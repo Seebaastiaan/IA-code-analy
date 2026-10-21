@@ -1,3 +1,5 @@
 export { authApi } from './api/auth.api'
+export { GithubMark } from './components/LoginForm'
+export { useGithubLogin } from './hooks/useGithubLogin'
 export { useSession } from './store/session.store'
 export type { User } from './types'

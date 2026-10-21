@@ -3,7 +3,6 @@ import type { AnalyzeRequest } from '@/features/analysis/types'
 import type { ChatRequest } from '@/features/assistant/types'
 import type { GithubCallbackRequest } from '@/features/auth/types'
 import type { DiffRequest } from '@/features/compare/types'
-import type { DiagnosticoRequest } from '@/features/diagnostico/types'
 import type { SaveFileRequest } from '@/features/editor/types'
 import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
@@ -13,8 +12,7 @@ import * as db from '../db'
 import * as github from '../github'
 import * as team from '../team'
 import { answer } from '../fixtures/chat'
-import { FILES, languageOf } from '../fixtures/code'
-import { diagnostico } from '../fixtures/diagnostico'
+import { languageOf } from '../fixtures/code'
 import { health } from '../fixtures/health'
 import { demoUser } from '../fixtures/user'
 
@@ -52,15 +50,6 @@ export const handlers = [
   http.post(EP.auth.logout, () => new HttpResponse(null, { status: 204 })),
   http.get(EP.auth.me, () => json(demoUser)),
   http.get(EP.health, () => json(health)),
-
-  // ─── Diagnóstico con IA (prototipo) ───
-  http.post(EP.diagnostico, route(async ({ request }) => {
-    const body = (await request.json()) as DiagnosticoRequest
-    if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+/.test(body.url)) return fail(422, 'invalid_url', 'Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)')
-    const file = body.file || 'auth.py'
-    if (!(file in FILES)) return fail(404, 'file_not_found', `${file} no existe en el repositorio`)
-    return json(diagnostico(body.url, body.branch || 'main', file))
-  }, 1800)),
 
   // ─── Tablero y repos ───
   http.get(EP.dashboard, route(({ request }) => json(db.dashboard(param(request, 'repo'))))),

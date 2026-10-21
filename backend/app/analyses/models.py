@@ -1,7 +1,6 @@
 """
-Contrato de datos del análisis: lo que el pipeline de analizadores entregará al terminar y que leen el
-tablero, el reporte y el editor. Las categorías, severidades y herramientas son las de
-docs/FRONTEND_SPEC.md §4 (frontend/src/features/findings/types.ts).
+Lo que el job de análisis (app.analysis.jobs) entrega al terminar (ver `AnalysisStore.save_report`).
+Es el contrato entre el análisis y los módulos que lo leen: tablero, reporte y editor.
 """
 
 from dataclasses import dataclass, field
@@ -23,9 +22,9 @@ class FindingInput:
     msg: str
     why: str
     rec: str
-    # Hay corrección automática (reglas de Ruff con corrección "safe")
+    # Hay corrección automática (hoy solo reglas de Ruff con corrección "safe")
     fix: bool = False
-    # Texto de la línea señalada: permite reconocer el hallazgo aunque cambie de línea
+    # Texto de la línea señalada; si se omite, save_report lo toma de la copia de trabajo
     code: str | None = None
 
 
@@ -56,3 +55,11 @@ class ReportInput:
     complexity: list[ComplexityInput] = field(default_factory=list)
     # ISO 8601; vacío = ahora
     created_at: str | None = None
+    # Semilla de las métricas que aún se simulan (pruebas y cobertura): el mismo reporte se ve igual siempre
+    seed: int = 0
+    # Analizadores que corrieron; vacío = todos
+    analyzers: list[str] = field(default_factory=list)
+    # Lenguajes del repo [{name, files}] (solo se analiza Python)
+    languages: list[dict] = field(default_factory=list)
+    # Líneas de Python analizadas: escalan la penalización del score en proyectos grandes
+    code_lines: int = 0

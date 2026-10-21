@@ -15,20 +15,29 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     secret_key: str = ""
     token_encryption_key: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
     database_path: str = "data/ia_voy.db"
     # Carpeta de los repos clonados. Vacía = fuera del proyecto (ver app.analysis.clone.clones_root):
     # dentro de OneDrive/Dropbox la sincronización bloquea los archivos recién clonados.
     clones_path: str = ""
-    # API de IA (Gemini): diagnóstico de un archivo (app.diagnostico)
+    # Pausa visual entre los pasos del análisis (11 pasos) para seguirlos en la terminal en vivo
+    job_step_seconds: float = 0.9
+    # API de IA (Gemini). El análisis no la usa: el motor es determinista (docs/adr/ADR-001)
     gemini_api_key: str = ""
     # gemini-2.5-flash ya no está disponible para claves nuevas
     gemini_model: str = "gemini-3.8-flash"
+
+    @property
+    def github_redirect_uri(self) -> str:
+        return f"{self.frontend_url.rstrip('/')}/github/callback"
 
 
 def with_generated_secrets(settings: Settings) -> Settings:
     """
     Completa SECRET_KEY y TOKEN_ENCRYPTION_KEY si no vienen en el entorno: la primera vez las genera y
     las guarda junto a la base de datos (`data/secrets.json`) para que sobrevivan a los reinicios.
+    Si ese archivo se pierde, las sesiones vencen y hay que volver a conectar GitHub.
     """
     if settings.secret_key and settings.token_encryption_key:
         return settings

@@ -15,8 +15,6 @@ export const EP = {
     index: (id: string) => `/api/repos/${id}/index`,
     analyses: (id: string) => `/api/repos/${id}/analyses`,
   },
-  /** Prototipo del Sprint 3: diagnóstico de un archivo con la API de IA */
-  diagnostico: '/api/diagnostico',
   analyze: '/api/analyze',
   jobs: {
     get: (id: string) => `/api/jobs/${id}`,

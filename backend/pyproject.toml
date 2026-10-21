@@ -9,6 +9,10 @@ dependencies = [
     "httpx>=0.28",
     "pydantic-settings>=2.6",
     "cryptography>=44",
+    # Analizadores estáticos: corren sobre el clon (análisis) y sobre un archivo (editor)
+    "ruff>=0.15",
+    "bandit>=1.8",
+    "radon>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +30,8 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 160
+# Proyecto de ejemplo con problemas a propósito (lo analiza app/seed.py)
+extend-exclude = ["seed_data"]
 
 [tool.ruff.lint]
 # B008: `Depends(...)` como valor por defecto es el estilo normal de FastAPI
