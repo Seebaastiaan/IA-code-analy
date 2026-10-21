@@ -1,0 +1,21 @@
+# Dependencias y builds
+node_modules/
+dist/
+dist-ssr/
+
+# Entorno local
+*.local
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Configuración local de herramientas
+.claude/
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

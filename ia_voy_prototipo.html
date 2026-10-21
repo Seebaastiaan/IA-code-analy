@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IA voy · Prototipo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: {
+      fontFamily: { sans: ['Inter','system-ui','sans-serif'], mono: ['"JetBrains Mono"','ui-monospace','monospace'] },
+      colors: { brand: { 50:'#f0f0ff',100:'#e3e2ff',200:'#cbc9ff',300:'#a9a4fd',400:'#8a7ff8',500:'#7060f1',600:'#5f45e4',700:'#5037c9',800:'#422fa3',900:'#382c81' } }
+    } }
+  };
+</script>
+<script>
+  (function(){
+    var dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    try { var t = localStorage.getItem('iavoy-theme'); if (t) dark = (t === 'dark'); } catch(e) {}
+    if (dark) document.documentElement.classList.add('dark');
+  })();
+</script>
+<style>
+  html,body{background:#f8fafc}
+  html.dark,html.dark body{background:#020617}
+  .tok-k{color:#7c3aed;font-weight:500} .dark .tok-k{color:#c4b5fd}
+  .tok-s{color:#047857} .dark .tok-s{color:#6ee7b7}
+  .tok-c{color:#94a3b8;font-style:italic} .dark .tok-c{color:#64748b}
+  .tok-n{color:#c2410c} .dark .tok-n{color:#fdba74}
+  .fade-in{animation:fade .22s ease-out}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .slide-in{animation:slide .25s ease-out}
+  @keyframes slide{from{transform:translateX(100%)}to{transform:none}}
+  .scroll-thin::-webkit-scrollbar{width:8px;height:8px}
+  .scroll-thin::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px}
+  .dark .scroll-thin::-webkit-scrollbar-thumb{background:#334155}
+  [contenteditable]:focus{outline:none}
+  input[type=range]{accent-color:#5f45e4}
+  .dot-typing span{animation:blink 1.2s infinite both}
+  .dot-typing span:nth-child(2){animation-delay:.2s}.dot-typing span:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+</style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-200 font-sans antialiased">
+
+<!-- Vistas fuera del shell (login y reporte público) -->
+<div id="solo" class="hidden"></div>
+
+<!-- Shell principal -->
+<div id="shell">
+  <div id="sb-overlay" class="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm hidden lg:hidden" onclick="closeSidebar()"></div>
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full lg:translate-x-0 transition-transform duration-200 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col">
+    <div class="h-16 flex items-center gap-3 px-5 border-b border-slate-200 dark:border-slate-800">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-fuchsia-500 grid place-items-center text-white font-extrabold text-sm shadow-lg shadow-brand-500/30">IA</div>
+      <div class="leading-tight"><p class="font-bold tracking-tight">IA voy</p><p class="text-[11px] text-slate-500 dark:text-slate-400">Analizador de código Python</p></div>
+      <button class="ml-auto lg:hidden p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" onclick="closeSidebar()" aria-label="Cerrar menú"><span data-i="x"></span></button>
+    </div>
+    <nav id="nav" class="flex-1 overflow-y-auto scroll-thin px-3 py-4 space-y-5"></nav>
+    <div class="p-4 border-t border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+      <div class="flex items-center gap-2"><span class="relative flex w-2 h-2"><span class="absolute inline-flex w-full h-full rounded-full bg-emerald-400 opacity-75 animate-ping"></span><span class="relative w-2 h-2 rounded-full bg-emerald-500"></span></span><span class="text-slate-600 dark:text-slate-300">Túnel activo</span><span class="ml-auto font-mono text-slate-400 truncate">ia-voy.trycloudflare.com</span></div>
+      <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><span class="text-slate-600 dark:text-slate-300">Gemini 2.5 Flash</span><span class="ml-auto text-slate-400">Groq en espera</span></div>
+    </div>
+  </aside>
+
+  <div class="lg:pl-64 min-h-screen flex flex-col">
+    <header class="sticky top-0 z-20 h-16 bg-white/80 dark:bg-slate-950/80 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+      <div class="h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-3">
+        <button class="lg:hidden p-2 -ml-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" onclick="openSidebar()" aria-label="Abrir menú"><span data-i="menu"></span></button>
+        <p id="page-title" class="font-semibold truncate">Tablero</p>
+        <div class="hidden md:flex flex-1 max-w-md ml-6 relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" data-i="search" data-c="w-4 h-4"></span>
+          <input id="gsearch" onkeydown="if(event.key==='Enter')globalSearch(this.value)" class="w-full rounded-xl bg-slate-100 dark:bg-slate-900 border border-transparent focus:border-brand-400 focus:bg-white dark:focus:bg-slate-900 focus:ring-4 focus:ring-brand-500/10 pl-9 pr-3 py-2 text-sm outline-none transition placeholder:text-slate-400" placeholder="Buscar archivo, regla o hallazgo… (Enter)">
+        </div>
+        <div class="ml-auto flex items-center gap-1.5">
+          <div id="job-pill"></div>
+          <button onclick="toggleTheme()" class="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400" aria-label="Cambiar tema" title="Cambiar tema claro/oscuro">
+            <span class="dark:hidden" data-i="moon"></span><span class="hidden dark:inline" data-i="sun"></span>
+          </button>
+          <div class="relative">
+            <button onclick="toggleMenu(event)" class="flex items-center gap-2 p-1 pr-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800">
+              <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-brand-500 text-white text-xs font-bold grid place-items-center">AL</span>
+              <span class="hidden sm:block text-sm font-medium">Ana L.</span>
+            </button>
+            <div id="umenu" class="hidden absolute right-0 mt-2 w-56 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-1.5 fade-in">
+              <div class="px-3 py-2 border-b border-slate-100 dark:border-slate-800 mb-1"><p class="text-sm font-semibold">Ana López</p><p class="text-xs text-slate-500">Equipo Backend · 6 miembros</p></div>
+              <button onclick="go('config')" class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-slate-800">Configuración</button>
+              <button onclick="go('compartido')" class="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-slate-800">Ver un reporte público</button>
+              <button onclick="go('login')" class="w-full text-left px-3 py-2 rounded-lg text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10">Cerrar sesión</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main id="main" class="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8"></main>
+  </div>
+</div>
+
+<div id="overlay"></div>
+<div id="toasts" class="fixed z-[60] bottom-4 right-4 left-4 sm:left-auto sm:w-96 space-y-2"></div>
+
+<script>
+/* =========================================================
+   Iconos
+   ========================================================= */
+const P = {
+  flow:'M4 5h5v5H4zM15 5h5v5h-5zM9.5 14h5v5h-5zM9 7.5h6M12 10v4',
+  home:'M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10',
+  plus:'M12 5v14M5 12h14',
+  folder:'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z',
+  doc:'M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6',
+  code:'M8 9l-4 3 4 3M16 9l4 3-4 3M13.5 6l-3 12',
+  chat:'M4 5h16v11H9l-5 4zM8 9h8M8 12h5',
+  compare:'M8 4v16M16 4v16M4 8h8M12 16h8',
+  sliders:'M4 6h9M17 6h3M15 4v4M4 12h3M11 12h9M9 10v4M4 18h11M19 18h1M17 16v4',
+  lock:'M6 11h12v9H6zM8 11V7a4 4 0 018 0v4',
+  globe:'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
+  shield:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
+  beaker:'M9 3h6M10 3v6L4.5 18.5A1.5 1.5 0 005.8 21h12.4a1.5 1.5 0 001.3-2.5L14 9V3M7 15h10',
+  sparkle:'M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8zM18.5 14.5l.8 1.7 1.7.8-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8z',
+  share:'M4 13v6h16v-6M12 3v12M8 7l4-4 4 4',
+  download:'M12 3v12M8 11l4 4 4-4M4 19h16',
+  sun:'M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  moon:'M20 13.5A8 8 0 1110.5 4a6.5 6.5 0 009.5 9.5z',
+  menu:'M4 6h16M4 12h16M4 18h16',
+  x:'M6 6l12 12M18 6L6 18',
+  search:'M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-4-4',
+  check:'M5 12.5l4.5 4.5L19 7',
+  arrow:'M5 12h14M13 6l6 6-6 6',
+  chevron:'M9 6l6 6-6 6',
+  refresh:'M4 4v6h6M20 20v-6h-6M5.5 15a7 7 0 0012 2.5M18.5 9A7 7 0 006.5 6.5',
+  copy:'M9 9h11v11H9zM5 15V4h11',
+  send:'M4 12L20 4l-6 16-2.5-6.5z',
+  wand:'M4 20L15 9M17 3v3M20 6h-3M14 5l1 1M19 10l1 1',
+  eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 100 6 3 3 0 000-6z',
+  branch:'M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM18 9c0 5-12 2-12 6',
+  file:'M7 3h7l5 5v13H7zM14 3v5h5',
+  alert:'M12 9v4M12 17h.01M10.3 3.9L2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
+  clock:'M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2',
+  play:'M7 5l12 7-12 7z',
+  ban:'M12 3a9 9 0 100 18 9 9 0 000-18zM5.6 5.6l12.8 12.8',
+  bolt:'M13 3L5 13h6l-1 8 8-10h-6z',
+  save:'M5 3h11l3 3v15H5zM8 3v5h7V3M8 21v-7h8v7',
+  diff:'M8 4v10M3 9h10M16 13v7M11 17h10'
+};
+function icon(n, c='w-5 h-5'){ return `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[n]||''}"/></svg>`; }
+const SPIN = (c='w-4 h-4') => `<svg class="animate-spin ${c}" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity=".25" stroke-width="3"/><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
+function hydrateIcons(root=document){ root.querySelectorAll('[data-i]').forEach(el=>{ el.innerHTML = icon(el.dataset.i, el.dataset.c||'w-5 h-5'); el.removeAttribute('data-i'); }); }
+
+/* =========================================================
+   Estilos reutilizables
+   ========================================================= */
+const C = {
+  card:'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm shadow-slate-200/50 dark:shadow-none',
+  btn:'inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white text-sm font-semibold px-4 py-2.5 shadow-sm shadow-brand-600/25 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 disabled:opacity-50',
+  btn2:'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm font-medium px-4 py-2.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+  ghost:'inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition',
+  input:'w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15 transition placeholder:text-slate-400',
+  label:'block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300',
+  h1:'text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white',
+  sub:'text-sm text-slate-500 dark:text-slate-400',
+  chip:'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset'
+};
+const CAT = {
+  seg:{label:'Seguridad',icon:'shield',hex:'#d946ef',tools:'Bandit · pip-audit',chip:'bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-600/20 dark:bg-fuchsia-500/10 dark:text-fuchsia-300 dark:ring-fuchsia-400/30',soft:'bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-500/15 dark:text-fuchsia-300',bar:'bg-fuchsia-500'},
+  test:{label:'Pruebas',icon:'beaker',hex:'#0ea5e9',tools:'pytest · coverage',chip:'bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/30',soft:'bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-300',bar:'bg-sky-500'},
+  prac:{label:'Buenas prácticas',icon:'sparkle',hex:'#14b8a6',tools:'Ruff · Radon',chip:'bg-teal-50 text-teal-700 ring-teal-600/20 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/30',soft:'bg-teal-100 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300',bar:'bg-teal-500'}
+};
+const SEV = {
+  alta:{label:'Alta',cls:'bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30',dot:'bg-rose-500',line:'bg-rose-500/[.07] dark:bg-rose-500/10'},
+  media:{label:'Media',cls:'bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/30',dot:'bg-amber-500',line:'bg-amber-500/[.07] dark:bg-amber-500/10'},
+  baja:{label:'Baja',cls:'bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-500/10 dark:text-slate-300 dark:ring-slate-400/30',dot:'bg-slate-400',line:'bg-slate-500/[.06] dark:bg-slate-500/10'}
+};
+const TONE = {
+  good:{text:'text-emerald-600 dark:text-emerald-400',hex:'#10b981',bar:'bg-emerald-500',label:'Saludable'},
+  warn:{text:'text-amber-600 dark:text-amber-400',hex:'#f59e0b',bar:'bg-amber-500',label:'Mejorable'},
+  bad:{text:'text-rose-600 dark:text-rose-400',hex:'#f43f5e',bar:'bg-rose-500',label:'Crítico'}
+};
+const tone = v => v>=80?'good':v>=60?'warn':'bad';
+const BRAND = '#5f45e4';
+
+/* =========================================================
+   Datos de ejemplo
+   ========================================================= */
+const DATES = ['01 sep','08 sep','15 sep','22 sep','29 sep','06 oct','13 oct'];
+const REPOS = [
+  {id:'r1',name:'equipo/api-pagos',branch:'main',commit:'a3f9c1e',seg:68,test:85,prac:73,cov:78,files:48,status:'listo',last:'hace 2 h',num:128},
+  {id:'r2',name:'equipo/etl-ventas',branch:'develop',commit:'7bd21aa',seg:92,test:84,prac:86,cov:81,files:31,status:'listo',last:'ayer',num:97},
+  {id:'r3',name:'equipo/bot-soporte',branch:'main',commit:'e01c4f2',seg:48,test:61,prac:66,cov:52,files:22,status:'listo',last:'hace 3 días',num:64},
+  {id:'r4',name:'equipo/notebooks-ml',branch:'feature/limpieza',commit:'—',status:'analizando',last:'en curso',files:17},
+  {id:'r5',name:'equipo/cli-utilidades',branch:'main',commit:'c9e7710',status:'error',last:'hace 5 días',files:12,err:'pytest no pudo importar el módulo "click"'}
+];
+const OFF = {seg:[-8,-5,-1,3,6,8],test:[-5,-4,-2,-1,0,1],prac:[-7,-4,-1,3,6,7]};
+const clamp = v => Math.max(0, Math.min(100, v));
+REPOS.forEach(r=>{ if(r.seg!=null){ r.hist={}; for(const k in OFF) r.hist[k]=OFF[k].map(o=>clamp(r[k]+o)); } });
+
+const FINDINGS = [
+  {id:1,sev:'alta',cat:'seg',tool:'Bandit',rule:'B105',file:'auth.py',line:42,msg:'Clave secreta escrita directamente en el código',fix:true,
+   why:'Cualquier persona con acceso al repositorio puede firmar tokens JWT válidos y suplantar usuarios.',rec:'Leer la clave desde una variable de entorno y rotar la clave expuesta.'},
+  {id:2,sev:'alta',cat:'seg',tool:'Bandit',rule:'B608',file:'api.py',line:17,msg:'Posible inyección SQL por concatenación de cadenas',fix:true,
+   why:'El valor de "cliente" llega desde la URL y se inserta sin escapar en la consulta.',rec:'Usar consultas parametrizadas con marcadores "?".'},
+  {id:3,sev:'alta',cat:'seg',tool:'pip-audit',rule:'requests 2.25.1',file:'requirements.txt',line:4,msg:'Dependencia con vulnerabilidad conocida',fix:true,
+   why:'La versión instalada tiene avisos de seguridad publicados.',rec:'Actualizar a la versión más reciente sin avisos y volver a correr las pruebas.'},
+  {id:4,sev:'media',cat:'seg',tool:'Bandit',rule:'B324',file:'utils.py',line:9,msg:'Hash débil (MD5) usado para validar contraseñas',fix:true,
+   why:'MD5 tiene colisiones conocidas y es demasiado rápido para proteger contraseñas.',rec:'Usar SHA-256 para huellas, o bcrypt/argon2 si es una contraseña.'},
+  {id:5,sev:'media',cat:'seg',tool:'Bandit',rule:'B311',file:'tokens.py',line:23,msg:'random no es criptográficamente seguro',fix:true,
+   why:'Los tokens generados con random pueden predecirse.',rec:'Usar el módulo secrets (secrets.token_urlsafe).'},
+  {id:6,sev:'media',cat:'test',tool:'coverage',rule:'COV',file:'pagos/reembolsos.py',line:1,msg:'Cobertura de 31 % (umbral: 60 %)',fix:false,
+   why:'La lógica de reembolsos casi no tiene pruebas y maneja dinero.',rec:'Agregar pruebas para los casos de reembolso parcial y total.'},
+  {id:7,sev:'media',cat:'test',tool:'pytest',rule:'FAIL',file:'tests/test_api.py',line:58,msg:'test_crear_pago_invalido falló (AssertionError)',fix:false,
+   why:'Una prueba fallida indica que el comportamiento esperado cambió o hay un error.',rec:'Revisar el código de estado esperado (400 vs 422).'},
+  {id:8,sev:'media',cat:'prac',tool:'Radon',rule:'CC · D',file:'pagos/procesador.py',line:88,msg:'Complejidad ciclomática 24 en procesar_lote()',fix:false,
+   why:'Funciones muy complejas son difíciles de probar y mantener.',rec:'Dividir la función en pasos más pequeños (validar, agrupar, cobrar).'},
+  {id:9,sev:'baja',cat:'prac',tool:'Ruff',rule:'F401',file:'api.py',line:3,msg:'Import sin usar: os',fix:true,
+   why:'Código muerto que confunde a quien lee el archivo.',rec:'Eliminar el import.'},
+  {id:10,sev:'baja',cat:'prac',tool:'Ruff',rule:'E501',file:'pagos/procesador.py',line:131,msg:'Línea demasiado larga (112 > 100)',fix:true,
+   why:'Dificulta la lectura y las revisiones de código.',rec:'Partir la expresión en varias líneas.'},
+  {id:11,sev:'baja',cat:'prac',tool:'Ruff',rule:'B006',file:'utils.py',line:31,msg:'Argumento por defecto mutable',fix:true,
+   why:'La lista por defecto se comparte entre llamadas y acumula valores.',rec:'Usar None como valor por defecto y crear la lista dentro.'},
+  {id:12,sev:'baja',cat:'test',tool:'pytest',rule:'SKIP',file:'tests/test_auth.py',line:12,msg:'3 pruebas omitidas con @skip',fix:false,
+   why:'Pruebas omitidas pueden ocultar regresiones.',rec:'Reactivarlas o documentar por qué se omiten.'}
+];
+const CODE = {
+  'auth.py':[[30,'import hashlib'],[31,'import os'],[32,'import jwt'],[33,'from datetime import datetime, timedelta'],[34,''],[35,'from .db import obtener_usuario'],[36,'ALGORITMO = "HS256"'],[37,'EXPIRACION_MIN = 30'],[38,''],[39,''],[40,'def crear_token(usuario_id: int) -> str:'],[41,'    carga = {"sub": usuario_id, "exp": datetime.utcnow() + timedelta(minutes=EXPIRACION_MIN)}'],[42,'    SECRET_KEY = "super-secreto-123"'],[43,'    return jwt.encode(carga, SECRET_KEY, algorithm=ALGORITMO)'],[44,''],[45,''],[46,'def verificar(usuario: str, clave: str) -> bool:'],[47,'    u = obtener_usuario(usuario)'],[48,'    return u is not None and u.clave_hash == hashlib.sha256(clave.encode()).hexdigest()']],
+  'api.py':[[1,'import sqlite3'],[2,''],[3,'import os'],[4,'from fastapi import FastAPI, HTTPException'],[5,''],[6,'app = FastAPI()'],[7,'conexion = sqlite3.connect("pagos.db", check_same_thread=False)'],[8,''],[9,''],[10,'@app.get("/pagos/{cliente}")'],[11,'def listar_pagos(cliente: str):'],[12,'    # Devuelve los pagos de un cliente'],[13,'    cursor = conexion.cursor()'],[14,'    if not cliente:'],[15,'        raise HTTPException(status_code=400)'],[16,'    # TODO: paginar resultados'],[17,'    consulta = "SELECT * FROM pagos WHERE cliente = \'" + cliente + "\'"'],[18,'    filas = cursor.execute(consulta).fetchall()'],[19,'    return {"cliente": cliente, "pagos": filas}']],
+  'utils.py':[[1,'import hashlib'],[2,'import json'],[3,''],[4,''],[5,'def huella(texto: str) -> str:'],[6,'    # Huella usada para validar contraseñas temporales'],[7,'    datos = texto.strip().encode()'],[8,'    # TODO: revisar algoritmo'],[9,'    return hashlib.md5(datos).hexdigest()'],[10,''],['gap',null],[31,'def agregar(item, lista=[]):'],[32,'    lista.append(item)'],[33,'    return lista']]
+};
+const FIXES = {
+  1:[['auth.py',42,'    SECRET_KEY = os.environ["SECRET_KEY"]']],
+  2:[['api.py',17,'    consulta = "SELECT * FROM pagos WHERE cliente = ?"'],['api.py',18,'    filas = cursor.execute(consulta, (cliente,)).fetchall()']],
+  4:[['utils.py',9,'    return hashlib.sha256(datos).hexdigest()']],
+  9:[['api.py',3,null]],
+  11:[['utils.py',31,'def agregar(item, lista=None):'],['utils.py',32,'    lista = [] if lista is None else lista; lista.append(item)']]
+};
+const TREE = [['auth.py',''],['api.py',''],['utils.py',''],['tokens.py',''],['requirements.txt',''],['pagos/procesador.py','pagos'],['pagos/reembolsos.py','pagos'],['tests/test_api.py','tests'],['tests/test_auth.py','tests']];
+const COVERAGE = [['auth.py',92],['utils.py',88],['api.py',81],['tokens.py',74],['pagos/procesador.py',69],['pagos/reembolsos.py',31]];
+const COMPLEX = [['procesar_lote','pagos/procesador.py',24,'D'],['validar_tarjeta','pagos/procesador.py',14,'C'],['calcular_reembolso','pagos/reembolsos.py',11,'C'],['crear_token','auth.py',3,'A'],['listar_pagos','api.py',4,'A'],['huella','utils.py',1,'A']];
+const GRADE = {A:'bg-emerald-500',B:'bg-lime-500',C:'bg-amber-500',D:'bg-orange-500',E:'bg-rose-500',F:'bg-rose-700'};
+const JOB_STEPS = [
+  ['Clonando repositorio','git clone --depth 1 --branch {b} {u}'],
+  ['Creando entorno aislado','uv venv .venv  (sandbox WSL2)'],
+  ['Instalando dependencias','uv pip install -r requirements.txt'],
+  ['Bandit','bandit -r . -f json'],
+  ['pip-audit','pip-audit -r requirements.txt -f json'],
+  ['pytest','pytest -q --maxfail=50'],
+  ['coverage','coverage run -m pytest && coverage json'],
+  ['Ruff','ruff check . --output-format json'],
+  ['Radon','radon cc . -j && radon mi . -j'],
+  ['Calculando score','agregación ponderada (.ia_voy.toml)'],
+  ['Indexando para el asistente','tree-sitter → embeddings → ChromaDB']
+];
+
+/* =========================================================
+   Estado
+   ========================================================= */
+const S = {
+  repo:'r1', hidden:new Set(), filters:{q:'',sev:'todas',cat:'todas'}, tab:'hallazgos',
+  drawer:null, modal:null, file:'auth.py', diff:false, edits:{}, pending:new Set(), resolved:new Set(),
+  job:null, timer:null,
+  weights:{seg:50,test:30,prac:20}, thr:{score:70,cov:60}, ignored:['S101','D100'], excluded:['migrations/','tests/fixtures/'],
+  share:{pwd:false,password:'',exp:'7',code:false}, unlocked:false,
+  chat:[{role:'ai',html:'Hola, ya indexé <b>equipo/api-pagos</b>: 48 archivos .py, el README y el reporte #128. Pregúntame sobre el código o sobre cualquier hallazgo.',src:[]}], typing:false
+};
+
+/* =========================================================
+   Utilidades
+   ========================================================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const repo = id => REPOS.find(r=>r.id===id);
+const wsum = () => S.weights.seg + S.weights.test + S.weights.prac || 1;
+const calc = (s,t,p) => (S.weights.seg*s + S.weights.test*t + S.weights.prac*p) / wsum();
+const score = r => calc(r.seg, r.test, r.prac);
+const f1 = v => (Math.round(v*10)/10).toFixed(1);
+const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
+
+function hl(src){
+  const re = /("[^"]*"|'[^']*')|(#.*$)|\b(def|return|import|from|is|not|None|and|or|if|else|class|for|in|True|False|with|as|raise|lambda)\b|\b(\d+)\b/g;
+  let out='', last=0, m;
+  while((m = re.exec(src))){
+    out += esc(src.slice(last, m.index));
+    const t = esc(m[0]);
+    out += m[1] ? `<span class="tok-s">${t}</span>` : m[2] ? `<span class="tok-c">${t}</span>` : m[3] ? `<span class="tok-k">${t}</span>` : `<span class="tok-n">${t}</span>`;
+    last = re.lastIndex;
+  }
+  return out + esc(src.slice(last));
+}
+function deltaBadge(d, big){
+  if (Math.abs(d) < 0.05) return `<span class="text-xs text-slate-400">sin cambios</span>`;
+  const up = d > 0;
+  return `<span class="inline-flex items-center gap-0.5 ${big?'text-sm':'text-xs'} font-semibold ${up?'text-emerald-600 dark:text-emerald-400':'text-rose-600 dark:text-rose-400'}">${up?'▲':'▼'} ${f1(Math.abs(d))}</span>`;
+}
+function ring(v, size=64, sw=7, cls=''){
+  const r=(size-sw)/2, c=2*Math.PI*r, t=TONE[tone(v)];
+  return `<div class="relative shrink-0 ${cls}" style="width:${size}px;height:${size}px">
+    <svg width="${size}" height="${size}" class="-rotate-90"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke-width="${sw}" class="stroke-slate-100 dark:stroke-slate-800"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${t.hex}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${c*(1-v/100)}" style="transition:stroke-dashoffset .8s ease"/></svg>
+    <div class="absolute inset-0 grid place-items-center font-bold tabular-nums ${t.text}" style="font-size:${Math.round(size*0.27)}px">${size>80?f1(v):Math.round(v)}</div></div>`;
+}
+const sevBadge = s => `<span class="${C.chip} ${SEV[s].cls}"><span class="w-1.5 h-1.5 rounded-full ${SEV[s].dot}"></span>${SEV[s].label}</span>`;
+const catChip = c => `<span class="${C.chip} ${CAT[c].chip}">${icon(CAT[c].icon,'w-3 h-3')}${CAT[c].label}</span>`;
+const bar = (v, cls) => `<div class="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full ${cls}" style="width:${v}%"></div></div>`;
+const statusChip = s => ({
+  listo:`<span class="${C.chip} bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30">${icon('check','w-3 h-3')}Listo</span>`,
+  analizando:`<span class="${C.chip} bg-brand-50 text-brand-700 ring-brand-600/20 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-400/30">${SPIN('w-3 h-3')}Analizando</span>`,
+  error:`<span class="${C.chip} bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30">${icon('alert','w-3 h-3')}Error</span>`
+})[s];
+
+/* =========================================================
+   Navegación
+   ========================================================= */
+const NAV = [
+  {g:'Prototipo',items:[['flujo','Mapa de flujo','flow'],['login','Pantalla de acceso','lock'],['compartido','Vista pública','globe']]},
+  {g:'Principal',items:[['dashboard','Tablero','home'],['analizar','Nuevo análisis','plus'],['repos','Repositorios','folder']]},
+  {g:'Análisis',items:[['reporte','Reporte','doc'],['editor','Editor','code'],['chat','Asistente IA','chat'],['comparar','Comparativa','compare']]},
+  {g:'Sistema',items:[['config','Configuración','sliders']]}
+];
+const TITLES = {flujo:'Mapa de flujo',dashboard:'Tablero',analizar:'Nuevo análisis',repos:'Repositorios',reporte:'Reporte',editor:'Editor de código',chat:'Asistente IA',comparar:'Comparativa',config:'Configuración'};
+const route = () => (location.hash.replace(/^#\/?/,'') || 'flujo');
+function go(r){ closeSidebar(); $('#umenu').classList.add('hidden'); if (route()===r) render(); else location.hash = '#/'+r; }
+function nav(r, extra){ go(r); if (extra==='share') setTimeout(openShare, 80); }
+function renderNav(cur){
+  $('#nav').innerHTML = NAV.map(sec=>`<div><p class="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">${sec.g}</p>
+    ${sec.items.map(([id,l,ic])=>{ const a = id===cur;
+      const badge = id==='reporte' ? `<span class="ml-auto text-[10px] font-bold rounded-full px-1.5 py-0.5 bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">${FINDINGS.filter(f=>f.sev==='alta'&&!S.resolved.has(f.id)).length}</span>` : '';
+      return `<button onclick="go('${id}')" class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${a?'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300':'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}">${icon(ic,'w-[18px] h-[18px]')}<span>${l}</span>${badge}</button>`;}).join('')}</div>`).join('');
+}
+function openSidebar(){ $('#sidebar').classList.remove('-translate-x-full'); $('#sb-overlay').classList.remove('hidden'); }
+function closeSidebar(){ $('#sidebar').classList.add('-translate-x-full'); $('#sb-overlay').classList.add('hidden'); }
+function toggleMenu(e){ e.stopPropagation(); $('#umenu').classList.toggle('hidden'); }
+document.addEventListener('click', e=>{ const m=$('#umenu'); if(m && !m.contains(e.target)) m.classList.add('hidden'); });
+function toggleTheme(){
+  const d = document.documentElement.classList.toggle('dark');
+  try { localStorage.setItem('iavoy-theme', d?'dark':'light'); } catch(e){}
+}
+const PAGES = {};
+function render(keep){
+  const r = route(), y = window.scrollY;
+  if (r==='login' || r==='compartido'){
+    $('#shell').classList.add('hidden'); $('#solo').classList.remove('hidden');
+    $('#solo').innerHTML = r==='login' ? pLogin() : pShared();
+    hydrateIcons($('#solo'));
+  } else {
+    $('#solo').classList.add('hidden'); $('#shell').classList.remove('hidden');
+    const page = PAGES[r] ? r : 'flujo';
+    $('#main').innerHTML = `<div class="fade-in">${PAGES[page]()}</div>`;
+    $('#page-title').textContent = TITLES[page];
+    renderNav(page); hydrateIcons($('#main'));
+    if (page==='analizar') scrollLog();
+    if (page==='chat') scrollChat();
+  }
+  window.scrollTo(0, keep ? y : 0);
+}
+const refresh = () => render(true);
+window.addEventListener('hashchange', ()=>render());
+
+/* =========================================================
+   Toasts, drawer y modales
+   ========================================================= */
+let tid = 0;
+function toast(msg, opt={}){
+  const id = 't'+(++tid), t = opt.tone||'ok';
+  const ic = t==='ok' ? `<span class="w-8 h-8 rounded-lg grid place-items-center bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">${icon('check','w-4 h-4')}</span>`
+    : t==='err' ? `<span class="w-8 h-8 rounded-lg grid place-items-center bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400">${icon('alert','w-4 h-4')}</span>`
+    : `<span class="w-8 h-8 rounded-lg grid place-items-center bg-brand-100 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">${icon('bolt','w-4 h-4')}</span>`;
+  const el = document.createElement('div');
+  el.id = id;
+  el.className = 'fade-in flex items-center gap-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-3 pr-2';
+  el.innerHTML = `${ic}<p class="text-sm flex-1">${msg}</p>${opt.action?`<button onclick="${opt.action[1]};closeToast('${id}')" class="${C.ghost} text-brand-600 dark:text-brand-300">${opt.action[0]}</button>`:''}<button onclick="closeToast('${id}')" class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">${icon('x','w-4 h-4')}</button>`;
+  $('#toasts').appendChild(el);
+  setTimeout(()=>closeToast(id), opt.ms||4500);
+}
+function closeToast(id){ const el=document.getElementById(id); if(el) el.remove(); }
+function closeOverlay(){ S.drawer=null; S.modal=null; $('#overlay').innerHTML=''; document.body.style.overflow=''; }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeOverlay(); });
+
+function openDrawer(id){
+  S.drawer = id; const f = FINDINGS.find(x=>x.id===id); const done = S.resolved.has(id);
+  const code = CODE[f.file]; let snip = '';
+  if (code){
+    const lines = code.filter(([n])=>n!=='gap' && Math.abs(n-f.line)<=2);
+    snip = `<div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 overflow-x-auto scroll-thin text-xs font-mono py-2">${lines.map(([n,t])=>`<div class="flex ${n===f.line?SEV[f.sev].line:''}"><span class="w-10 shrink-0 text-right pr-3 text-slate-400 select-none">${n}</span><span class="whitespace-pre pr-4">${hl(t)}</span></div>`).join('')}</div>`;
+  }
+  $('#overlay').innerHTML = `<div class="fixed inset-0 z-50 flex justify-end">
+    <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onclick="closeOverlay()"></div>
+    <aside class="slide-in relative w-full sm:w-[30rem] h-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col">
+      <div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-start gap-3">
+        <div class="flex-1 min-w-0"><div class="flex flex-wrap items-center gap-2 mb-2">${sevBadge(f.sev)}${catChip(f.cat)}${done?`<span class="${C.chip} bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30">${icon('check','w-3 h-3')}Resuelto</span>`:''}</div>
+          <h3 class="text-lg font-semibold leading-snug">${f.msg}</h3>
+          <p class="mt-1 font-mono text-xs text-slate-500">${f.file}:${f.line} · ${f.tool} · ${f.rule}</p></div>
+        <button onclick="closeOverlay()" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400">${icon('x')}</button>
+      </div>
+      <div class="flex-1 overflow-y-auto scroll-thin p-5 space-y-5">
+        ${snip ? `<div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Código</p>${snip}</div>` : ''}
+        <div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Por qué importa</p><p class="text-sm leading-relaxed">${f.why}</p></div>
+        <div class="rounded-xl bg-brand-50 dark:bg-brand-500/10 border border-brand-100 dark:border-brand-500/20 p-4"><p class="text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-300 mb-1.5">Cómo corregirlo</p><p class="text-sm leading-relaxed">${f.rec}</p></div>
+      </div>
+      <div class="p-4 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-2">
+        ${f.fix && !done ? `<button onclick="applyFix(${f.id})" class="${C.btn} col-span-2">${icon('wand','w-4 h-4')}Aplicar corrección automática</button>` : ''}
+        <button onclick="openSource('${f.file}',${f.line})" class="${C.btn2}">${icon('code','w-4 h-4')}Abrir en editor</button>
+        <button onclick="askAbout(${f.id})" class="${C.btn2}">${icon('chat','w-4 h-4')}Preguntar a la IA</button>
+        <button onclick="ignoreRule('${f.rule}')" class="${C.ghost} col-span-2 text-slate-500">${icon('ban','w-4 h-4')}Ignorar la regla ${f.rule} en este proyecto</button>
+      </div>
+    </aside></div>`;
+  document.body.style.overflow='hidden';
+}
+function openFinding(id){ go('reporte'); setTimeout(()=>openDrawer(id), 80); }
+function ignoreRule(r){ if(!S.ignored.includes(r)) S.ignored.push(r); closeOverlay(); toast(`Regla <b>${esc(r)}</b> agregada a la lista de ignoradas`, {action:['Ver ajustes',"go('config')"]}); }
+
+function openShare(){
+  S.modal='share'; const sh=S.share;
+  const url = 'https://ia-voy.trycloudflare.com/r/a3f9c1';
+  const toggle = (on, fn) => `<button onclick="${fn}" role="switch" aria-checked="${on}" class="relative w-11 h-6 rounded-full transition ${on?'bg-brand-600':'bg-slate-200 dark:bg-slate-700'}"><span class="absolute top-0.5 ${on?'left-[22px]':'left-0.5'} w-5 h-5 rounded-full bg-white shadow transition-all"></span></button>`;
+  $('#overlay').innerHTML = `<div class="fixed inset-0 z-50 grid place-items-center p-4">
+    <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onclick="closeOverlay()"></div>
+    <div class="fade-in relative w-full max-w-lg ${C.card} shadow-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+      <div class="p-5 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex items-start gap-3">
+        <span class="w-10 h-10 rounded-xl bg-brand-100 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300 grid place-items-center">${icon('share')}</span>
+        <div class="flex-1"><h3 class="text-lg font-semibold">Compartir reporte</h3><p class="${C.sub}">equipo/api-pagos · análisis #128</p></div>
+        <button onclick="closeOverlay()" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400">${icon('x')}</button>
+      </div>
+      <div class="p-5 sm:p-6 space-y-5">
+        <div><label class="${C.label}">Enlace público</label>
+          <div class="flex gap-2"><input readonly value="${url}" class="${C.input} font-mono text-xs"><button onclick="copyLink('${url}')" class="${C.btn2} shrink-0 px-3">${icon('copy','w-4 h-4')}<span class="hidden sm:inline">Copiar</span></button></div></div>
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800">
+          <div class="p-4 flex items-center gap-3"><div class="flex-1"><p class="text-sm font-medium">Proteger con contraseña</p><p class="text-xs text-slate-500">Quien abra el enlace deberá escribirla</p></div>${toggle(sh.pwd,"S.share.pwd=!S.share.pwd;openShare()")}</div>
+          ${sh.pwd?`<div class="p-4"><input type="password" value="${esc(sh.password)}" oninput="S.share.password=this.value" placeholder="Contraseña del enlace" class="${C.input}"></div>`:''}
+          <div class="p-4 flex items-center gap-3"><div class="flex-1"><p class="text-sm font-medium">Expiración</p><p class="text-xs text-slate-500">El enlace deja de funcionar después</p></div>
+            <select onchange="S.share.exp=this.value" class="${C.input} w-auto">${[['1','1 día'],['7','7 días'],['30','30 días'],['0','Nunca']].map(([v,l])=>`<option value="${v}" ${sh.exp===v?'selected':''}>${l}</option>`).join('')}</select></div>
+          <div class="p-4 flex items-center gap-3"><div class="flex-1"><p class="text-sm font-medium">Incluir fragmentos de código</p><p class="text-xs text-slate-500">Por defecto solo se comparten hallazgos</p></div>${toggle(sh.code,"S.share.code=!S.share.code;openShare()")}</div>
+        </div>
+        <div><p class="${C.label}">Exportar</p><div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${['JSON','HTML','Markdown','SARIF'].map(x=>`<button onclick="exportAs('${x}')" class="${C.btn2} px-2">${icon('download','w-4 h-4')}${x}</button>`).join('')}</div></div>
+      </div>
+      <div class="p-5 sm:p-6 pt-0 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+        <button onclick="closeOverlay();S.unlocked=false;go('compartido')" class="${C.btn2}">${icon('eye','w-4 h-4')}Ver como invitado</button>
+        <button onclick="closeOverlay();toast('Enlace creado. Expira en ${sh.exp==='0'?'—':sh.exp+' día(s)'}')" class="${C.btn}">Crear enlace</button>
+      </div>
+    </div></div>`;
+  document.body.style.overflow='hidden';
+}
+function copyLink(u){ try { navigator.clipboard.writeText(u).then(()=>toast('Enlace copiado al portapapeles'), ()=>toast('Enlace: '+u,{tone:'info'})); } catch(e){ toast('Enlace: '+u,{tone:'info'}); } }
+function exportAs(f){ toast(`Exportando reporte en formato <b>${f}</b>…`, {tone:'info'}); }
+
+/* =========================================================
+   Página: Mapa de flujo
+   ========================================================= */
+const JOURNEYS = [
+  {t:'Analizar un repositorio',d:'El recorrido principal: desde el acceso hasta el reporte.',steps:[['login','Acceso','Inicio de sesión del equipo'],['dashboard','Tablero','Estado general y tendencias'],['analizar','Nuevo análisis','URL, rama y analizadores'],['analizar','Progreso en vivo','Pasos y log por WebSocket'],['reporte','Reporte','Score, categorías y hallazgos']]},
+  {t:'Corregir un hallazgo',d:'Del problema detectado a la corrección guardada.',steps:[['reporte','Detalle del hallazgo','Por qué importa y cómo corregir'],['editor','Editor','Línea marcada en el código'],['editor','Vista diff','Original contra propuesta'],['editor','Guardar','Re-análisis del archivo'],['dashboard','Score actualizado','La mejora se ve en el tablero']]},
+  {t:'Compartir con el equipo',d:'Enlaces públicos con control de acceso.',steps:[['reporte','Reporte','Botón Compartir'],['reporte','Opciones','Contraseña, expiración, exportar','share'],['compartido','Vista pública','Solo lectura, sin menú']]},
+  {t:'Entender el código con IA',d:'Preguntas sobre el repositorio con fuentes citadas.',steps:[['reporte','Hallazgo o reporte','Preguntar a la IA'],['chat','Asistente','Respuesta con archivo y línea'],['editor','Fuente citada','Abre el archivo en el editor']]},
+  {t:'Seguir la evolución',d:'Historial, comparación y ajustes del proyecto.',steps:[['dashboard','Tendencias','Histórico por categoría'],['comparar','Comparativa','Nuevos contra resueltos'],['config','Configuración','Pesos, umbrales y reglas']]}
+];
+const SCREENS = [
+  ['Tablero','dashboard','GET /api/dashboard'],['Nuevo análisis','analizar','POST /api/analyze · WS /ws/jobs/{id}'],['Repositorios','repos','GET /api/dashboard'],
+  ['Reporte','reporte','GET /api/report/{id}'],['Compartir','reporte','POST /api/report/{id}/share'],['Editor','editor','GET · PUT /api/file · POST /api/fix'],
+  ['Asistente IA','chat','POST /api/chat'],['Comparativa','comparar','POST /api/diff'],['Vista pública','compartido','GET /r/{share_id}']
+];
+PAGES.flujo = () => `
+  <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 via-brand-700 to-fuchsia-700 text-white p-6 sm:p-8 mb-6">
+    <div class="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-white/10 blur-2xl"></div>
+    <div class="absolute right-10 -bottom-20 w-48 h-48 rounded-full bg-fuchsia-400/30 blur-2xl"></div>
+    <span class="relative inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">${icon('flow','w-3.5 h-3.5')}Prototipo navegable</span>
+    <h1 class="relative mt-3 text-2xl sm:text-4xl font-extrabold tracking-tight">Flujo de la interfaz de IA voy</h1>
+    <p class="relative mt-2 max-w-2xl text-white/80 text-sm sm:text-base">Cada tarjeta es una pantalla funcional del prototipo. Haz clic en cualquier paso para ir a ella, o usa el menú lateral para moverte libremente. Los datos son de ejemplo.</p>
+    <div class="relative mt-5 flex flex-wrap gap-2"><button onclick="go('dashboard')" class="inline-flex items-center gap-2 rounded-xl bg-white text-brand-700 font-semibold text-sm px-4 py-2.5 hover:bg-brand-50 transition">Empezar en el tablero ${icon('arrow','w-4 h-4')}</button><button onclick="toggleTheme()" class="inline-flex items-center gap-2 rounded-xl bg-white/15 hover:bg-white/25 font-medium text-sm px-4 py-2.5 transition">${icon('moon','w-4 h-4')}Probar tema claro/oscuro</button></div>
+  </div>
+  <div class="space-y-4">
+  ${JOURNEYS.map((j,ji)=>`<section class="${C.card} p-5">
+    <div class="flex items-baseline gap-3 mb-4"><span class="text-xs font-bold text-brand-600 dark:text-brand-300">FLUJO ${ji+1}</span><h2 class="font-semibold">${j.t}</h2><p class="hidden sm:block text-sm text-slate-500 dark:text-slate-400">${j.d}</p></div>
+    <div class="flex flex-col lg:flex-row lg:items-stretch">
+      ${j.steps.map((s,i)=>`${i?`<div class="flex items-center justify-center py-1 lg:py-0 lg:px-1.5 text-slate-300 dark:text-slate-600">${icon('arrow','w-5 h-5 rotate-90 lg:rotate-0')}</div>`:''}
+      <button onclick="nav('${s[0]}','${s[3]||''}')" class="group flex-1 min-w-0 text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 p-3.5 hover:border-brand-400 dark:hover:border-brand-500 hover:bg-brand-50/60 dark:hover:bg-brand-500/5 hover:-translate-y-0.5 transition">
+        <div class="flex items-center gap-2"><span class="w-6 h-6 shrink-0 rounded-full bg-brand-600 text-white text-xs font-bold grid place-items-center">${i+1}</span><span class="font-semibold text-sm truncate">${s[1]}</span><span class="ml-auto text-slate-300 group-hover:text-brand-500 transition">${icon('chevron','w-4 h-4')}</span></div>
+        <p class="text-xs text-slate-500 dark:text-slate-400 mt-1.5 pl-8">${s[2]}</p></button>`).join('')}
+    </div></section>`).join('')}
+  </div>
+  <div class="grid lg:grid-cols-5 gap-4 mt-6">
+    <section class="${C.card} lg:col-span-3 overflow-hidden">
+      <div class="p-5 border-b border-slate-200 dark:border-slate-800"><h2 class="font-semibold">Pantallas y endpoints</h2><p class="${C.sub}">Cómo se conecta cada vista con la API del backend (sección 4 del documento).</p></div>
+      <div class="divide-y divide-slate-100 dark:divide-slate-800">${SCREENS.map(([n,r,api])=>`<button onclick="go('${r}')" class="w-full flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 px-5 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 transition"><span class="text-sm font-medium sm:w-40">${n}</span><code class="text-xs font-mono text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-500/10 rounded-md px-2 py-1 w-fit">${api}</code></button>`).join('')}</div>
+    </section>
+    <section class="${C.card} lg:col-span-2 p-5 space-y-5">
+      <div><h2 class="font-semibold">Sistema de color</h2><p class="${C.sub}">Cada color tiene un único significado en toda la interfaz.</p></div>
+      <div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Categorías</p><div class="flex flex-wrap gap-2">${Object.keys(CAT).map(catChip).join('')}</div></div>
+      <div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Severidad</p><div class="flex flex-wrap gap-2">${Object.keys(SEV).map(sevBadge).join('')}</div></div>
+      <div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Score</p><div class="space-y-2 text-sm">${[['good','80 – 100'],['warn','60 – 79'],['bad','0 – 59']].map(([t,r])=>`<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full ${TONE[t].bar}"></span><span class="font-medium ${TONE[t].text}">${TONE[t].label}</span><span class="ml-auto font-mono text-xs text-slate-400">${r}</span></div>`).join('')}</div></div>
+      <div><p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Acción principal</p><button class="${C.btn} pointer-events-none">Violeta = acción</button></div>
+    </section>
+  </div>`;
+
+/* =========================================================
+   Página: Tablero
+   ========================================================= */
+function series(r){
+  const n = r.hist.seg.length;
+  const g = r.hist.seg.map((_,i)=>calc(r.hist.seg[i], r.hist.test[i], r.hist.prac[i]));
+  return { global:[...g, score(r)], seg:[...r.hist.seg, r.seg], test:[...r.hist.test, r.test], prac:[...r.hist.prac, r.prac], n:n+1 };
+}
+function chart(r){
+  const d = series(r), W=640, H=230, pl=34, pr=14, pt=14, pb=30;
+  const keys = [['global','Global',BRAND],['seg',CAT.seg.label,CAT.seg.hex],['test',CAT.test.label,CAT.test.hex],['prac',CAT.prac.label,CAT.prac.hex]];
+  const all = keys.filter(k=>!S.hidden.has(k[0])).flatMap(k=>d[k[0]]);
+  const lo = Math.max(0, Math.floor((Math.min(...(all.length?all:[40]))-5)/10)*10), hi = 100;
+  const x = i => pl + i*(W-pl-pr)/(d.n-1), y = v => pt + (1-(v-lo)/(hi-lo))*(H-pt-pb);
+  const ticks = []; for(let v=lo; v<=hi; v+=lo<=40?20:10) ticks.push(v);
+  const gid = 'g'+r.id;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="Tendencia de puntuación"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${BRAND}" stop-opacity=".22"/><stop offset="1" stop-color="${BRAND}" stop-opacity="0"/></linearGradient></defs>`;
+  svg += ticks.map(v=>`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" class="stroke-slate-100 dark:stroke-slate-800" stroke-width="1"/><text x="${pl-8}" y="${y(v)+4}" text-anchor="end" class="fill-slate-400" font-size="11">${v}</text>`).join('');
+  svg += DATES.map((l,i)=>`<text x="${x(i)}" y="${H-8}" text-anchor="middle" class="fill-slate-400" font-size="11">${l}</text>`).join('');
+  if(!S.hidden.has('global')){ const pts = d.global.map((v,i)=>`${x(i)},${y(v)}`).join(' '); svg += `<polygon points="${x(0)},${y(lo)} ${pts} ${x(d.n-1)},${y(lo)}" fill="url(#${gid})"/>`; }
+  keys.slice().reverse().forEach(([k,,c])=>{ if(S.hidden.has(k)) return;
+    const g = k==='global';
+    svg += `<polyline points="${d[k].map((v,i)=>`${x(i)},${y(v)}`).join(' ')}" fill="none" stroke="${c}" stroke-width="${g?3:2}" stroke-linejoin="round" stroke-linecap="round" ${g?'':'stroke-dasharray="0" opacity=".85"'}/>`;
+    svg += d[k].map((v,i)=>`<circle cx="${x(i)}" cy="${y(v)}" r="${g?4.5:3}" fill="${c}" class="stroke-white dark:stroke-slate-900" stroke-width="2"><title>${DATES[i]} · ${k==='global'?'Global':CAT[k].label}: ${f1(v)}</title></circle>`).join('');
+  });
+  return svg + '</svg>' + `<div class="flex flex-wrap gap-2 mt-3">${keys.map(([k,l,c])=>`<button onclick="toggleSeries('${k}')" class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium border transition ${S.hidden.has(k)?'border-slate-200 dark:border-slate-800 text-slate-400 line-through':'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}"><span class="w-2.5 h-2.5 rounded-full" style="background:${c}"></span>${l}</button>`).join('')}</div>`;
+}
+function toggleSeries(k){ S.hidden.has(k) ? S.hidden.delete(k) : S.hidden.add(k); refresh(); }
+function setRepo(id){ S.repo=id; refresh(); }
+function kpiCat(k, r){
+  const v=r[k], prev=r.hist[k][r.hist[k].length-1], t=TONE[tone(v)];
+  return `<button onclick="S.filters.cat='${k}';go('reporte')" class="${C.card} p-5 text-left hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md transition group">
+    <div class="flex items-center gap-3"><span class="w-10 h-10 rounded-xl grid place-items-center ${CAT[k].soft}">${icon(CAT[k].icon)}</span><div class="min-w-0"><p class="text-sm font-medium truncate">${CAT[k].label}</p><p class="text-xs text-slate-400">${CAT[k].tools}</p></div></div>
+    <div class="flex items-end justify-between mt-4"><p class="text-3xl font-bold tabular-nums ${t.text}">${Math.round(v)}<span class="text-base text-slate-400 font-medium">/100</span></p>${deltaBadge(v-prev)}</div>
+    <div class="mt-3">${bar(v, CAT[k].bar)}</div></button>`;
+}
+PAGES.dashboard = () => {
+  const scored = REPOS.filter(r=>r.seg!=null), r = repo(S.repo), sc = score(r), d = series(r), prev = d.global[d.n-2];
+  const top = FINDINGS.filter(f=>!S.resolved.has(f.id)).sort((a,b)=>['alta','media','baja'].indexOf(a.sev)-['alta','media','baja'].indexOf(b.sev)).slice(0,4);
+  return `
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+    <div><p class="${C.sub}">Martes 13 de octubre · 3 repositorios activos</p><h1 class="${C.h1}">Resumen del equipo</h1></div>
+    <div class="flex flex-col sm:flex-row gap-2">
+      <select onchange="setRepo(this.value)" class="${C.input} sm:w-56">${scored.map(x=>`<option value="${x.id}" ${x.id===S.repo?'selected':''}>${x.name}</option>`).join('')}</select>
+      <button class="${C.btn}" onclick="go('analizar')">${icon('plus','w-4 h-4')}Nuevo análisis</button>
+    </div>
+  </div>
+  <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div class="${C.card} p-5 sm:col-span-2 xl:col-span-1 flex items-center gap-5 bg-gradient-to-br from-white to-brand-50/60 dark:from-slate-900 dark:to-brand-500/5">
+      ${ring(sc, 96, 9)}
+      <div><p class="text-sm font-medium">Score global</p><p class="text-xs text-slate-400 mb-2">${r.name}</p>${deltaBadge(sc-prev,true)}<p class="text-xs text-slate-400 mt-0.5">vs. análisis anterior</p>
+      <span class="mt-2 ${C.chip} ${sc>=S.thr.score?'bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30':'bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/30'}">${sc>=S.thr.score?'Supera':'No supera'} el umbral (${S.thr.score})</span></div>
+    </div>
+    ${kpiCat('seg',r)}${kpiCat('test',r)}${kpiCat('prac',r)}
+  </div>
+  <div class="grid lg:grid-cols-3 gap-4 mt-4">
+    <section class="${C.card} p-5 lg:col-span-2">
+      <div class="flex items-start justify-between gap-3 mb-3"><div><h2 class="font-semibold">Tendencia</h2><p class="${C.sub}">Últimas 7 semanas · toca la leyenda para ocultar series</p></div><button onclick="go('comparar')" class="${C.ghost}">${icon('compare','w-4 h-4')}Comparar</button></div>
+      ${chart(r)}
+    </section>
+    <section class="${C.card} p-5 flex flex-col">
+      <div class="flex items-center justify-between mb-3"><h2 class="font-semibold">Atención prioritaria</h2><span class="text-xs text-slate-400">${FINDINGS.filter(f=>!S.resolved.has(f.id)).length} abiertos</span></div>
+      <div class="space-y-2 flex-1">${top.map(f=>`<button onclick="openFinding(${f.id})" class="w-full text-left flex gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+        <span class="mt-1.5 w-2 h-2 shrink-0 rounded-full ${SEV[f.sev].dot}"></span><div class="min-w-0"><p class="text-sm font-medium leading-snug">${f.msg}</p><p class="text-xs font-mono text-slate-400 mt-0.5 truncate">${f.file}:${f.line} · ${f.rule}</p></div></button>`).join('')}</div>
+      <button onclick="go('reporte')" class="${C.btn2} mt-3 w-full">Ver todos los hallazgos ${icon('arrow','w-4 h-4')}</button>
+    </section>
+  </div>
+  <section class="${C.card} mt-4 overflow-hidden">
+    <div class="p-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800"><h2 class="font-semibold">Análisis recientes</h2><button onclick="go('repos')" class="${C.ghost}">Ver repositorios ${icon('chevron','w-4 h-4')}</button></div>
+    <div class="divide-y divide-slate-100 dark:divide-slate-800">${REPOS.map(x=>`
+      <div class="flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+        ${x.seg!=null?ring(score(x),40,4):`<span class="w-10 h-10 rounded-full grid place-items-center bg-slate-100 dark:bg-slate-800 text-slate-400">${x.status==='error'?icon('alert','w-4 h-4'):SPIN()}</span>`}
+        <div class="flex-1 min-w-0"><p class="text-sm font-medium truncate">${x.name}</p><p class="text-xs text-slate-400 flex items-center gap-1">${icon('branch','w-3 h-3')}${x.branch} · ${x.last}</p></div>
+        ${statusChip(x.status)}
+        <button onclick="${x.status==='listo'?`S.repo='${x.id}';go('reporte')`:x.status==='error'?`toast('${esc(x.err||'')}',{tone:'err',action:['Reintentar',&quot;go('analizar')&quot;]})`:`go('analizar')`}" class="${C.ghost}">${x.status==='listo'?'Ver reporte':x.status==='error'?'Ver error':'Ver progreso'}</button>
+      </div>`).join('')}</div>
+  </section>`;
+};
+
+/* =========================================================
+   Página: Nuevo análisis + progreso
+   ========================================================= */
+PAGES.analizar = () => S.job ? jobView() : `
+  <div class="mb-6"><h1 class="${C.h1}">Nuevo análisis</h1><p class="${C.sub} mt-1">Indica el repositorio; IA voy lo clona, ejecuta los analizadores y genera el reporte.</p></div>
+  <div class="grid lg:grid-cols-3 gap-4">
+    <form onsubmit="event.preventDefault();startJob()" class="${C.card} p-5 sm:p-6 lg:col-span-2 space-y-6">
+      <div class="grid sm:grid-cols-3 gap-4">
+        <div class="sm:col-span-2"><label class="${C.label}" for="f-url">URL del repositorio</label><input id="f-url" required value="https://github.com/equipo/api-pagos" class="${C.input} font-mono text-[13px]"></div>
+        <div><label class="${C.label}" for="f-br">Rama</label><input id="f-br" value="main" class="${C.input} font-mono text-[13px]"></div>
+      </div>
+      <div><p class="${C.label}">Analizadores</p>
+        <div class="grid sm:grid-cols-3 gap-3">${Object.entries({seg:['Bandit','pip-audit'],test:['pytest','coverage'],prac:['Ruff','Radon']}).map(([k,tools])=>`
+          <div class="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
+            <div class="flex items-center gap-2 mb-2.5"><span class="w-7 h-7 rounded-lg grid place-items-center ${CAT[k].soft}">${icon(CAT[k].icon,'w-4 h-4')}</span><span class="text-sm font-semibold">${CAT[k].label}</span><span class="ml-auto text-xs font-mono text-slate-400">${S.weights[k]}%</span></div>
+            ${tools.map(t=>`<label class="flex items-center gap-2 py-1 text-sm cursor-pointer"><input type="checkbox" checked class="w-4 h-4 rounded accent-brand-600"> ${t}</label>`).join('')}
+          </div>`).join('')}</div></div>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <label class="flex gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"><input type="checkbox" checked class="mt-0.5 w-4 h-4 accent-brand-600"><span><span class="block text-sm font-medium">Ejecutar en sandbox (WSL2)</span><span class="text-xs text-slate-500">Aísla la ejecución de pytest</span></span></label>
+        <label class="flex gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"><input type="checkbox" checked class="mt-0.5 w-4 h-4 accent-brand-600"><span><span class="block text-sm font-medium">Indexar para el asistente</span><span class="text-xs text-slate-500">Permite preguntar sobre el código</span></span></label>
+      </div>
+      <label class="flex items-center gap-2 text-xs text-slate-500 cursor-pointer w-fit"><input id="f-fail" type="checkbox" class="w-3.5 h-3.5 accent-rose-600">Simular un error durante el análisis (prototipo)</label>
+      <div class="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+        <button type="button" onclick="go('dashboard')" class="${C.btn2}">Cancelar</button>
+        <button class="${C.btn}">${icon('play','w-4 h-4')}Iniciar análisis</button>
+      </div>
+    </form>
+    <aside class="space-y-4">
+      <div class="${C.card} p-5"><h2 class="font-semibold mb-3">Qué va a pasar</h2>
+        <ol class="space-y-3 text-sm">${[['Clonado','Se descarga la rama indicada'],['Entorno','Se instalan dependencias aisladas'],['Análisis','Seis herramientas en paralelo'],['Score','Promedio ponderado por categoría'],['Reporte','Listo para revisar y compartir']].map(([a,b],i)=>`<li class="flex gap-3"><span class="w-6 h-6 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold grid place-items-center text-slate-500">${i+1}</span><div><p class="font-medium">${a}</p><p class="text-xs text-slate-500">${b}</p></div></li>`).join('')}</ol>
+        <p class="mt-4 flex items-center gap-2 text-xs text-slate-500">${icon('clock','w-4 h-4')}Tiempo estimado: 2 – 4 minutos</p></div>
+      <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-5 text-sm"><p class="font-medium mb-1">Fórmula actual</p><code class="font-mono text-xs text-slate-500">Score = ${(S.weights.seg/100).toFixed(2)}·Seg + ${(S.weights.test/100).toFixed(2)}·Test + ${(S.weights.prac/100).toFixed(2)}·Prác</code><button onclick="go('config')" class="block mt-2 text-xs font-medium text-brand-600 dark:text-brand-300 hover:underline">Cambiar pesos →</button></div>
+    </aside>
+  </div>`;
+function startJob(){
+  const u = $('#f-url').value.trim(), b = $('#f-br').value.trim() || 'main';
+  S.job = {url:u, name:u.replace(/^https?:\/\/[^/]+\//,''), branch:b, step:0, status:'running', fail:$('#f-fail').checked, logs:[`$ ia-voy analyze ${u} --branch ${b}`]};
+  pushLog(); refresh(); renderJobPill();
+  S.timer = setInterval(tickJob, 750);
+}
+function pushLog(){ const j=S.job, s=JOB_STEPS[j.step]; j.logs.push(`[${String(j.step+1).padStart(2,'0')}/${JOB_STEPS.length}] ${s[0]} → ${s[1].replace('{b}',j.branch).replace('{u}',j.url)}`); }
+function tickJob(){
+  const j = S.job; if(!j) return clearInterval(S.timer);
+  const extra = {3:'  3 alta · 4 media · 0 baja',4:'  1 paquete vulnerable',5:'  139 passed, 1 failed, 3 skipped',6:'  cobertura total: 78 %',7:'  4 problemas (3 corregibles)',8:'  complejidad media: 6.2',9:`  score global: ${f1(score(repo('r1')))}`};
+  if (j.fail && j.step===5){ j.status='error'; j.logs.push("  ERROR: ModuleNotFoundError: No module named 'stripe'", '  El análisis se detuvo. Revisa requirements.txt.'); clearInterval(S.timer); toast('El análisis falló en pytest',{tone:'err',action:['Ver detalle',"go('analizar')"]}); }
+  else {
+    if (extra[j.step]) j.logs.push(extra[j.step]);
+    j.logs.push('  ✓ ok');
+    j.step++;
+    if (j.step >= JOB_STEPS.length){ j.status='done'; j.logs.push('Análisis #129 completado.'); clearInterval(S.timer); toast('Análisis completado',{action:['Ver reporte',"S.job=null;go('reporte')"]}); }
+    else pushLog();
+  }
+  renderJobPill();
+  if (route()==='analizar') refresh();
+}
+function scrollLog(){ const el=$('#log'); if(el) el.scrollTop=el.scrollHeight; }
+function cancelJob(){ clearInterval(S.timer); S.job=null; renderJobPill(); refresh(); toast('Análisis cancelado',{tone:'info'}); }
+function renderJobPill(){
+  const j=S.job, el=$('#job-pill');
+  if(!j || j.status==='done' && route()==='analizar'){ el.innerHTML=''; return; }
+  const pct = Math.round(j.step/JOB_STEPS.length*100);
+  el.innerHTML = j.status==='running' ? `<button onclick="go('analizar')" class="hidden sm:inline-flex items-center gap-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 text-xs font-semibold px-3 py-2">${SPIN('w-3.5 h-3.5')}Analizando ${pct}%</button>`
+    : j.status==='error' ? `<button onclick="go('analizar')" class="hidden sm:inline-flex items-center gap-2 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300 text-xs font-semibold px-3 py-2">${icon('alert','w-3.5 h-3.5')}Falló</button>` : '';
+}
+function jobView(){
+  const j=S.job, pct=Math.round(j.step/JOB_STEPS.length*100), err=j.status==='error', done=j.status==='done';
+  return `
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div><p class="${C.sub} flex items-center gap-1.5">${icon('branch','w-4 h-4')}${esc(j.branch)}</p><h1 class="${C.h1} break-all">${esc(j.name)}</h1></div>
+    <div class="flex gap-2">${j.status==='running'?`<button onclick="cancelJob()" class="${C.btn2}">Cancelar</button>`:''}
+      ${err?`<button onclick="S.job=null;refresh()" class="${C.btn2}">Editar parámetros</button><button onclick="S.job.fail=false;S.job.status='running';S.job.logs.push('— Reintentando —');pushLog();S.timer=setInterval(tickJob,750);refresh()" class="${C.btn}">${icon('refresh','w-4 h-4')}Reintentar</button>`:''}
+      ${done?`<button onclick="S.job=null;refresh()" class="${C.btn2}">Nuevo análisis</button><button onclick="S.job=null;go('reporte')" class="${C.btn}">Ver reporte ${icon('arrow','w-4 h-4')}</button>`:''}</div>
+  </div>
+  <div class="${C.card} p-5 mb-4">
+    <div class="flex items-center justify-between mb-2 text-sm"><span class="font-medium">${err?'El análisis se detuvo':done?'Análisis completado':JOB_STEPS[j.step][0]+'…'}</span><span class="font-mono tabular-nums ${err?'text-rose-600 dark:text-rose-400':'text-slate-500'}">${pct}%</span></div>
+    <div class="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ${err?'bg-rose-500':done?'bg-emerald-500':'bg-gradient-to-r from-brand-500 to-fuchsia-500'}" style="width:${Math.max(pct,3)}%"></div></div>
+    ${err?`<div class="mt-4 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 p-4 text-sm flex gap-3"><span class="text-rose-600 dark:text-rose-400">${icon('alert')}</span><div><p class="font-semibold text-rose-700 dark:text-rose-300">pytest no pudo importar un módulo</p><p class="text-rose-700/80 dark:text-rose-300/80 mt-0.5">Falta <code class="font-mono">stripe</code> en requirements.txt. Agrégalo y vuelve a intentar.</p></div></div>`:''}
+  </div>
+  <div class="grid lg:grid-cols-5 gap-4">
+    <section class="${C.card} p-5 lg:col-span-2"><h2 class="font-semibold mb-3">Pasos</h2>
+      <ol class="space-y-1">${JOB_STEPS.map((s,i)=>{ const st = i<j.step?'ok':i===j.step?(err?'err':done?'ok':'run'):'wait';
+        const ic = st==='ok'?`<span class="w-6 h-6 rounded-full bg-emerald-500 text-white grid place-items-center">${icon('check','w-3.5 h-3.5')}</span>`:st==='run'?`<span class="w-6 h-6 rounded-full bg-brand-100 dark:bg-brand-500/15 text-brand-600 dark:text-brand-300 grid place-items-center">${SPIN('w-3.5 h-3.5')}</span>`:st==='err'?`<span class="w-6 h-6 rounded-full bg-rose-500 text-white grid place-items-center">${icon('x','w-3.5 h-3.5')}</span>`:`<span class="w-6 h-6 rounded-full border-2 border-slate-200 dark:border-slate-700"></span>`;
+        return `<li class="flex items-center gap-3 rounded-lg px-2 py-1.5 ${st==='run'?'bg-brand-50/60 dark:bg-brand-500/5':''}">${ic}<span class="text-sm ${st==='wait'?'text-slate-400':st==='err'?'text-rose-600 dark:text-rose-400 font-medium':'font-medium'}">${s[0]}</span></li>`; }).join('')}</ol></section>
+    <section class="lg:col-span-3 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex flex-col">
+      <div class="px-4 py-2.5 border-b border-slate-800 flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-rose-500/80"></span><span class="w-2.5 h-2.5 rounded-full bg-amber-500/80"></span><span class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></span><span class="ml-2 text-xs text-slate-400 font-mono">ws://…/ws/jobs/129</span>${j.status==='running'?'<span class="ml-auto flex items-center gap-1.5 text-[11px] text-emerald-400"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>en vivo</span>':''}</div>
+      <pre id="log" class="flex-1 h-80 overflow-auto scroll-thin p-4 text-xs leading-relaxed font-mono text-slate-300">${j.logs.map(l=>`<span class="${/ERROR|stripe'/.test(l)?'text-rose-400':/✓|completado/.test(l)?'text-emerald-400':/^\$/.test(l)?'text-brand-300':/^ {2}/.test(l)?'text-slate-400':''}">${esc(l)}</span>`).join('\n')}</pre>
+    </section>
+  </div>`;
+}
+
+/* =========================================================
+   Página: Repositorios
+   ========================================================= */
+PAGES.repos = () => `
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+    <div><h1 class="${C.h1}">Repositorios</h1><p class="${C.sub} mt-1">${REPOS.length} repositorios conectados al equipo</p></div>
+    <div class="flex gap-2"><input oninput="filterRepos(this.value)" placeholder="Filtrar por nombre…" class="${C.input} sm:w-64"><button onclick="go('analizar')" class="${C.btn} shrink-0">${icon('plus','w-4 h-4')}<span class="hidden sm:inline">Agregar</span></button></div>
+  </div>
+  <div id="repo-grid" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${REPOS.map(x=>`
+    <article data-name="${x.name}" class="${C.card} p-5 flex flex-col">
+      <div class="flex items-start gap-3"><span class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 grid place-items-center text-slate-500">${icon('folder')}</span>
+        <div class="flex-1 min-w-0"><p class="font-semibold truncate">${x.name}</p><p class="text-xs text-slate-400 flex items-center gap-1 mt-0.5">${icon('branch','w-3 h-3')}${x.branch} · ${x.files} archivos</p></div>${statusChip(x.status)}</div>
+      ${x.seg!=null?`<div class="flex items-center gap-4 mt-5">${ring(score(x),64,6)}<div class="flex-1 space-y-2">${['seg','test','prac'].map(k=>`<div class="flex items-center gap-2 text-xs"><span class="w-16 text-slate-500 truncate">${k==='prac'?'Prácticas':CAT[k].label}</span><div class="flex-1">${bar(x[k],CAT[k].bar)}</div><span class="w-6 text-right font-mono tabular-nums">${x[k]}</span></div>`).join('')}</div></div>`
+      : x.status==='error'?`<div class="mt-5 flex-1 rounded-xl bg-rose-50 dark:bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300 font-mono">${x.err}</div>`
+      :`<div class="mt-5 flex-1 rounded-xl bg-brand-50 dark:bg-brand-500/10 p-3 text-xs text-brand-700 dark:text-brand-300 flex items-center gap-2">${SPIN('w-3.5 h-3.5')}Ejecutando pytest (paso 6 de 11)…</div>`}
+      <div class="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between"><span class="text-xs text-slate-400">${icon('clock','w-3.5 h-3.5 inline -mt-0.5')} ${x.last}</span>
+        <div class="flex gap-1">${x.status!=='analizando'?`<button onclick="toast('Re-análisis de ${x.name} en cola',{tone:'info'})" class="${C.ghost}" title="Re-analizar">${icon('refresh','w-4 h-4')}</button>`:''}${x.status==='listo'?`<button onclick="S.repo='${x.id}';go('reporte')" class="${C.ghost} text-brand-600 dark:text-brand-300">Reporte ${icon('chevron','w-4 h-4')}</button>`:''}</div></div>
+    </article>`).join('')}</div>`;
+function filterRepos(q){ document.querySelectorAll('#repo-grid article').forEach(a=>a.classList.toggle('hidden', !a.dataset.name.toLowerCase().includes(q.toLowerCase()))); }
+
+/* =========================================================
+   Página: Reporte
+   ========================================================= */
+function filtered(){
+  const {q,sev,cat} = S.filters, s = q.toLowerCase();
+  return FINDINGS.filter(f => (sev==='todas'||f.sev===sev) && (cat==='todas'||f.cat===cat) && (!s || (f.msg+f.file+f.rule+f.tool).toLowerCase().includes(s)));
+}
+function findingRows(){
+  const list = filtered();
+  if(!list.length) return `<div class="p-10 text-center"><span class="mx-auto w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 grid place-items-center text-slate-400">${icon('search')}</span><p class="mt-3 font-medium">Sin hallazgos con esos filtros</p><button onclick="S.filters={q:'',sev:'todas',cat:'todas'};refresh()" class="mt-2 text-sm text-brand-600 dark:text-brand-300 hover:underline">Limpiar filtros</button></div>`;
+  return list.map(f=>{ const done=S.resolved.has(f.id); return `
+    <button onclick="openDrawer(${f.id})" class="w-full text-left flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-4 sm:px-5 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition ${done?'opacity-60':''}">
+      <div class="flex items-center gap-2 sm:w-44 shrink-0">${sevBadge(f.sev)}<span class="font-mono text-xs text-slate-500 truncate">${f.rule}</span></div>
+      <div class="flex-1 min-w-0"><p class="text-sm font-medium ${done?'line-through':''}">${f.msg}</p><p class="text-xs font-mono text-slate-400 truncate mt-0.5">${f.file}:${f.line} · ${f.tool}</p></div>
+      <div class="flex items-center gap-2 shrink-0">${catChip(f.cat)}${done?`<span class="${C.chip} bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30">Resuelto</span>`:f.fix?`<span class="${C.chip} bg-brand-50 text-brand-700 ring-brand-600/20 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-400/30">${icon('wand','w-3 h-3')}Fix</span>`:''}<span class="hidden sm:block text-slate-300 dark:text-slate-600">${icon('chevron','w-4 h-4')}</span></div>
+    </button>`; }).join('');
+}
+function onSearch(v){ S.filters.q=v; $('#flist').innerHTML=findingRows(); $('#fcount').textContent=filtered().length; }
+function setFilter(k,v){ S.filters[k]=v; refresh(); }
+PAGES.reporte = () => {
+  const r = repo('r1'), sc = score(r), d = series(r), prev = d.global[d.n-2];
+  const cnt = s => FINDINGS.filter(f=>f.sev===s && !S.resolved.has(f.id)).length;
+  const chips = [['todas','Todas'],['alta','Alta'],['media','Media'],['baja','Baja']];
+  return `
+  <nav class="flex items-center gap-1.5 text-sm text-slate-500 mb-4"><button onclick="go('repos')" class="hover:text-slate-800 dark:hover:text-slate-200">Repositorios</button>${icon('chevron','w-3.5 h-3.5')}<span class="truncate">${r.name}</span>${icon('chevron','w-3.5 h-3.5')}<span class="text-slate-800 dark:text-slate-200 font-medium">#${r.num}</span></nav>
+  <section class="${C.card} p-5 sm:p-6">
+    <div class="flex flex-col md:flex-row md:items-center gap-5">
+      ${ring(sc,112,10)}
+      <div class="flex-1 min-w-0">
+        <div class="flex flex-wrap items-center gap-2 mb-1"><h1 class="text-xl sm:text-2xl font-bold tracking-tight">${r.name}</h1><span class="${C.chip} bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">${icon('branch','w-3 h-3')}${r.branch}</span></div>
+        <p class="${C.sub}">Commit <span class="font-mono">${r.commit}</span> · 13 oct 2026, 19:41 · 2 min 48 s</p>
+        <div class="flex flex-wrap items-center gap-3 mt-3 text-sm">${deltaBadge(sc-prev,true)}<span class="text-slate-400">vs. #${r.num-1}</span><span class="text-slate-300 dark:text-slate-700">|</span>
+          <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-500"></span>${cnt('alta')} altas</span><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span>${cnt('media')} medias</span><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-slate-400"></span>${cnt('baja')} bajas</span></div>
+      </div>
+      <div class="grid grid-cols-2 sm:flex gap-2">
+        <button onclick="openShare()" class="${C.btn} col-span-2 sm:col-span-1">${icon('share','w-4 h-4')}Compartir</button>
+        <button onclick="go('chat')" class="${C.btn2}">${icon('chat','w-4 h-4')}<span>Preguntar</span></button>
+        <button onclick="go('comparar')" class="${C.btn2}">${icon('compare','w-4 h-4')}<span>Comparar</span></button>
+      </div>
+    </div>
+    <div class="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800 grid sm:grid-cols-3 gap-3">${['seg','test','prac'].map(k=>{ const v=r[k], a=S.filters.cat===k; return `
+      <button onclick="setFilter('cat','${a?'todas':k}')" class="text-left rounded-xl border p-4 transition ${a?'border-brand-400 ring-4 ring-brand-500/10 bg-brand-50/40 dark:bg-brand-500/5':'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}">
+        <div class="flex items-center gap-2"><span class="w-8 h-8 rounded-lg grid place-items-center ${CAT[k].soft}">${icon(CAT[k].icon,'w-4 h-4')}</span><span class="text-sm font-medium">${CAT[k].label}</span><span class="ml-auto text-xl font-bold tabular-nums ${TONE[tone(v)].text}">${v}</span></div>
+        <div class="mt-3">${bar(v,CAT[k].bar)}</div>
+        <p class="text-xs text-slate-500 mt-2">${k==='seg'?`${FINDINGS.filter(f=>f.cat==='seg'&&!S.resolved.has(f.id)).length} hallazgos abiertos`:k==='test'?`Cobertura ${r.cov} % · 1 prueba falla`:'Complejidad media 6.2'} · peso ${S.weights[k]}%</p></button>`; }).join('')}</div>
+    <p class="mt-4 font-mono text-xs text-slate-500 bg-slate-50 dark:bg-slate-950 rounded-lg px-3 py-2 overflow-x-auto whitespace-nowrap scroll-thin">Score = ${(S.weights.seg/100).toFixed(2)} × ${r.seg} + ${(S.weights.test/100).toFixed(2)} × ${r.test} + ${(S.weights.prac/100).toFixed(2)} × ${r.prac} = <b class="${TONE[tone(sc)].text}">${f1(sc)}</b></p>
+  </section>
+  <div class="mt-6 flex gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto scroll-thin">${[['hallazgos','Hallazgos'],['cobertura','Cobertura'],['complejidad','Complejidad']].map(([t,l])=>`<button onclick="S.tab='${t}';refresh()" class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${S.tab===t?'border-brand-600 text-brand-700 dark:text-brand-300':'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}">${l}</button>`).join('')}</div>
+  ${S.tab==='hallazgos'?`
+  <section class="${C.card} mt-4 overflow-hidden">
+    <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row gap-3 lg:items-center">
+      <div class="relative flex-1"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">${icon('search','w-4 h-4')}</span><input value="${esc(S.filters.q)}" oninput="onSearch(this.value)" placeholder="Buscar por archivo, regla o texto…" class="${C.input} pl-9"></div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">${chips.map(([v,l])=>`<button onclick="setFilter('sev','${v}')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition ${S.filters.sev===v?'bg-white dark:bg-slate-950 shadow-sm text-slate-900 dark:text-white':'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}">${l}</button>`).join('')}</div>
+        <select onchange="setFilter('cat',this.value)" class="${C.input} w-auto py-2">${[['todas','Todas las categorías'],['seg','Seguridad'],['test','Pruebas'],['prac','Buenas prácticas']].map(([v,l])=>`<option value="${v}" ${S.filters.cat===v?'selected':''}>${l}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="px-5 py-2 text-xs text-slate-400 bg-slate-50/60 dark:bg-slate-950/40 border-b border-slate-100 dark:border-slate-800"><span id="fcount">${filtered().length}</span> resultados · haz clic en un hallazgo para ver el detalle</div>
+    <div id="flist" class="divide-y divide-slate-100 dark:divide-slate-800">${findingRows()}</div>
+  </section>`
+  : S.tab==='cobertura' ? `
+  <section class="${C.card} mt-4 p-5"><div class="flex items-center justify-between mb-4"><h2 class="font-semibold">Cobertura por archivo</h2><span class="text-xs text-slate-400">Umbral mínimo: ${S.thr.cov} %</span></div>
+    <div class="space-y-3">${COVERAGE.map(([f,v])=>`<div class="grid grid-cols-[1fr_auto] sm:grid-cols-[14rem_1fr_3rem] items-center gap-x-3 gap-y-1"><span class="font-mono text-xs truncate">${f}</span><span class="sm:order-last text-right text-sm font-semibold tabular-nums ${v<S.thr.cov?'text-rose-600 dark:text-rose-400':''}">${v}%</span>
+      <div class="col-span-2 sm:col-span-1 relative h-2.5 rounded-full bg-slate-100 dark:bg-slate-800"><div class="h-full rounded-full ${v<S.thr.cov?'bg-rose-500':v<80?'bg-amber-500':'bg-emerald-500'}" style="width:${v}%"></div><div class="absolute top-[-3px] bottom-[-3px] w-0.5 bg-slate-400 dark:bg-slate-500" style="left:${S.thr.cov}%" title="Umbral"></div></div></div>`).join('')}</div></section>`
+  : `
+  <section class="${C.card} mt-4 overflow-hidden"><div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between"><h2 class="font-semibold">Complejidad ciclomática</h2><div class="hidden sm:flex gap-1">${Object.entries(GRADE).map(([g,c])=>`<span class="w-6 h-6 rounded-md ${c} text-white text-[11px] font-bold grid place-items-center">${g}</span>`).join('')}</div></div>
+    <div class="divide-y divide-slate-100 dark:divide-slate-800">${COMPLEX.map(([fn,f,cc,g])=>`<div class="flex items-center gap-4 px-5 py-3"><span class="w-8 h-8 rounded-lg ${GRADE[g]} text-white text-sm font-bold grid place-items-center shrink-0">${g}</span><div class="flex-1 min-w-0"><p class="font-mono text-sm truncate">${fn}()</p><p class="text-xs text-slate-400 font-mono truncate">${f}</p></div><span class="text-sm tabular-nums"><b>${cc}</b> <span class="text-slate-400">CC</span></span></div>`).join('')}</div></section>`}`;
+};
+
+/* =========================================================
+   Página: Editor
+   ========================================================= */
+function lineText(file, n){ const e=S.edits[file]; return e && n in e ? e[n] : CODE[file].find(l=>l[0]===n)[1]; }
+function edited(file){ return S.edits[file] ? Object.keys(S.edits[file]).length : 0; }
+function applyFix(id){
+  const f = FINDINGS.find(x=>x.id===id); closeOverlay();
+  if (FIXES[id]){
+    FIXES[id].forEach(([file,n,t])=>{ (S.edits[file] = S.edits[file]||{})[n]=t; });
+    S.pending.add(id); S.file=f.file; S.diff=true; go('editor');
+    toast('Corrección aplicada. Revisa el diff y guarda.',{tone:'info'});
+  } else { S.resolved.add(id); refresh(); renderNav(route()); toast(`Corrección de <b>${f.rule}</b> aplicada (simulada en el prototipo)`); }
+}
+function openSource(file, line){ closeOverlay(); if(CODE[file]){ S.file=file; S.diff=false; go('editor'); setTimeout(()=>{ const el=document.getElementById('L'+line); if(el) el.scrollIntoView({block:'center',behavior:'smooth'}); },120); } else toast(`<span class="font-mono">${esc(file)}</span> no está incluido en este prototipo`,{tone:'info'}); }
+function onLineEdit(el){ const n=+el.dataset.n, file=S.file, orig=CODE[file].find(l=>l[0]===n)[1], t=el.textContent; S.edits[file]=S.edits[file]||{}; if(t===orig) delete S.edits[file][n]; else S.edits[file][n]=t; const b=$('#dirty'); if(b) b.classList.toggle('hidden', !edited(file)); }
+function saveFile(){
+  const file=S.file; if(!edited(file)) return toast('No hay cambios que guardar',{tone:'info'});
+  const r=repo('r1'), before=score(r);
+  $('#save-btn').innerHTML = SPIN()+'Re-analizando…'; $('#save-btn').disabled=true;
+  setTimeout(()=>{
+    Object.entries(S.edits[file]).forEach(([n,t])=>{ const row=CODE[file].find(l=>l[0]===+n); row[1]=t; });
+    CODE[file] = CODE[file].filter(l=>l[1]!==null || l[0]==='gap');
+    delete S.edits[file];
+    FINDINGS.filter(f=>f.file===file && S.pending.has(f.id)).forEach(f=>{ S.resolved.add(f.id); S.pending.delete(f.id); if(f.cat==='seg') r.seg=Math.min(100,r.seg+(f.sev==='alta'?7:4)); else r.prac=Math.min(100,r.prac+3); });
+    S.diff=false; refresh();
+    toast(`Guardado y re-analizado. Score: <b>${f1(before)}</b> → <b class="text-emerald-600 dark:text-emerald-400">${f1(score(r))}</b>`,{action:['Ver tablero',"go('dashboard')"],ms:6000});
+  }, 1400);
+}
+function codeLines(file, mode){
+  const fl = FINDINGS.filter(f=>f.file===file && !S.resolved.has(f.id));
+  return CODE[file].map(([n,orig])=>{
+    if(n==='gap') return `<div class="flex text-slate-400 bg-slate-50 dark:bg-slate-900/60 select-none"><span class="w-12 shrink-0"></span><span class="px-3 py-0.5 text-[11px]">⋯ líneas ocultas</span></div>`;
+    const e = S.edits[file] && n in S.edits[file], t = mode==='orig' ? orig : lineText(file,n), f = fl.find(x=>x.line===n);
+    const del = mode!=='orig' && e && t===null;
+    const bg = mode==='orig' && e ? 'bg-rose-500/10' : e ? (del?'bg-rose-500/10':'bg-emerald-500/10') : f ? SEV[f.sev].line : '';
+    const mark = mode==='orig' && e ? '<span class="text-rose-500">−</span>' : e ? (del?'<span class="text-rose-500">−</span>':'<span class="text-emerald-500">+</span>') : f ? `<span class="inline-block w-2 h-2 rounded-full ${SEV[f.sev].dot}" title="${esc(f.msg)}"></span>` : '';
+    const content = del ? `<span class="line-through text-slate-400">${hl(orig)}</span>` : hl(t ?? '');
+    const editable = mode==='edit' && !del;
+    return `<div id="${mode==='orig'?'O':'L'}${n}" class="flex group ${bg}"><span class="w-12 shrink-0 flex items-center justify-end gap-1.5 pr-3 text-slate-400 select-none tabular-nums"><span class="w-2 flex justify-center">${mark}</span>${n}</span><span ${editable?`contenteditable="true" spellcheck="false" data-n="${n}" oninput="onLineEdit(this)"`:''} class="flex-1 whitespace-pre pr-6 py-px min-h-[1.5em]">${content}</span></div>
+    ${mode==='edit' && f && !e ? `<div class="flex ${SEV[f.sev].line}"><span class="w-12 shrink-0"></span><div class="flex flex-wrap items-center gap-2 py-1 pr-4 text-[11px] font-sans"><span class="font-semibold ${f.sev==='alta'?'text-rose-600 dark:text-rose-400':f.sev==='media'?'text-amber-600 dark:text-amber-400':'text-slate-500'}">${f.rule} · ${f.msg}</span>${FIXES[f.id]?`<button onclick="applyFix(${f.id})" class="inline-flex items-center gap-1 rounded-md bg-brand-600 hover:bg-brand-700 text-white px-2 py-0.5 font-semibold">${icon('wand','w-3 h-3')}Aplicar fix</button>`:''}<button onclick="openDrawer(${f.id})" class="text-brand-600 dark:text-brand-300 hover:underline">Detalle</button></div></div>`:''}`;
+  }).join('');
+}
+PAGES.editor = () => {
+  const file=S.file, n=edited(file), fixable=FINDINGS.filter(f=>f.file===file && FIXES[f.id] && !S.resolved.has(f.id) && !S.pending.has(f.id));
+  const panel = 'rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0b1120] overflow-hidden';
+  return `
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+    <div><h1 class="${C.h1}">Editor</h1><p class="${C.sub}">equipo/api-pagos · los cambios se guardan en el repositorio clonado</p></div>
+    <select onchange="S.file=this.value;S.diff=false;refresh()" class="${C.input} lg:hidden">${Object.keys(CODE).map(f=>`<option ${f===file?'selected':''}>${f}</option>`).join('')}</select>
+  </div>
+  <div class="grid lg:grid-cols-[15rem_1fr] gap-4">
+    <aside class="${C.card} p-3 hidden lg:block h-fit">
+      <p class="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Archivos</p>
+      ${TREE.map(([f,dir])=>{ const c=FINDINGS.filter(x=>x.file===f&&!S.resolved.has(x.id)), worst=c.find(x=>x.sev==='alta')?'alta':c.find(x=>x.sev==='media')?'media':c.length?'baja':null, a=f===file;
+        return `<button onclick="${CODE[f]?`S.file='${f}';S.diff=false;refresh()`:`openSource('${f}',1)`}" class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition ${dir?'pl-5':''} ${a?'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300 font-medium':'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'} ${CODE[f]?'':'opacity-60'}">${icon('file','w-4 h-4 shrink-0')}<span class="truncate font-mono text-xs">${f.split('/').pop()}</span>${edited(f)?'<span class="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Modificado"></span>':''}${worst?`<span class="ml-auto text-[10px] font-bold rounded-full px-1.5 ${SEV[worst].cls} ring-1 ring-inset">${c.length}</span>`:''}</button>`; }).join('')}
+    </aside>
+    <section class="min-w-0">
+      <div class="${C.card} rounded-b-none border-b-0 px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2">
+        <span class="font-mono text-sm font-medium flex items-center gap-1.5">${icon('file','w-4 h-4 text-slate-400')}${file}</span>
+        <span id="dirty" class="${n?'':'hidden'} ${C.chip} bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30">● modificado</span>
+        <div class="ml-auto flex flex-wrap gap-1.5">
+          ${fixable.length?`<button onclick="${fixable.map(f=>`applyFix(${f.id})`).join(';')}" class="${C.ghost} text-brand-600 dark:text-brand-300">${icon('wand','w-4 h-4')}Corregir todo (${fixable.length})</button>`:''}
+          <button onclick="S.diff=!S.diff;refresh()" class="${C.ghost} ${S.diff?'bg-slate-100 dark:bg-slate-800':''}">${icon('diff','w-4 h-4')}Diff</button>
+          ${n?`<button onclick="delete S.edits['${file}'];S.pending.clear();refresh()" class="${C.ghost}">Descartar</button>`:''}
+          <button id="save-btn" onclick="saveFile()" class="${C.btn} py-1.5 px-3">${icon('save','w-4 h-4')}Guardar</button>
+        </div>
+      </div>
+      ${S.diff ? `
+      <div class="grid md:grid-cols-2 gap-px bg-slate-200 dark:bg-slate-800 rounded-b-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+        <div class="bg-white dark:bg-[#0b1120]"><p class="px-4 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 border-b border-slate-200 dark:border-slate-800">Original</p><div class="overflow-x-auto scroll-thin font-mono text-[12.5px] leading-6 py-2">${codeLines(file,'orig')}</div></div>
+        <div class="bg-white dark:bg-[#0b1120]"><p class="px-4 py-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 border-b border-slate-200 dark:border-slate-800">Propuesta ${n?`· ${n} línea(s)`:'· sin cambios'}</p><div class="overflow-x-auto scroll-thin font-mono text-[12.5px] leading-6 py-2">${codeLines(file,'new')}</div></div>
+      </div>` : `
+      <div class="${panel} rounded-t-none"><div class="overflow-x-auto scroll-thin font-mono text-[12.5px] leading-6 py-2">${codeLines(file,'edit')}</div></div>`}
+      <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400 px-1"><span>Python 3.12</span><span>UTF-8</span><span>Respaldo automático antes de guardar</span><span class="sm:ml-auto">Haz clic en una línea para editarla · en la versión final: Monaco</span></div>
+    </section>
+  </div>`;
+};
+
+/* =========================================================
+   Página: Asistente
+   ========================================================= */
+const ANSWERS = [
+  {k:/auth|secret|clave|b105|jwt/i, html:'El hallazgo <b>B105</b> en <code>auth.py:42</code> indica que <code>SECRET_KEY</code> está escrita en el código. Cualquiera con acceso al repositorio podría firmar tokens válidos.<br><br>Recomendación: leerla con <code>os.environ["SECRET_KEY"]</code> y rotar la clave actual. Hay una corrección automática disponible.', src:[['auth.py',42],['auth.py',43]], act:[1,'Aplicar fix']},
+  {k:/sql|inyecc|b608|api\.py/i, html:'En <code>api.py:17</code> la consulta se construye concatenando el parámetro <code>cliente</code>, que viene de la URL. Un valor como <code>\' OR 1=1 --</code> devolvería todos los pagos.<br><br>Usa un marcador <code>?</code> y pasa el valor como parámetro de <code>execute</code>.', src:[['api.py',17],['api.py',18]], act:[2,'Aplicar fix']},
+  {k:/cobertura|coverage|prueba|test/i, html:'Los archivos con menor cobertura son:<br>• <code>pagos/reembolsos.py</code> — 31 %<br>• <code>pagos/procesador.py</code> — 69 %<br><br>Además <code>test_crear_pago_invalido</code> falla porque espera 400 y la API responde 422. Empezaría por reembolsos: maneja dinero y casi no tiene pruebas.', src:[['pagos/reembolsos.py',1],['tests/test_api.py',58]]},
+  {k:/procesar|complej|radon|lote/i, html:'<code>procesar_lote()</code> tiene complejidad 24 (grado D): mezcla validación, agrupación por moneda y cobro en un solo bloque con muchos <code>if</code> anidados.<br><br>Propuesta: extraer <code>validar_pago()</code>, <code>agrupar_por_moneda()</code> y <code>cobrar_grupo()</code>. Cada una quedaría por debajo de 8.', src:[['pagos/procesador.py',88]]}
+];
+const SUGGEST = ['¿Por qué auth.py tiene severidad alta?','¿Qué archivos tienen menos cobertura?','Explícame la inyección SQL en api.py','¿Cómo simplifico procesar_lote()?'];
+function scrollChat(){ const el=$('#chatbox'); if(el) el.scrollTop=el.scrollHeight; }
+function ask(q){
+  q = (q||'').trim(); if(!q || S.typing) return;
+  S.chat.push({role:'me',html:esc(q)}); S.typing=true; refresh();
+  setTimeout(()=>{
+    const a = ANSWERS.find(x=>x.k.test(q));
+    S.chat.push(a ? {role:'ai',html:a.html,src:a.src,act:a.act} : {role:'ai',html:'En este prototipo las respuestas son de ejemplo. En la versión real, IA voy busca los fragmentos más relevantes del repositorio en ChromaDB, arma el prompt con ellos y responde con Gemini (o Groq si se agota la cuota), citando siempre archivo y línea.',src:[['README.md',1]]});
+    S.typing=false; if(route()==='chat') refresh();
+  }, 1100);
+}
+function askAbout(id){ const f=FINDINGS.find(x=>x.id===id); closeOverlay(); go('chat'); setTimeout(()=>ask(`Explícame el hallazgo ${f.rule} en ${f.file}:${f.line}`),100); }
+PAGES.chat = () => `
+  <div class="grid lg:grid-cols-[1fr_18rem] gap-4 h-[calc(100vh-8.5rem)] min-h-[520px]">
+    <section class="${C.card} flex flex-col overflow-hidden min-h-0">
+      <div class="px-4 sm:px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
+        <span class="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 to-fuchsia-500 text-white grid place-items-center">${icon('sparkle','w-4 h-4')}</span>
+        <div class="min-w-0"><p class="font-semibold text-sm">Asistente de código</p><p class="text-xs text-slate-400 truncate">equipo/api-pagos · reporte #128</p></div>
+        <span class="ml-auto ${C.chip} bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/30"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Gemini 2.5 Flash</span>
+      </div>
+      <div id="chatbox" class="flex-1 overflow-y-auto scroll-thin p-4 sm:p-5 space-y-4">
+        ${S.chat.map(m=> m.role==='me' ? `<div class="flex justify-end"><div class="max-w-[85%] rounded-2xl rounded-br-md bg-brand-600 text-white px-4 py-2.5 text-sm">${m.html}</div></div>`
+          : `<div class="flex gap-3"><span class="w-7 h-7 shrink-0 rounded-lg bg-brand-100 dark:bg-brand-500/15 text-brand-600 dark:text-brand-300 grid place-items-center">${icon('sparkle','w-3.5 h-3.5')}</span><div class="max-w-[85%] min-w-0"><div class="rounded-2xl rounded-tl-md bg-slate-100 dark:bg-slate-800 px-4 py-3 text-sm leading-relaxed [&_code]:font-mono [&_code]:text-[12px] [&_code]:bg-white [&_code]:dark:bg-slate-900 [&_code]:px-1 [&_code]:rounded">${m.html}</div>
+            ${(m.src&&m.src.length)||m.act?`<div class="flex flex-wrap items-center gap-1.5 mt-2">${(m.src||[]).map(([f,l])=>`<button onclick="openSource('${f}',${l})" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-[11px] font-mono hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300 transition">${icon('file','w-3 h-3')}${f}:${l}</button>`).join('')}${m.act&&!S.resolved.has(m.act[0])?`<button onclick="applyFix(${m.act[0]})" class="inline-flex items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-700 text-white px-2 py-1 text-[11px] font-semibold">${icon('wand','w-3 h-3')}${m.act[1]}</button>`:''}</div>`:''}</div></div>`).join('')}
+        ${S.typing?`<div class="flex gap-3"><span class="w-7 h-7 rounded-lg bg-brand-100 dark:bg-brand-500/15 text-brand-600 grid place-items-center">${icon('sparkle','w-3.5 h-3.5')}</span><div class="rounded-2xl bg-slate-100 dark:bg-slate-800 px-4 py-3 dot-typing text-lg leading-none text-slate-400"><span>●</span><span>●</span><span>●</span></div></div>`:''}
+      </div>
+      <div class="p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800">
+        <div class="flex gap-2 overflow-x-auto scroll-thin pb-2 lg:hidden">${SUGGEST.map(s=>`<button onclick="ask('${s}')" class="shrink-0 rounded-full border border-slate-200 dark:border-slate-700 px-3 py-1 text-xs hover:border-brand-400">${s}</button>`).join('')}</div>
+        <form onsubmit="event.preventDefault();ask(this.q.value)" class="flex gap-2"><input name="q" autocomplete="off" placeholder="Pregunta sobre el código o un hallazgo…" class="${C.input}"><button class="${C.btn} px-3.5" aria-label="Enviar">${icon('send','w-4 h-4')}</button></form>
+      </div>
+    </section>
+    <aside class="hidden lg:flex flex-col gap-4">
+      <div class="${C.card} p-5"><h2 class="font-semibold text-sm mb-3">Contexto indexado</h2>
+        <dl class="grid grid-cols-2 gap-3">${[['48','archivos .py'],['612','fragmentos'],['1','README'],['#128','reporte']].map(([a,b])=>`<div class="rounded-xl bg-slate-50 dark:bg-slate-950 p-3"><dt class="text-lg font-bold">${a}</dt><dd class="text-xs text-slate-500">${b}</dd></div>`).join('')}</dl>
+        <p class="text-xs text-slate-400 mt-3">Respaldo: Groq Llama 3.3 si Gemini responde 429.</p></div>
+      <div class="${C.card} p-5"><h2 class="font-semibold text-sm mb-3">Prueba preguntar</h2><div class="space-y-2">${SUGGEST.map(s=>`<button onclick="ask('${s}')" class="w-full text-left rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm hover:border-brand-400 hover:bg-brand-50/50 dark:hover:bg-brand-500/5 transition">${s}</button>`).join('')}</div></div>
+    </aside>
+  </div>`;
+
+/* =========================================================
+   Página: Comparativa
+   ========================================================= */
+PAGES.comparar = () => {
+  const r=repo('r1'), d=series(r), A={g:d.global[d.n-2],seg:r.hist.seg[5],test:r.hist.test[5],prac:r.hist.prac[5]}, B={g:score(r),seg:r.seg,test:r.test,prac:r.prac};
+  const nuevos = FINDINGS.filter(f=>[2,3,7].includes(f.id)), resueltos=[['B201','app.py:12','Flask con debug=True en producción','seg'],['F841','pagos/procesador.py:40','Variable asignada y nunca usada','prac']];
+  return `
+  <div class="mb-6"><h1 class="${C.h1}">Comparativa</h1><p class="${C.sub} mt-1">Diferencias entre dos análisis del mismo repositorio, o entre ramas.</p></div>
+  <section class="${C.card} p-5 grid sm:grid-cols-[1fr_auto_1fr] gap-3 items-end">
+    <div><label class="${C.label}">Base (A)</label><select class="${C.input}"><option>#127 · 06 oct · main</option><option>#120 · 29 sep · main</option><option>develop · último</option></select></div>
+    <span class="hidden sm:grid w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 place-items-center text-slate-400 mb-0.5">${icon('arrow','w-4 h-4')}</span>
+    <div><label class="${C.label}">Comparar con (B)</label><select class="${C.input}"><option>#128 · 13 oct · main</option><option>feature/reembolsos · último</option></select></div>
+  </section>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+    ${[['g','Global',BRAND],['seg',CAT.seg.label,CAT.seg.hex],['test',CAT.test.label,CAT.test.hex],['prac',CAT.prac.label,CAT.prac.hex]].map(([k,l,c])=>`<div class="${C.card} p-5"><p class="text-sm font-medium flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${c}"></span>${l}</p>
+      <div class="flex items-baseline gap-2 mt-2"><span class="text-slate-400 tabular-nums">${f1(A[k])}</span><span class="text-slate-300">→</span><span class="text-2xl font-bold tabular-nums ${TONE[tone(B[k])].text}">${f1(B[k])}</span><span class="ml-auto">${deltaBadge(B[k]-A[k])}</span></div>
+      <div class="mt-3 space-y-1.5"><div class="flex items-center gap-2 text-[11px] text-slate-400"><span class="w-3">A</span><div class="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800"><div class="h-full rounded-full bg-slate-300 dark:bg-slate-600" style="width:${A[k]}%"></div></div></div><div class="flex items-center gap-2 text-[11px] text-slate-400"><span class="w-3">B</span><div class="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800"><div class="h-full rounded-full" style="width:${B[k]}%;background:${c}"></div></div></div></div></div>`).join('')}
+  </div>
+  <div class="grid lg:grid-cols-2 gap-4 mt-4">
+    <section class="${C.card} overflow-hidden"><div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400 grid place-items-center">${icon('plus','w-4 h-4')}</span><h2 class="font-semibold">Nuevos en B</h2><span class="ml-auto text-sm text-slate-400">${nuevos.length}</span></div>
+      <div class="divide-y divide-slate-100 dark:divide-slate-800">${nuevos.map(f=>`<button onclick="openFinding(${f.id})" class="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/40">${sevBadge(f.sev)}<div class="min-w-0"><p class="text-sm font-medium truncate">${f.msg}</p><p class="text-xs font-mono text-slate-400">${f.file}:${f.line}</p></div></button>`).join('')}</div></section>
+    <section class="${C.card} overflow-hidden"><div class="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400 grid place-items-center">${icon('check','w-4 h-4')}</span><h2 class="font-semibold">Resueltos en B</h2><span class="ml-auto text-sm text-slate-400">${resueltos.length}</span></div>
+      <div class="divide-y divide-slate-100 dark:divide-slate-800">${resueltos.map(([rule,loc,msg,c])=>`<div class="px-5 py-3 flex items-center gap-3">${catChip(c)}<div class="min-w-0"><p class="text-sm font-medium truncate line-through decoration-emerald-500/60">${msg}</p><p class="text-xs font-mono text-slate-400">${loc} · ${rule}</p></div></div>`).join('')}</div></section>
+  </div>`;
+};
+
+/* =========================================================
+   Página: Configuración
+   ========================================================= */
+function toml(){ const w=S.weights, s=wsum(); return `# .ia_voy.toml
+[pesos]
+seguridad = ${(w.seg/s).toFixed(2)}
+pruebas   = ${(w.test/s).toFixed(2)}
+practicas = ${(w.prac/s).toFixed(2)}
+
+[umbrales]
+score_minimo     = ${S.thr.score}
+cobertura_minima = ${S.thr.cov}
+
+[reglas]
+ignorar = [${S.ignored.map(x=>`"${x}"`).join(', ')}]
+
+[rutas]
+excluir = [${S.excluded.map(x=>`"${x}"`).join(', ')}]`; }
+function updateWeights(k, v){
+  S.weights[k]=+v; $('#wv-'+k).textContent=v+'%';
+  const s=S.weights.seg+S.weights.test+S.weights.prac, el=$('#wsum');
+  el.textContent = `Suma: ${s}%`; el.className = 'text-xs font-semibold '+(s===100?'text-emerald-600 dark:text-emerald-400':'text-amber-600 dark:text-amber-400');
+  $('#wnote').classList.toggle('hidden', s===100);
+  $('#wprev').textContent = f1(score(repo('r1'))); $('#toml').textContent = toml();
+}
+function addChip(list, inp){ const v=inp.value.trim(); if(v && !S[list].includes(v)){ S[list].push(v); refresh(); } }
+function removeChip(list, i){ S[list].splice(i,1); refresh(); }
+function chipList(list, ph){ return `<div class="flex flex-wrap gap-2 mb-3">${S[list].map((x,i)=>`<span class="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 pl-2.5 pr-1 py-1 text-xs font-mono">${esc(x)}<button onclick="removeChip('${list}',${i})" class="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400" aria-label="Quitar">${icon('x','w-3 h-3')}</button></span>`).join('') || '<span class="text-xs text-slate-400">Ninguna</span>'}</div>
+  <form onsubmit="event.preventDefault();addChip('${list}',this.v)" class="flex gap-2"><input name="v" placeholder="${ph}" class="${C.input} py-2 font-mono text-xs"><button class="${C.btn2} py-2 shrink-0">Agregar</button></form>`; }
+PAGES.config = () => `
+  <div class="mb-6"><h1 class="${C.h1}">Configuración</h1><p class="${C.sub} mt-1">Ajustes del proyecto <b>equipo/api-pagos</b>. Se guardan en <code class="font-mono">.ia_voy.toml</code>.</p></div>
+  <div class="grid lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2 space-y-4">
+      <section class="${C.card} p-5 sm:p-6">
+        <div class="flex items-center justify-between mb-1"><h2 class="font-semibold">Pesos del score</h2><span id="wsum" class="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Suma: ${wsum()}%</span></div>
+        <p class="${C.sub} mb-5">Cuánto aporta cada categoría al score global.</p>
+        <div class="space-y-5">${['seg','test','prac'].map(k=>`<div><div class="flex items-center gap-2 mb-2"><span class="w-7 h-7 rounded-lg grid place-items-center ${CAT[k].soft}">${icon(CAT[k].icon,'w-4 h-4')}</span><span class="text-sm font-medium">${CAT[k].label}</span><span id="wv-${k}" class="ml-auto font-mono text-sm font-semibold">${S.weights[k]}%</span></div><input type="range" min="0" max="100" step="5" value="${S.weights[k]}" oninput="updateWeights('${k}',this.value)" class="w-full"></div>`).join('')}</div>
+        <p id="wnote" class="${wsum()===100?'hidden':''} mt-4 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 rounded-lg p-3">Los pesos no suman 100 %; se normalizarán automáticamente al calcular.</p>
+        <div class="mt-4 rounded-xl bg-slate-50 dark:bg-slate-950 p-3 text-sm flex items-center justify-between"><span class="text-slate-500">Score de api-pagos con estos pesos</span><b id="wprev" class="tabular-nums">${f1(score(repo('r1')))}</b></div>
+      </section>
+      <section class="${C.card} p-5 sm:p-6"><h2 class="font-semibold mb-4">Umbrales mínimos</h2>
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div><label class="${C.label}">Score global mínimo</label><input type="number" min="0" max="100" value="${S.thr.score}" onchange="S.thr.score=+this.value;$('#toml').textContent=toml()" class="${C.input}"><p class="text-xs text-slate-400 mt-1">Por debajo, el reporte se marca en rojo.</p></div>
+          <div><label class="${C.label}">Cobertura mínima (%)</label><input type="number" min="0" max="100" value="${S.thr.cov}" onchange="S.thr.cov=+this.value;$('#toml').textContent=toml()" class="${C.input}"><p class="text-xs text-slate-400 mt-1">Archivos por debajo generan un hallazgo.</p></div>
+        </div></section>
+      <section class="grid sm:grid-cols-2 gap-4">
+        <div class="${C.card} p-5"><h2 class="font-semibold mb-1">Reglas ignoradas</h2><p class="${C.sub} mb-3">Códigos de Bandit o Ruff.</p>${chipList('ignored','p. ej. E501')}</div>
+        <div class="${C.card} p-5"><h2 class="font-semibold mb-1">Rutas excluidas</h2><p class="${C.sub} mb-3">No se analizan.</p>${chipList('excluded','p. ej. scripts/')}</div>
+      </section>
+    </div>
+    <div class="space-y-4">
+      <section class="${C.card} p-5"><h2 class="font-semibold mb-4">Servicios</h2>
+        <div class="space-y-3">${[['Gemini 2.5 Flash','Modelo principal','emerald','Operativo'],['Groq · Llama 3.3','Respaldo ante 429','slate','En espera'],['Cloudflare Tunnel','ia-voy.trycloudflare.com','emerald','Activo'],['Sandbox WSL2','Ejecución aislada','emerald','Listo']].map(([a,b,c,s])=>`<div class="flex items-center gap-3"><span class="w-2 h-2 rounded-full ${c==='emerald'?'bg-emerald-500':'bg-slate-400'}"></span><div class="flex-1 min-w-0"><p class="text-sm font-medium">${a}</p><p class="text-xs text-slate-400 truncate">${b}</p></div><span class="text-xs ${c==='emerald'?'text-emerald-600 dark:text-emerald-400':'text-slate-400'}">${s}</span></div>`).join('')}</div></section>
+      <section class="rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden"><div class="px-4 py-2.5 border-b border-slate-800 flex items-center justify-between"><span class="text-xs font-mono text-slate-400">.ia_voy.toml</span><span class="text-[10px] text-slate-500">vista previa en vivo</span></div><pre id="toml" class="p-4 text-xs font-mono text-slate-300 overflow-x-auto scroll-thin leading-relaxed">${toml()}</pre></section>
+      <button onclick="toast('Configuración guardada')" class="${C.btn} w-full">${icon('save','w-4 h-4')}Guardar configuración</button>
+    </div>
+  </div>`;
+
+/* =========================================================
+   Login y vista pública
+   ========================================================= */
+function pLogin(){ return `
+  <div class="min-h-screen grid lg:grid-cols-2">
+    <div class="hidden lg:flex relative overflow-hidden bg-gradient-to-br from-brand-600 via-brand-700 to-fuchsia-700 text-white p-12 flex-col justify-between">
+      <div class="absolute -left-20 -bottom-20 w-96 h-96 rounded-full bg-fuchsia-400/30 blur-3xl"></div><div class="absolute right-0 top-10 w-72 h-72 rounded-full bg-white/10 blur-3xl"></div>
+      <div class="relative flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-white/15 grid place-items-center font-extrabold">IA</div><span class="text-xl font-bold">IA voy</span></div>
+      <div class="relative"><h2 class="text-4xl font-extrabold tracking-tight leading-tight">Calidad de código Python,<br>medida y explicada.</h2>
+        <div class="mt-8 space-y-3">${['seg','test','prac'].map(k=>`<div class="flex items-center gap-3 rounded-2xl bg-white/10 backdrop-blur px-4 py-3"><span class="w-9 h-9 rounded-xl bg-white/15 grid place-items-center">${icon(CAT[k].icon,'w-4 h-4')}</span><div><p class="font-semibold text-sm">${CAT[k].label}</p><p class="text-xs text-white/70">${CAT[k].tools}</p></div></div>`).join('')}</div></div>
+      <p class="relative text-xs text-white/60">Proyecto académico · 2026</p>
+    </div>
+    <div class="flex items-center justify-center p-6 relative">
+      <button onclick="toggleTheme()" class="absolute top-4 right-4 p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"><span class="dark:hidden">${icon('moon')}</span><span class="hidden dark:inline">${icon('sun')}</span></button>
+      <form onsubmit="event.preventDefault();go('dashboard');setTimeout(()=>toast('Bienvenida de nuevo, Ana'),150)" class="w-full max-w-sm fade-in">
+        <div class="lg:hidden flex items-center gap-3 mb-8"><div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-fuchsia-500 text-white grid place-items-center font-extrabold text-sm">IA</div><span class="text-xl font-bold">IA voy</span></div>
+        <h1 class="text-2xl font-bold tracking-tight">Inicia sesión</h1><p class="${C.sub} mt-1 mb-8">Acceso solo para miembros del equipo.</p>
+        <div class="space-y-4">
+          <div><label class="${C.label}" for="l-e">Correo</label><input id="l-e" type="email" required value="ana@equipo.dev" class="${C.input}"></div>
+          <div><div class="flex justify-between"><label class="${C.label}" for="l-p">Contraseña</label><button type="button" onclick="toast('Pide a quien administra el equipo que restablezca tu acceso',{tone:'info'})" class="text-xs text-brand-600 dark:text-brand-300 hover:underline">¿La olvidaste?</button></div><input id="l-p" type="password" required value="demo1234" class="${C.input}"></div>
+          <label class="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400"><input type="checkbox" checked class="w-4 h-4 accent-brand-600">Mantener sesión iniciada</label>
+          <button class="${C.btn} w-full py-3">Entrar ${icon('arrow','w-4 h-4')}</button>
+        </div>
+        <p class="mt-8 text-xs text-center text-slate-400">¿Solo quieres ver un reporte compartido? <button type="button" onclick="go('compartido')" class="text-brand-600 dark:text-brand-300 hover:underline">Ábrelo aquí</button></p>
+      </form>
+    </div>
+  </div>`; }
+function unlockShared(v){ if(!S.share.password || v===S.share.password){ S.unlocked=true; render(); } else toast('Contraseña incorrecta',{tone:'err'}); }
+function pShared(){
+  const r=repo('r1'), sc=score(r), back=`<button onclick="go('reporte')" class="fixed bottom-4 left-4 z-50 inline-flex items-center gap-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold px-3 py-2 shadow-xl">${icon('arrow','w-3.5 h-3.5 rotate-180')}Volver al prototipo</button>`;
+  const head = `<header class="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"><div class="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-3"><div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-fuchsia-500 text-white grid place-items-center font-extrabold text-xs">IA</div><span class="font-bold">IA voy</span><span class="${C.chip} bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700 ml-1">${icon('eye','w-3 h-3')}Solo lectura</span><button onclick="toggleTheme()" class="ml-auto p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"><span class="dark:hidden">${icon('moon')}</span><span class="hidden dark:inline">${icon('sun')}</span></button></div></header>`;
+  if (S.share.pwd && !S.unlocked) return `${head}<div class="min-h-[70vh] grid place-items-center p-6"><form onsubmit="event.preventDefault();unlockShared(this.p.value)" class="${C.card} p-6 sm:p-8 w-full max-w-sm text-center fade-in"><span class="mx-auto w-12 h-12 rounded-2xl bg-brand-100 dark:bg-brand-500/15 text-brand-600 dark:text-brand-300 grid place-items-center">${icon('lock')}</span><h1 class="text-lg font-semibold mt-4">Reporte protegido</h1><p class="${C.sub} mt-1 mb-5">Escribe la contraseña que te compartieron.</p><input name="p" type="password" autofocus class="${C.input} text-center" placeholder="Contraseña"><button class="${C.btn} w-full mt-3">Ver reporte</button></form></div>${back}`;
+  return `${head}
+  <main class="max-w-4xl mx-auto px-4 sm:px-6 py-8 fade-in">
+    <div class="rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-2.5 text-xs sm:text-sm text-amber-800 dark:text-amber-200 flex items-center gap-2 mb-6">${icon('clock','w-4 h-4 shrink-0')}Este enlace ${S.share.exp==='0'?'no expira':`expira en ${S.share.exp} día(s)`} · compartido por Ana López</div>
+    <section class="${C.card} p-6 flex flex-col sm:flex-row items-center gap-6 text-center sm:text-left">${ring(sc,120,10)}<div class="flex-1"><p class="${C.sub}">Reporte de calidad</p><h1 class="text-2xl font-bold tracking-tight">${r.name}</h1><p class="text-sm text-slate-500 mt-1">Rama ${r.branch} · commit <span class="font-mono">${r.commit}</span> · 13 oct 2026</p></div></section>
+    <div class="grid sm:grid-cols-3 gap-3 mt-4">${['seg','test','prac'].map(k=>`<div class="${C.card} p-4"><div class="flex items-center gap-2"><span class="w-8 h-8 rounded-lg grid place-items-center ${CAT[k].soft}">${icon(CAT[k].icon,'w-4 h-4')}</span><span class="text-sm font-medium">${CAT[k].label}</span><span class="ml-auto text-xl font-bold ${TONE[tone(r[k])].text}">${r[k]}</span></div><div class="mt-3">${bar(r[k],CAT[k].bar)}</div></div>`).join('')}</div>
+    <section class="${C.card} mt-4 overflow-hidden"><div class="p-5 border-b border-slate-200 dark:border-slate-800"><h2 class="font-semibold">Hallazgos principales</h2></div>
+      <div class="divide-y divide-slate-100 dark:divide-slate-800">${FINDINGS.filter(f=>f.sev!=='baja').map(f=>`<div class="px-5 py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4"><div class="flex items-center gap-2 sm:w-36 shrink-0">${sevBadge(f.sev)}<span class="font-mono text-xs text-slate-500">${f.rule}</span></div><div class="flex-1 min-w-0"><p class="text-sm font-medium">${f.msg}</p><p class="text-xs font-mono text-slate-400">${f.file}:${f.line}</p></div>${catChip(f.cat)}</div>`).join('')}</div></section>
+    <p class="text-center text-xs text-slate-400 mt-8">Generado con IA voy · los fragmentos de código ${S.share.code?'están incluidos':'no se incluyen en enlaces públicos'}</p>
+  </main>${back}`;
+}
+
+/* =========================================================
+   Búsqueda global e inicio
+   ========================================================= */
+function globalSearch(v){ S.filters={q:v,sev:'todas',cat:'todas'}; S.tab='hallazgos'; $('#gsearch').value=''; go('reporte'); }
+hydrateIcons();
+if (!location.hash) history.replaceState(null,'','#/flujo');
+render();
+</script>
+</body>
+</html>
