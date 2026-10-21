@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     secret_key: str = ""
     token_encryption_key: str = ""
     database_path: str = "data/ia_voy.db"
+    # Carpeta de los repos clonados. Vacía = fuera del proyecto (ver app.analysis.clone.clones_root):
+    # dentro de OneDrive/Dropbox la sincronización bloquea los archivos recién clonados.
+    clones_path: str = ""
+    # API de IA (Gemini): diagnóstico de un archivo (app.diagnostico)
+    gemini_api_key: str = ""
+    # gemini-2.5-flash ya no está disponible para claves nuevas
+    gemini_model: str = "gemini-3.8-flash"
 
 
 def with_generated_secrets(settings: Settings) -> Settings:

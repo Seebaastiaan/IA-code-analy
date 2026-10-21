@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+
+/* Dark mode por clase en <html> (lo controla ThemeProvider) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-brand-50: #f0f0ff;
+  --color-brand-100: #e3e2ff;
+  --color-brand-200: #cbc9ff;
+  --color-brand-300: #a9a4fd;
+  --color-brand-400: #8a7ff8;
+  --color-brand-500: #7060f1;
+  --color-brand-600: #5f45e4;
+  --color-brand-700: #5037c9;
+  --color-brand-800: #422fa3;
+  --color-brand-900: #382c81;
+
+  --animate-fade-in: fade-in 0.22s ease-out;
+  --animate-slide-in: slide-in 0.25s ease-out;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes slide-in {
+    from { transform: translateX(100%); }
+    to { transform: none; }
+  }
+}
+
+/*
+ * Paleta del modo oscuro. En lugar de usar clases distintas, se reemplaza la escala `slate` solo
+ * cuando <html> tiene la clase .dark: todos los `dark:bg-slate-900`, `text-slate-400`, etc. toman
+ * estos valores. Igual que en el modo claro hay tres niveles de superficie bien separados
+ * (fondo 950 < tarjeta 900 < hover/chip 800) y bordes suaves, sin negro puro ni blanco puro.
+ *
+ * Predeterminada: "Pizarra" (inspirada en GitHub Dark Dimmed), el mismo gris azulado del modo claro
+ * pero apagado. Alternativas para comparar con <html data-palette="grafito|nocturno">.
+ */
+html.dark {
+  --color-slate-50: #f6f8fa;
+  --color-slate-100: #e6edf3;
+  --color-slate-200: #cdd9e5;
+  --color-slate-300: #adbac7;
+  --color-slate-400: #909dab;
+  --color-slate-500: #768390;
+  --color-slate-600: #545d68;
+  --color-slate-700: #3d444d;
+  --color-slate-800: #2d333b;
+  --color-slate-900: #22272e;
+  --color-slate-950: #1c2128;
+}
+
+/* Grafito: neutro con un leve tinte violeta de la marca (estilo Linear/Raycast) */
+html.dark[data-palette='grafito'] {
+  --color-slate-50: #f7f7fa;
+  --color-slate-100: #ededf2;
+  --color-slate-200: #dcdce4;
+  --color-slate-300: #c0c0cd;
+  --color-slate-400: #9a9aab;
+  --color-slate-500: #73738a;
+  --color-slate-600: #4f4f61;
+  --color-slate-700: #363645;
+  --color-slate-800: #272733;
+  --color-slate-900: #1c1c25;
+  --color-slate-950: #15151c;
+}
+
+/* Nocturno: índigo suave (inspirado en Catppuccin Mocha) */
+html.dark[data-palette='nocturno'] {
+  --color-slate-50: #f5f6fd;
+  --color-slate-100: #e6e9f8;
+  --color-slate-200: #cdd6f4;
+  --color-slate-300: #bac2de;
+  --color-slate-400: #9399b2;
+  --color-slate-500: #7f849c;
+  --color-slate-600: #585b70;
+  --color-slate-700: #45475a;
+  --color-slate-800: #313244;
+  --color-slate-900: #1e1e2e;
+  --color-slate-950: #181825;
+}
+
+@layer base {
+  html, body { background: var(--color-slate-50); }
+  html.dark, html.dark body { background: var(--color-slate-950); }
+  body {
+    @apply min-h-screen bg-slate-50 font-sans text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-200;
+  }
+  input[type='range'] { accent-color: var(--color-brand-600); }
+  button:not(:disabled) { cursor: pointer; }
+}
+
+@utility scroll-thin {
+  &::-webkit-scrollbar { width: 8px; height: 8px; }
+  &::-webkit-scrollbar-thumb { background: var(--color-slate-300); border-radius: 8px; }
+  .dark &::-webkit-scrollbar-thumb { background: var(--color-slate-700); }
+}
+
+/* Resaltado de sintaxis Python (snippets fuera de Monaco) */
+.tok-k { color: #7c3aed; font-weight: 500; }
+.tok-s { color: #047857; }
+.tok-c { color: #94a3b8; font-style: italic; }
+.tok-n { color: #c2410c; }
+.dark .tok-k { color: #c4b5fd; }
+.dark .tok-s { color: #6ee7b7; }
+.dark .tok-c { color: #64748b; }
+.dark .tok-n { color: #fdba74; }
+
+/* Indicador "escribiendo…" del asistente */
+.dot-typing span { animation: blink 1.2s infinite both; }
+.dot-typing span:nth-child(2) { animation-delay: 0.2s; }
+.dot-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+/* Marcas de hallazgos en Monaco (línea completa + punto en el margen) */
+.iv-line-alta { background: rgb(244 63 94 / 0.09); }
+.iv-line-media { background: rgb(245 158 11 / 0.09); }
+.iv-line-baja { background: rgb(100 116 139 / 0.08); }
+.iv-glyph-alta, .iv-glyph-media, .iv-glyph-baja { border-radius: 9999px; width: 8px !important; height: 8px !important; margin: 7px 0 0 6px; }
+.iv-glyph-alta { background: #f43f5e; }
+.iv-glyph-media { background: #f59e0b; }
+.iv-glyph-baja { background: #94a3b8; }
