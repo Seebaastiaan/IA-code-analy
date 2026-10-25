@@ -76,6 +76,14 @@ def test_ruta_wsl():
     assert _wsl_path(Path("C:/Users/ana/repo")) == "/mnt/c/Users/ana/repo"
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16", "utf-8"])
+def test_error_del_lanzador_legible(tmp_path, encoding):
+    """wsl.exe escribe en UTF-16: el motivo (p. ej. distro no encontrada) debe llegar a la terminal."""
+    log = tmp_path / "launcher.log"
+    log.write_bytes("There is no distribution with the supplied name.\r\nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\r\n".encode(encoding))
+    assert sandbox._read_launcher(log).splitlines()[-1] == "Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND"
+
+
 def test_parse_audit_sin_duplicados():
     [v] = parse_audit(AUDIT)
     assert (v.package, v.version, v.ids, v.fix_versions) == ("requests", "2.25.1", ["PYSEC-1", "GHSA-2"], ["2.31.0", "2.32.0"])

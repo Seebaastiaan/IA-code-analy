@@ -104,6 +104,20 @@ def _tail(text: str) -> str:
     return "\n".join(text.strip().splitlines()[-LOG_TAIL_LINES:])
 
 
+def _read_launcher(path: Path) -> str:
+    """Salida de wsl.exe / docker. wsl.exe escribe sus propios errores en UTF-16 (sin BOM) si no hay WSL_UTF8=1."""
+    if not path.is_file():
+        return ""
+    data = path.read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = data.decode("utf-16", errors="replace")
+    elif data.count(b"\x00") > len(data) // 4:
+        text = data.decode("utf-16-le", errors="replace")
+    else:
+        text = data.decode("utf-8", errors="replace")
+    return text.replace("\x00", "").strip()
+
+
 def _wsl_path(path: Path) -> str:
     """C:\\Users\\ana\\x → /mnt/c/Users/ana/x (las unidades de Windows dentro de WSL)."""
     # Una ruta que ya trae unidad se traduce tal cual (en Linux o macOS resolve() la volvería relativa al cwd)
@@ -166,7 +180,7 @@ class SandboxRun:
                 return result
             if self.proc.poll() is not None:
                 # Terminó sin llegar a esta fase: lo que dijo el lanzador explica por qué
-                launcher = (self.out / "launcher.log").read_text(encoding="utf-8", errors="replace").strip() if (self.out / "launcher.log").is_file() else ""
+                launcher = _read_launcher(self.out / "launcher.log")
                 return self._read(name) or PhaseResult(name, None, launcher[-600:] or "El sandbox terminó antes de esta fase")
             if time.monotonic() > self.deadline:
                 self.stop()
@@ -230,6 +244,8 @@ def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | No
     (out / "sandbox.sh").write_text(SCRIPT, encoding="utf-8", newline="\n")
     # Entorno mínimo: el sandbox no hereda las claves del backend (.env ya cargado en os.environ)
     env = {k: v for k, v in os.environ.items() if k.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "LOCALAPPDATA", "PROGRAMDATA", "DOCKER_HOST"}}
+    # Que wsl.exe escriba sus errores (p. ej. distro no encontrada) en UTF-8 y no en UTF-16
+    env["WSL_UTF8"] = "1"
     try:
         with open(out / "launcher.log", "wb") as launcher:
             proc = subprocess.Popen(_command(settings, clone_dir(settings, repo_id), out, name), stdin=subprocess.DEVNULL, stdout=launcher, stderr=subprocess.STDOUT, env=env, creationflags=_NO_WINDOW)
