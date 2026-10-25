@@ -1,6 +1,6 @@
 """
 Copia de trabajo de un repo analizado: el clon de app.analysis.clone (`CLONES_PATH/{repo_id}/`). La crea
-el job al clonar; los analizadores y los fragmentos de código del reporte la leen. Toda ruta pasa por `resolve`.
+el job al clonar; la pantalla Archivos la lee (solo lectura). Toda ruta que llega del navegador pasa por `resolve`.
 """
 
 import os
@@ -53,20 +53,13 @@ class Workspace:
         if not full.is_file():
             raise not_found(path)
         if full.stat().st_size > MAX_FILE_BYTES:
-            raise ApiError(413, "file_too_large", "El archivo es demasiado grande para el editor (máx. 1 MB)")
+            raise ApiError(413, "file_too_large", "El archivo es demasiado grande para mostrarlo (máx. 1 MB)")
         try:
             # newline="" conserva los saltos de línea tal cual (\r\n incluidos)
             with open(full, encoding="utf-8", newline="") as fh:
                 return fh.read()
         except UnicodeDecodeError as exc:
             raise ApiError(415, "binary_file", "El archivo no es texto UTF-8") from exc
-
-    def read_lines(self, path: str) -> list[str] | None:
-        """Líneas del archivo o None si no se puede leer (para fragmentos de código)."""
-        try:
-            return self.read(path).split("\n")
-        except ApiError:
-            return None
 
     def list_files(self, excluded: list[str]) -> list[str]:
         """Archivos de texto del repo (rutas posix), sin carpetas ocultas, entornos ni rutas excluidas."""
@@ -92,10 +85,3 @@ def is_excluded(path: str, excluded: list[str]) -> bool:
     """Si `path` es una ruta excluida o está dentro de una carpeta excluida."""
     return any(path == e.strip("/") or path.startswith(e.strip("/") + "/") for e in excluded if e.strip("/"))
 
-
-def snippet(lines: list[str] | None, line: int, radius: int = 2) -> list[dict] | None:
-    """±`radius` líneas alrededor de `line` (1-based), en el formato de `SnippetLine` del frontend."""
-    if not lines or not 1 <= line <= len(lines):
-        return None
-    start, end = max(1, line - radius), min(len(lines), line + radius)
-    return [{"line": n, "text": lines[n - 1].rstrip("\r")} for n in range(start, end + 1)]

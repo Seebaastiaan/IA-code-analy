@@ -1,6 +1,11 @@
-import { CAT } from '@/shared/constants/categories'
-import { CATEGORIES } from '@/shared/types/common'
-import { Icon } from '@/shared/ui'
+import { Icon, type IconName } from '@/shared/ui'
+
+// Lo que hace la app en el Sprint 4; los analizadores y el score llegan en los siguientes sprints
+const FEATURES: { icon: IconName; label: string; desc: string }[] = [
+  { icon: 'branch', label: 'Clonado desde GitHub', desc: 'Repos públicos y privados de tu cuenta' },
+  { icon: 'shield', label: 'Entorno aislado', desc: 'uv venv en WSL2 o Docker' },
+  { icon: 'folder', label: 'Repositorios del equipo', desc: 'Cada análisis queda guardado en su historial' },
+]
 
 export function LoginHero() {
   return (
@@ -18,14 +23,14 @@ export function LoginHero() {
           medida y explicada.
         </h2>
         <div className="mt-8 space-y-3">
-          {CATEGORIES.map((k) => (
-            <div key={k} className="flex items-center gap-3 rounded-2xl bg-white/10 backdrop-blur px-4 py-3">
+          {FEATURES.map((f) => (
+            <div key={f.label} className="flex items-center gap-3 rounded-2xl bg-white/10 backdrop-blur px-4 py-3">
               <span className="w-9 h-9 rounded-xl bg-white/15 grid place-items-center">
-                <Icon name={CAT[k].icon} className="w-4 h-4" />
+                <Icon name={f.icon} className="w-4 h-4" />
               </span>
               <div>
-                <p className="font-semibold text-sm">{CAT[k].label}</p>
-                <p className="text-xs text-white/70">{CAT[k].tools}</p>
+                <p className="font-semibold text-sm">{f.label}</p>
+                <p className="text-xs text-white/70">{f.desc}</p>
               </div>
             </div>
           ))}

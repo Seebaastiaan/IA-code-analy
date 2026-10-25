@@ -1,11 +1,8 @@
-"""Modelos compartidos del contrato (frontend/src/shared/types/common.ts, features/{repos,findings}/types.ts)."""
+"""Modelos compartidos del contrato (frontend/src/shared/types/common.ts, features/repos/types.ts)."""
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
-Severity = Literal["alta", "media", "baja"]
-Category = Literal["seg", "test", "prac"]
+from pydantic import BaseModel
 
 
 class Weights(BaseModel):
@@ -14,37 +11,9 @@ class Weights(BaseModel):
     prac: float
 
 
-class Scores(Weights):
-    # "global" es palabra reservada en Python: se expone con alias
-    global_: float = Field(alias="global")
-
-    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
-
-
 class Thresholds(BaseModel):
     score: float
     cov: float
-
-
-class SnippetLine(BaseModel):
-    line: int
-    text: str
-
-
-class Finding(BaseModel):
-    id: int
-    sev: Severity
-    cat: Category
-    tool: str
-    rule: str
-    file: str
-    line: int
-    msg: str
-    why: str
-    rec: str
-    fix: bool
-    status: Literal["open", "resolved"]
-    snippet: list[SnippetLine] | None = None
 
 
 class Progress(BaseModel):
@@ -65,6 +34,24 @@ class Repo(BaseModel):
     files: int
     last_report_id: str | None
     last_report_num: int | None
-    scores: Scores | None
+    # Análisis guardados del repo
+    reports: int = 0
     error: str | None
     progress: Progress | None = None
+
+
+class Language(BaseModel):
+    name: str
+    files: int
+
+
+class SavedReport(BaseModel):
+    """Un análisis guardado en el repositorio (Sprint 4: hasta el entorno aislado, todavía sin hallazgos ni score)."""
+
+    id: str
+    num: int
+    branch: str
+    commit: str
+    created_at: str
+    duration_s: int
+    languages: list[Language]

@@ -26,14 +26,18 @@ export const router = createBrowserRouter([
       {
         Component: AppShell,
         children: [
-          // Inicio: mientras no hay tablero, la app abre en "Nuevo análisis"
-          { index: true, element: <Navigate to={paths.analyze()} replace /> },
-          { path: '/dashboard', element: <Navigate to={paths.analyze()} replace /> },
+          { index: true, element: <Navigate to={paths.repos()} replace /> },
           { path: '/analyze', handle: { title: 'Nuevo análisis' }, lazy: page(() => import('@/features/analysis/pages/AnalyzePage')) },
           { path: '/analyze/jobs/:jobId', handle: { title: 'Nuevo análisis' }, lazy: page(() => import('@/features/analysis/pages/AnalyzePage')) },
+          { path: '/repos', handle: { title: 'Repositorios' }, lazy: page(() => import('@/features/repos/pages/ReposPage')) },
+          { path: '/team', handle: { title: 'Equipo' }, lazy: page(() => import('@/features/team/pages/TeamPage')) },
+          { path: '/join/:code', handle: { title: 'Unirse a un equipo' }, lazy: page(() => import('@/features/team/pages/JoinTeamPage')) },
           {
             path: '/repos/:repoId',
-            children: [{ path: 'reports/:reportId', handle: { title: 'Reporte' }, lazy: page(() => import('@/features/report/pages/ReportPage')) }],
+            children: [
+              { path: 'files', handle: { title: 'Archivos' }, lazy: page(() => import('@/features/repos/pages/RepoFilesPage')) },
+              { path: 'settings', handle: { title: 'Configuración' }, lazy: page(() => import('@/features/settings/pages/SettingsPage')) },
+            ],
           },
         ],
       },

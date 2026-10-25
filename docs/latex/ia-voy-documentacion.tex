@@ -1,0 +1,920 @@
+% ============================================================================
+%  IA voy — Documentación técnica
+%  Compilar con pdflatex (dos pasadas para el índice):
+%     pdflatex ia-voy-documentacion.tex && pdflatex ia-voy-documentacion.tex
+%  o subir este archivo a Overleaf (compilador pdfLaTeX).
+% ============================================================================
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------- Idioma y fuentes
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+% es-noshorthands: sin esto, babel convierte " < > en atajos y rompe el texto de código
+\usepackage[spanish,es-noshorthands,es-tabla]{babel}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{microtype}
+
+% ---------------------------------------------------------------- Página
+\usepackage[a4paper,top=2.4cm,bottom=2.4cm,left=2.3cm,right=2.3cm,headheight=14pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+% ---------------------------------------------------------------- Color y gráficos
+\usepackage[table]{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds}
+\usepackage{tcolorbox}
+
+\definecolor{brand}{HTML}{7060F1}
+\definecolor{branddark}{HTML}{4C3CC9}
+\definecolor{brandsoft}{HTML}{EEEDFE}
+\definecolor{fuchsia}{HTML}{D946EF}
+\definecolor{ink}{HTML}{1E293B}
+\definecolor{muted}{HTML}{64748B}
+\definecolor{line}{HTML}{E2E8F0}
+\definecolor{codebg}{HTML}{F8FAFC}
+\definecolor{okgreen}{HTML}{059669}
+\definecolor{okgreensoft}{HTML}{ECFDF5}
+\definecolor{warnamber}{HTML}{B45309}
+\definecolor{warnambersoft}{HTML}{FFFBEB}
+\definecolor{seg}{HTML}{E11D48}
+\definecolor{test}{HTML}{0284C7}
+\definecolor{prac}{HTML}{7C3AED}
+
+% ---------------------------------------------------------------- Tablas
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\renewcommand{\arraystretch}{1.25}
+
+% ---------------------------------------------------------------- Código
+\usepackage{listings}
+\lstdefinelanguage{TypeScript}{
+  keywords={const,let,function,return,if,else,export,import,from,type,interface,async,await,new,true,false,null,undefined,extends,as,switch,case,default},
+  sensitive=true,
+  comment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]',
+  morestring=[b]",
+  morestring=[b]`,
+}
+\lstdefinelanguage{JSON}{
+  morestring=[b]",
+  comment=[l]{//},
+}
+\lstdefinelanguage{texto}{
+  comment=[l]{\#},
+}
+\lstset{
+  basicstyle=\ttfamily\footnotesize\color{ink},
+  keywordstyle=\color{branddark}\bfseries,
+  commentstyle=\color{muted}\itshape,
+  stringstyle=\color{okgreen},
+  backgroundcolor=\color{codebg},
+  frame=l,
+  framerule=2.5pt,
+  rulecolor=\color{brand},
+  xleftmargin=10pt,
+  framexleftmargin=8pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  tabsize=2,
+  literate=
+    {á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
+    {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
+    {ñ}{{\~n}}1 {Ñ}{{\~N}}1 {ü}{{\"u}}1 {¿}{{?`}}1 {¡}{{!`}}1,
+}
+
+% ---------------------------------------------------------------- Enlaces
+\usepackage[unicode,colorlinks=true,linkcolor=branddark,urlcolor=branddark,pdftitle={IA voy - Documentación técnica},pdfauthor={Equipo IA voy}]{hyperref}
+
+% ---------------------------------------------------------------- Estilo de títulos
+\titleformat{\section}{\Large\bfseries\color{ink}}{\colorbox{brand}{\makebox[1.6em][c]{\color{white}\thesection}}}{0.6em}{}[\vspace{-2pt}{\color{line}\rule{\linewidth}{0.8pt}}]
+\titleformat{\subsection}{\large\bfseries\color{branddark}}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{ink}}{\thesubsubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{18pt}{8pt}
+\titlespacing*{\subsection}{0pt}{12pt}{4pt}
+
+% ---------------------------------------------------------------- Encabezado y pie
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{muted}IA voy \textperiodcentered{} Documentación técnica}
+\fancyhead[R]{\small\color{muted}\nouppercase{\leftmark}}
+\fancyfoot[C]{\small\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{line}\leaders\hrule height \headrulewidth\hfill}}
+
+% ---------------------------------------------------------------- Cajas
+\newtcolorbox{nota}[1][Nota]{colback=brandsoft,colframe=brand,boxrule=0pt,leftrule=3pt,arc=2pt,left=8pt,right=8pt,top=5pt,bottom=5pt,title={\bfseries #1},coltitle=branddark,colbacktitle=brandsoft,fonttitle=\small,attach title to upper={\ \ }}
+\newtcolorbox{aviso}[1][Importante]{colback=warnambersoft,colframe=warnamber,boxrule=0pt,leftrule=3pt,arc=2pt,left=8pt,right=8pt,top=5pt,bottom=5pt,title={\bfseries #1},coltitle=warnamber,colbacktitle=warnambersoft,fonttitle=\small,attach title to upper={\ \ }}
+\newtcolorbox{listo}[1][Implementado]{colback=okgreensoft,colframe=okgreen,boxrule=0pt,leftrule=3pt,arc=2pt,left=8pt,right=8pt,top=5pt,bottom=5pt,title={\bfseries #1},coltitle=okgreen,colbacktitle=okgreensoft,fonttitle=\small,attach title to upper={\ \ }}
+
+% ---------------------------------------------------------------- Atajos
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\ruta}[1]{\texttt{\small\color{branddark}#1}}
+\newcommand{\si}{\textcolor{okgreen}{\textbf{Sí}}}
+\newcommand{\simulado}{\textcolor{warnamber}{\textbf{Simulado}}}
+\newcommand{\pendiente}{\textcolor{muted}{Pendiente}}
+\newcommand{\flecha}{\textrightarrow{}}
+
+% ============================================================================
+\begin{document}
+% Mucho código en línea (\code, \ruta): mejor espacios más amplios que palabras fuera del margen
+\sloppy
+
+% ---------------------------------------------------------------- Portada
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture,overlay]
+  \shade[left color=brand,right color=fuchsia] (current page.north west) rectangle ([yshift=-10cm]current page.north east);
+  \node[anchor=north west,fill=white,rounded corners=6pt,minimum size=1.6cm,text=brand,font=\Huge\bfseries]
+    at ([xshift=2.3cm,yshift=-2.6cm]current page.north west) {IA};
+  \node[anchor=north west,text=white,align=left] at ([xshift=2.3cm,yshift=-4.8cm]current page.north west) {%
+    {\fontsize{38}{42}\selectfont\bfseries IA voy}\\[10pt]
+    {\LARGE Documentación técnica}\\[6pt]
+    {\large Analizador de calidad de código Python}};
+\end{tikzpicture}
+
+\vspace*{10.5cm}
+
+{\large\color{ink}\textbf{Para:} equipo de desarrollo}\par\vspace{4pt}
+{\color{muted}Arquitectura, módulos, flujos, contrato de la API, base de datos, seguridad, pruebas y mapa de conocimiento generado con graphify.}
+
+\vspace{1.2cm}
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\textbf{Versión}   & 1.0 (rama \code{main}) \\
+\textbf{Fecha}     & 18 de octubre de 2026 \\
+\textbf{Repositorio} & \code{IA-VOY} \flecha{} \code{frontend/} (React) y \code{backend/} (FastAPI) \\
+\textbf{Estado}    & Todas las pantallas del spec funcionan contra el backend real; análisis con analizadores reales y sandbox \\
+\end{tabularx}
+
+\vfill
+{\small\color{muted}Generado a partir del código del repositorio y del grafo de conocimiento de graphify (1909 nodos, 3907 relaciones, 183 comunidades).}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================================
+\section{Visión general}
+
+\textbf{IA voy} analiza repositorios Python y entrega un \emph{score} de calidad ponderado en tres categorías:
+\textcolor{seg}{\textbf{seguridad}} (Bandit, pip-audit), \textcolor{test}{\textbf{pruebas}} (pytest, coverage) y
+\textcolor{prac}{\textbf{buenas prácticas}} (Ruff, Radon). Cada análisis genera un reporte con hallazgos, cobertura por
+archivo y complejidad por función. Sobre el reporte, el equipo abre el código en un editor, aplica correcciones
+automáticas, pregunta a un asistente IA, compara análisis y comparte el reporte con un enlace público.
+
+\textbf{Solo analiza Python.} Al clonar se cuentan los archivos por lenguaje: un repositorio sin archivos
+\code{.py} se detiene con un mensaje claro y, si Python es minoría, la terminal y el reporte avisan qué no se analizó.
+
+El proyecto nació como un prototipo navegable de un solo archivo (\ruta{ia\_voy\_prototipo.html}); de él se obtuvo por
+ingeniería inversa la especificación (\ruta{docs/FRONTEND\_SPEC.md}) que hoy implementan el frontend y el backend.
+
+\subsection{Estado actual}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lLl@{}}
+\toprule
+\textbf{Área} & \textbf{Qué hace hoy} & \textbf{Estado} \\
+\midrule
+Inicio de sesión & Solo con GitHub (OAuth). La cuenta de GitHub es la cuenta de la app. & \si \\
+Equipos & Cada usuario pertenece a un equipo; los repos son del equipo. Invitación por enlace. & \si \\
+Análisis & Clonado real; Ruff, Bandit y Radon en el backend; pip-audit, pytest y coverage en un sandbox (WSL2 o Docker). Se eligen los analizadores. & \si \\
+Jobs & Guardados en SQLite con latido: sobreviven reinicios y funcionan con varios workers. & \si \\
+Tablero, reporte, exportación & Score calculado al leer, tendencia, JSON/HTML/Markdown/SARIF. & \si \\
+Editor & Monaco, guardar con re-análisis del archivo, correcciones automáticas de Ruff. & \si \\
+Asistente IA & RAG sobre el código con Gemini (respaldo Groq), respuesta por streaming. & \si \\
+Comparativa, configuración & Nuevos y resueltos entre análisis; pesos, umbrales, reglas, \code{.ia\_voy.toml}. & \si \\
+Compartir & Enlace público con contraseña y expiración; vista de solo lectura. & \si \\
+Túnel público & Cloudflare Tunnel: aún no se conecta (el estado en \code{/api/health} es fijo). & \pendiente \\
+Sandbox Docker & Programado, sin probar de punta a punta. & \pendiente \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{nota}[Dos modos de desarrollo]
+Con \code{VITE\_USE\_MOCKS=false} (por defecto) el frontend habla con el backend FastAPI a través del proxy de Vite.
+Con \code{VITE\_USE\_MOCKS=true} responde todo \code{/api} con datos de ejemplo (MSW) y no necesita backend; así corren
+las pruebas e2e.
+\end{nota}
+
+% ============================================================================
+\section{Stack y estructura del repositorio}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+\textbf{Capa} & \textbf{Tecnología} \\
+\midrule
+Frontend & React 19, TypeScript 6, Vite 8, Tailwind CSS 4, React Router 7 \\
+Datos del servidor & TanStack Query 5 (caché, reintentos, invalidación) \\
+Estado de UI & Zustand 5 y parámetros de la URL \\
+Editor de código & Monaco (\code{@monaco-editor/react}) \\
+Mocks & MSW 2 (Service Worker) con un backend en memoria \\
+Calidad (frontend) & Oxlint, Vitest (unitarias), Playwright (e2e) \\
+Backend & Python 3.12+, FastAPI, Uvicorn, httpx, pydantic-settings \\
+Analizadores & Ruff, Bandit y Radon (en el backend); pip-audit, pytest y coverage (en el sandbox con \code{uv}) \\
+Asistente & Gemini (respuestas y \code{gemini-embedding-001}), Groq como respaldo, numpy para la similitud \\
+Persistencia & SQLite (\ruta{backend/data/ia\_voy.db}) \\
+Seguridad & Fernet para tokens de GitHub; HMAC-SHA256 para sesiones; scrypt para contraseñas de enlaces \\
+Pruebas (backend) & pytest + \code{TestClient}; GitHub, git, el LLM y el sandbox sustituidos por dobles \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{lstlisting}[language=texto]
+IA-VOY/
+|-- frontend/                React + Vite
+|   |-- src/app/             router, layouts, providers
+|   |-- src/features/        un modulo por dominio (auth, analysis, report, team, ...)
+|   |-- src/shared/          api (http, ws, sse, endpoints), ui (design system), utils, tipos
+|   |-- src/mocks/           MSW: handlers + backend en memoria
+|   `-- tests/               unit/ (Vitest) y e2e/ (Playwright: los 5 flujos del spec)
+|-- backend/                 FastAPI
+|   |-- app/main.py          create_app(): CORS, errores, routers
+|   |-- app/auth.py          login con GitHub y tokens de sesion
+|   |-- app/github/          cliente de GitHub, tokens cifrados, state de OAuth
+|   |-- app/teams/           equipos, invitaciones
+|   |-- app/analysis/        jobs, clonado, pipeline, sandbox, WebSocket
+|   |-- app/analyses/        reportes, hallazgos, score, configuracion, analizadores
+|   |-- app/dashboard/       tablero, repos, historial
+|   |-- app/reports/         reporte y exportacion
+|   |-- app/editor/          arbol, archivos, correcciones
+|   |-- app/assistant/       fragmentos (ast), indice de embeddings, LLM
+|   |-- app/projects/        configuracion del proyecto
+|   |-- app/compare/         comparativa
+|   |-- app/share/           enlaces publicos
+|   `-- tests/               pytest
+|-- docs/                    FRONTEND_SPEC.md, FRONTEND_STRUCTURE.md, este documento
+|-- graphify-out/            grafo de conocimiento (graph.json, graph.html, GRAPH_REPORT.md)
+`-- ia_voy_prototipo.html    prototipo original (referencia)
+\end{lstlisting}
+
+% ============================================================================
+\section{Arquitectura}
+
+En desarrollo, el navegador solo habla con Vite (\code{:5173}). Vite sirve la app y redirige \code{/api} y \code{/ws}
+al backend (\code{:8000}). El backend es el único que habla con GitHub, con los modelos de IA, con el sandbox y con la
+base de datos.
+
+\begin{center}
+\begin{tikzpicture}[
+  box/.style={draw=#1,fill=#1!8,rounded corners=4pt,minimum height=1.25cm,text width=2.8cm,align=center,font=\footnotesize,line width=0.8pt},
+  box/.default=brand,
+  lbl/.style={font=\scriptsize,text=muted,align=center},
+  arr/.style={-{Latex[length=2.2mm]},line width=0.8pt,color=ink!70},
+  biarr/.style={{Latex[length=2.2mm]}-{Latex[length=2.2mm]},line width=0.8pt,color=ink!70},
+]
+  \node[box] (nav) {\textbf{Navegador}\\React\\TanStack Query\\Zustand};
+  \node[box=muted,right=1.5cm of nav] (vite) {\textbf{Vite :5173}\\sirve la app\\proxy /api y /ws};
+  \node[box,right=1.5cm of vite] (api) {\textbf{FastAPI :8000}\\REST \textperiodcentered{} WS \textperiodcentered{} SSE};
+  \node[box=okgreen,below=1.3cm of api] (db) {\textbf{SQLite}\\usuarios, equipos,\\repos, reportes,\\jobs, índice};
+  \node[box=ink,above=1.3cm of api] (gh) {\textbf{GitHub}\\OAuth + REST API};
+  \node[box=seg,below=1.3cm of vite] (sb) {\textbf{Sandbox}\\WSL2 o Docker\\pip-audit, pytest,\\coverage};
+  \node[box=prac,above=1.3cm of vite] (llm) {\textbf{Gemini / Groq}\\respuestas y\\embeddings};
+  \node[box=warnamber,below=1.3cm of nav] (msw) {\textbf{MSW (opcional)}\\responde /api sin\\backend};
+
+  \draw[biarr] (nav) -- node[lbl,above=2pt]{HTTP\\WS} (vite);
+  \draw[biarr] (vite) -- node[lbl,above=2pt]{proxy} (api);
+  \draw[biarr] (api) -- node[lbl,right]{sqlite3} (db);
+  \draw[biarr] (api) -- node[lbl,right]{httpx\\(token cifrado)} (gh);
+  \draw[biarr] (api) -- node[lbl,above,sloped]{script} (sb);
+  \draw[biarr] (api) -- node[lbl,above,sloped]{httpx} (llm);
+  \draw[arr,dashed] (nav) -- node[lbl,left]{VITE\_USE\_MOCKS\\=true} (msw);
+\end{tikzpicture}
+\end{center}
+
+\subsection{Principios}
+\begin{itemize}
+  \item \textbf{Los tipos de \code{features/*/types.ts} son el contrato.} El mock y el backend devuelven exactamente esas formas.
+  \item \textbf{Solo la capa de API habla con el servidor} (\ruta{shared/api} + \ruta{features/*/api}); los componentes usan \emph{hooks} de TanStack Query.
+  \item \textbf{Dependencias en una dirección:} \code{app} \flecha{} \code{features} \flecha{} \code{shared}. graphify no detecta ciclos de importación.
+  \item \textbf{Secretos solo en el backend:} el \code{client\_secret}, el token de GitHub y las claves de los modelos nunca llegan al navegador.
+  \item \textbf{Todo es del equipo:} repos, reportes, configuración, jobs e índice se filtran por el equipo del usuario.
+  \item \textbf{El score se calcula al leer:} resolver un hallazgo, ignorar una regla o cambiar los pesos se refleja sin re-analizar.
+  \item \textbf{Errores uniformes:} \code{\{"error": \{"code", "message"\}\}} en todas las respuestas de error.
+\end{itemize}
+
+% ============================================================================
+\section{Frontend}
+
+\subsection{Módulos (\code{src/features})}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{12.6cm}@{}}
+\toprule
+\textbf{Módulo} & \textbf{Responsabilidad} \\
+\midrule
+\endhead
+\code{auth} & Login con GitHub (\code{LoginForm}, \code{useGithubLogin}, \code{GithubCallbackPage}), sesión en local/sessionStorage. \\
+\code{analysis} & Formulario de \emph{Nuevo análisis} (analizadores por categoría, sandbox, indexar), progreso del job (\code{JobView}, \code{JobPill}), store del WebSocket. \\
+\code{github} & Estado del token, repos y ramas de la cuenta; selector \code{GithubRepoPicker}. \\
+\code{repos} & Lista de repositorios del equipo con sondeo mientras hay análisis, re-análisis, repo seleccionado. \\
+\code{dashboard} & Tablero: score global, KPIs por categoría, tendencia, análisis recientes. \\
+\code{report} & Reporte: hallazgos, cobertura, complejidad; filtros en la URL; exportación. \\
+\code{findings} & \emph{Drawer} del hallazgo (diálogo accesible), ignorar regla. \\
+\code{editor} & Monaco, árbol de archivos, aplicar parches, diff, guardar y re-analizar. \\
+\code{assistant} & Chat con el asistente IA; la respuesta aparece mientras se genera (SSE). \\
+\code{compare} & Comparativa entre dos análisis. \\
+\code{settings} & Pesos, umbrales, reglas ignoradas, rutas excluidas; estado de servicios. \\
+\code{team} & Equipo: miembros, invitar por enlace, ceder, quitar, salir; página \ruta{/join/:code}. \\
+\code{share}, \code{public-report} & Enlaces públicos con contraseña y expiración; vista de solo lectura. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Rutas}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lLl@{}}
+\toprule
+\textbf{Ruta} & \textbf{Pantalla} & \textbf{Acceso} \\
+\midrule
+\ruta{/login} & Inicio de sesión con GitHub & público \\
+\ruta{/github/callback} & Regreso de GitHub (canjea \code{code} + \code{state}) & público \\
+\ruta{/r/:shareId} & Reporte compartido & público \\
+\ruta{/dashboard} & Tablero & privado \\
+\ruta{/analyze}, \ruta{/analyze/jobs/:jobId} & Nuevo análisis y progreso & privado \\
+\ruta{/repos} & Repositorios del equipo & privado \\
+\ruta{/repos/:id/reports/:reportId} & Reporte (\code{latest} = el último) & privado \\
+\ruta{/repos/:id/editor} & Editor de código & privado \\
+\ruta{/repos/:id/assistant} & Asistente IA & privado \\
+\ruta{/repos/:id/compare} & Comparativa & privado \\
+\ruta{/repos/:id/settings} & Configuración del proyecto & privado \\
+\ruta{/team} & Equipo & privado \\
+\ruta{/join/:code} & Unirse a un equipo con una invitación & privado \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Las rutas privadas pasan por \code{RequireAuth}: sin token redirige a \ruta{/login} recordando a dónde quería ir (así
+una invitación abierta sin sesión vuelve a \ruta{/join/:code} después del login).
+
+\subsection{Capa de API}
+
+\ruta{shared/api/http.ts} envuelve \code{fetch}: añade el \code{Authorization: Bearer}, serializa JSON, convierte las
+respuestas de error en \code{ApiError(status, code, message)} y, ante un \code{401}, cierra la sesión. Para el asistente,
+\code{postStream} lee una respuesta \emph{Server-Sent Events} y entrega cada evento conforme llega. Todas las rutas
+viven en \code{EP} (\ruta{shared/api/endpoints.ts}) y las URL de la app en \code{paths}.
+
+\begin{lstlisting}[language=TypeScript]
+askStream: async (body: ChatRequest, onDelta: (text: string) => void) => {
+  let final: ChatResponse | null = null
+  await postStream(EP.chatStream, body, ({ event, data }) => {
+    if (event === 'delta') onDelta((data as { text: string }).text)
+    else if (event === 'done') final = data as ChatResponse
+    else if (event === 'error') throw new ApiError(503, data.code, data.message)
+  })
+  return final
+}
+\end{lstlisting}
+
+Tras terminar un análisis, guardar un archivo o aplicar un fix, \code{invalidateAnalysis()} invalida las consultas
+\code{dashboard}, \code{repos}, \code{report}, \code{tree}, \code{analyses}, \code{diff} e \code{index}. Al cambiar de
+equipo se descarta toda la caché.
+
+\subsection{Progreso del análisis}
+
+\code{useJobStore} (Zustand) abre el WebSocket \ruta{/ws/jobs/\{id\}} con reconexión exponencial y aplica cada mensaje
+con un reductor puro. La pantalla \code{JobView} dibuja la barra de progreso, la lista de pasos y la terminal en vivo.
+
+\begin{lstlisting}[language=TypeScript]
+export function reduceJob(job: Job | null, m: JobMessage): Job | null {
+  if (m.type === 'snapshot') return m.job
+  if (!job) return job
+  switch (m.type) {
+    case 'step':      return { ...job, step: m.index, total: m.total, status: 'running' }
+    case 'log':       return { ...job, logs: [...job.logs, m.line] }
+    case 'step_done': return { ...job, step: m.index + 1 }
+    case 'error':     return { ...job, status: 'error', step: m.step, error: { ... } }
+    case 'done':      return { ...job, status: 'done', step: job.total,
+                               repo_id: m.repo_id, report_id: m.report_id }
+  }
+}
+\end{lstlisting}
+
+\subsection{Mocks (MSW)}
+
+\ruta{src/mocks/handlers/index.ts} implementa todos los endpoints sobre un backend en memoria (\ruta{mocks/db.ts},
+\ruta{mocks/team.ts}), incluido el WebSocket de los jobs y el chat por SSE. El login simulado salta GitHub. Las pruebas
+e2e corren contra este modo (\ruta{.env.e2e}).
+
+% ============================================================================
+\section{Backend}
+
+\subsection{Módulos}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{10.8cm}@{}}
+\toprule
+\textbf{Archivo} & \textbf{Responsabilidad} \\
+\midrule
+\endhead
+\ruta{app/main.py} & \code{create\_app()}: CORS para \code{FRONTEND\_URL}, manejadores de error, routers. \\
+\ruta{app/config.py} & \code{Settings} (variables de entorno / \code{.env}); genera \code{SECRET\_KEY} y \code{TOKEN\_ENCRYPTION\_KEY} si faltan. \\
+\ruta{app/db.py} & Esquema SQLite, migraciones (columnas nuevas y paso a equipos), \code{get\_db} y \code{session}. \\
+\ruta{app/auth.py} & Login con GitHub, usuarios, tokens de sesión firmados, \code{current\_user\_id}. \\
+\ruta{app/github/} & \code{GithubClient}, tokens cifrados (\code{GithubAccountStore}), \code{state} de OAuth en SQLite. \\
+\ruta{app/teams/} & Equipos: pertenencia, invitaciones, unirse, salir, quitar y ceder. \\
+\ruta{app/analysis/jobs.py} & \code{JobManager}: jobs persistentes con latido, eventos del WebSocket, guardado del reporte. \\
+\ruta{app/analysis/clone.py} & \code{git clone} con el token del usuario en cabeceras, sin dejarlo en disco. \\
+\ruta{app/analysis/pipeline.py} & Ruff, Bandit y Radon; lectura de resultados del sandbox; simulación sin sandbox. \\
+\ruta{app/analysis/sandbox.py} & Script bash del sandbox, lanzador WSL2/Docker, lectura de JUnit, coverage y pip-audit. \\
+\ruta{app/analyses/} & Almacén de repos, reportes y hallazgos; score; \code{.ia\_voy.toml}; analizadores estáticos. \\
+\ruta{app/dashboard/}, \ruta{app/reports/} & Tablero, repos, historial; reporte y exportación (JSON, HTML, Markdown, SARIF). \\
+\ruta{app/editor/} & Árbol, leer y guardar archivos (con respaldo y re-análisis), correcciones de Ruff. \\
+\ruta{app/assistant/} & Fragmentos con \code{ast}, índice de embeddings, cliente LLM con streaming y respaldo. \\
+\ruta{app/projects/}, \ruta{app/compare/} & Configuración del proyecto; comparativa entre análisis. \\
+\ruta{app/share/} & Enlaces públicos, contraseña con scrypt, intentos fallidos en SQLite. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Configuración}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lLl@{}}
+\toprule
+\textbf{Variable} & \textbf{Uso} & \textbf{Por defecto} \\
+\midrule
+\code{FRONTEND\_URL} & \emph{redirect\_uri} de GitHub y CORS & \code{http://localhost:5173} \\
+\code{GITHUB\_CLIENT\_ID} / \code{\_SECRET} & OAuth App de GitHub (obligatorias) & --- \\
+\code{SECRET\_KEY} & Firma de sesiones y de tokens de enlaces (HMAC) & se genera \\
+\code{TOKEN\_ENCRYPTION\_KEY} & Cifrado Fernet de tokens de GitHub & se genera \\
+\code{DATABASE\_PATH} & Archivo SQLite & \code{data/ia\_voy.db} \\
+\code{CLONES\_PATH} & Carpeta de los clones (fuera de OneDrive) & \code{\%LOCALAPPDATA\%\textbackslash ia-voy\textbackslash repos} \\
+\code{JOB\_STEP\_SECONDS} & Pausa visual de los pasos que no esperan al sandbox & \code{0.9} \\
+\code{SANDBOX} & \code{off}, \code{wsl} o \code{docker} & \code{off} (\code{wsl} en \code{.env.example}) \\
+\code{SANDBOX\_WSL\_DISTRO} & Distribución de WSL & \code{Ubuntu-24.04} \\
+\code{GEMINI\_API\_KEY} & Asistente IA (sin ella responde \code{503}) & --- \\
+\code{GEMINI\_MODEL} & Modelo principal y respaldos & \code{gemini-3.8-flash} \\
+\code{GROQ\_API\_KEY} & Último respaldo del asistente & --- \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Las claves generadas se guardan en \ruta{data/secrets.json} junto a la base de datos (excluido de git).
+
+\subsection{Base de datos}
+
+\begin{center}
+\begin{tikzpicture}[
+  tbl/.style={draw=brand,fill=white,rounded corners=3pt,align=left,font=\scriptsize\ttfamily,inner sep=5pt,line width=0.7pt},
+  ttl/.style={fill=brand,text=white,font=\scriptsize\bfseries\sffamily,rounded corners=3pt,inner sep=4pt},
+  rel/.style={-{Latex[length=2mm]},line width=0.7pt,color=muted},
+]
+  \node[tbl] (users) {id \textcolor{brand}{PK}\\github\_id \textcolor{brand}{UNIQUE}\\login, name, email};
+  \node[ttl,above=0pt of users.north west,anchor=south west] {users};
+
+  \node[tbl,right=1.1cm of users] (members) {user\_id \textcolor{brand}{PK}\\team\_id \textcolor{brand}{FK}\\role (owner|member)};
+  \node[ttl,above=0pt of members.north west,anchor=south west] {team\_members};
+
+  \node[tbl,right=1.1cm of members] (teams) {id \textcolor{brand}{PK}\\name, created\_at};
+  \node[ttl,above=0pt of teams.north west,anchor=south west] {teams};
+
+  \node[tbl,below=1.3cm of teams] (repos) {id \textcolor{brand}{PK}, team\_id, user\_id\\name (owner/repo), url\\branch, files, status\\\textcolor{brand}{UNIQUE}(team\_id, name)};
+  \node[ttl,above=0pt of repos.north west,anchor=south west] {repos};
+
+  \node[tbl,left=1.1cm of repos] (reports) {id = repo\_id-num\\repo\_id \textcolor{brand}{FK}, num\\coverage\_total, tests\_failed\\analyzers, coverage, complexity};
+  \node[ttl,above=0pt of reports.north west,anchor=south west] {reports};
+
+  \node[tbl,left=1.1cm of reports] (findings) {report\_id \textcolor{brand}{FK}\\sev, cat, tool, rule\\file, line, status\\code, snippet};
+  \node[ttl,above=0pt of findings.north west,anchor=south west] {findings};
+
+  \node[tbl,below=1.3cm of repos] (jobs) {id \textcolor{brand}{PK}, team\_id, repo\_id\\step, status, logs, error\\options, heartbeat};
+  \node[ttl,above=0pt of jobs.north west,anchor=south west] {jobs};
+
+  \node[tbl,left=1.1cm of jobs] (shares) {id \textcolor{brand}{PK}, report\_id \textcolor{brand}{FK}\\password\_hash \textcolor{seg}{(scrypt)}\\expires\_at, include\_code};
+  \node[ttl,above=0pt of shares.north west,anchor=south west] {shares};
+
+  \draw[rel] (members.west) -- (users.east);
+  \draw[rel] (members.east) -- (teams.west);
+  \draw[rel] (repos.north) -- (teams.south);
+  \draw[rel] (reports.east) -- (repos.west);
+  \draw[rel] (findings.east) -- (reports.west);
+  \draw[rel] (jobs.north) -- (repos.south);
+  \draw[rel] (shares.north) -- (reports.south);
+\end{tikzpicture}
+\end{center}
+
+Otras tablas: \code{github\_accounts} (token cifrado por usuario), \code{oauth\_states}, \code{team\_invites},
+\code{project\_config} (equivalente de \code{.ia\_voy.toml}), \code{code\_chunks} y \code{repo\_index} (índice del
+asistente) y \code{share\_failures}. Las bases creadas antes de los equipos se migran solas al abrirlas: cada usuario
+recibe un equipo propio y la tabla \code{repos} se reconstruye con \code{team\_id} sin perder reportes.
+
+\subsection{Sesión de la app}
+
+El token de sesión es \code{base64(\{"sub", "exp"\}).firma}, con firma HMAC-SHA256 y vigencia de 30 días. No tiene
+estado en el servidor: cerrar sesión solo descarta el token en el frontend.
+
+\begin{lstlisting}[language=Python]
+def current_user_id(authorization: str | None = Header(default=None),
+                    settings: Settings = Depends(get_settings)) -> str:
+    """Id del usuario de la sesión; 401 si falta el token, está alterado o venció."""
+    scheme, _, token = (authorization or "").partition(" ")
+    payload, _, signature = token.partition(".")
+    if scheme.lower() != "bearer" or not payload or \
+       not hmac.compare_digest(signature, _sign(payload, settings.secret_key)):
+        raise ApiError(401, "unauthorized", "Inicia sesión para continuar")
+    data = json.loads(_unb64(payload))
+    if data["exp"] < time.time():
+        raise ApiError(401, "session_expired", "Tu sesión expiró")
+    return data["sub"]
+\end{lstlisting}
+
+% ============================================================================
+\section{Flujos principales}
+
+\subsection{Inicio de sesión con GitHub}
+
+\begin{center}
+\begin{tikzpicture}[
+  actor/.style={draw=#1,fill=#1!10,rounded corners=3pt,minimum width=2.9cm,minimum height=0.8cm,font=\small\bfseries},
+  msg/.style={-{Latex[length=2mm]},line width=0.7pt,color=ink!80},
+  ret/.style={-{Latex[length=2mm]},line width=0.7pt,color=muted,dashed},
+  t/.style={font=\scriptsize,fill=white,inner sep=1.5pt},
+]
+  \node[actor=brand]   (f) at (0,0)    {Frontend};
+  \node[actor=okgreen] (b) at (6,0)    {Backend};
+  \node[actor=ink]     (g) at (12,0)   {GitHub};
+  \foreach \n in {f,b,g} \draw[draw=line,line width=0.8pt] (\n.south) -- ++(0,-9.6);
+
+  \draw[msg] (0,-1.0) -- node[t,above]{1. POST /api/auth/github/authorize} (6,-1.0);
+  \draw[ret] (6,-1.7) -- node[t,above]{\{url, state\} \textperiodcentered{} state a sessionStorage} (0,-1.7);
+  \draw[msg] (0,-2.6) -- node[t,above,pos=0.3]{2. redirige el navegador a github.com/login/oauth/authorize} (12,-2.6);
+  \node[t,text=muted,align=center] at (12,-3.35) {usuario autoriza\\(una sola vez)};
+  \draw[ret] (12,-4.2) -- node[t,above,pos=0.7]{3. /github/callback?code\&state} (0,-4.2);
+  \node[t,text=muted,align=center] at (0,-4.9) {compara state\\con sessionStorage};
+  \draw[msg] (0,-5.8) -- node[t,above]{4. POST /api/auth/github/callback} (6,-5.8);
+  \node[t,text=muted] at (6,-6.4) {consume el state (SQLite)};
+  \draw[msg] (6,-7.0) -- node[t,above]{5. canjea code (client\_secret)} (12,-7.0);
+  \draw[ret] (12,-7.6) -- node[t,above]{access\_token, /user, /user/emails} (6,-7.6);
+  \node[t,text=muted,align=center] at (6,-8.35) {crea/actualiza usuario y su equipo\\guarda token cifrado};
+  \draw[ret] (6,-9.2) -- node[t,above]{6. \{token de sesión, user\}} (0,-9.2);
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+  \item \textbf{Doble protección del \code{state}:} el backend solo acepta \code{state} que emitió (un uso, 10 minutos,
+        guardado en SQLite) y el frontend solo acepta el \code{state} que inició esa pestaña (\emph{login CSRF}).
+  \item \textbf{Permisos solicitados:} \code{repo read:user user:email}.
+  \item \textbf{Re-autorizar:} si el usuario revoca el acceso en GitHub, \code{/api/github/*} responde
+        \code{409 github\_not\_connected} y \emph{Nuevo análisis} ofrece volver a conectar sin cerrar la sesión.
+\end{itemize}
+
+\begin{aviso}[Por qué 409 y no 401]
+El cliente HTTP del frontend trata cualquier \code{401} como sesión de la app vencida y la cierra. Un token de GitHub
+revocado no significa que la sesión de IA voy haya vencido, así que se responde \code{409}.
+\end{aviso}
+
+\subsection{Equipos}
+
+\begin{enumerate}
+  \item El primer login crea un equipo propio (\emph{Equipo de Ana}) con el usuario como dueño.
+  \item El dueño crea un enlace de invitación en \ruta{/team} (\code{POST /api/team/invites}, válido 7 días y para varias personas).
+  \item Quien lo abre ve una vista previa (\code{GET /api/team/invites/\{code\}}): equipo, miembros y, si es el único
+        miembro de su equipo actual, qué repos suyos se descartan porque el equipo ya los tiene.
+  \item Al unirse (\code{POST /api/team/join}) sus repos pasan al equipo y su equipo anterior se borra. Si su equipo
+        anterior tenía más miembros, los repos se quedan con ellos.
+  \item El dueño puede renombrar, ceder el equipo y quitar miembros; un miembro puede salirse. Quien sale o es quitado
+        vuelve a un equipo propio vacío. El dueño no puede salir mientras haya más miembros.
+\end{enumerate}
+
+\subsection{Análisis}
+
+\begin{enumerate}
+  \item \emph{Nuevo análisis} envía \code{POST /api/analyze \{url, branch, analyzers, sandbox, index\}}. Debe haber al
+        menos un analizador de cada categoría (si no, \code{422 missing\_analyzers}).
+  \item El backend valida la URL (solo \code{https://github.com/owner/repo}), crea o reutiliza el repo del equipo, lo
+        marca \code{analizando}, guarda el job en la tabla \code{jobs} y lo lanza. Responde \code{\{job\_id\}}.
+  \item El frontend abre \ruta{/ws/jobs/:jobId}: primero un \code{snapshot}, después \code{step}, \code{log} y
+        \code{step\_done} por cada paso. Si el job corre en otro worker, el WebSocket lee su fila cada medio segundo.
+  \item Paso 1, real: \code{git clone} con el token del usuario. Mientras el sandbox corre sus fases, Ruff, Bandit y Radon
+        corren en un hilo del backend; la terminal avanza con cada fase.
+  \item Al terminar se guarda el reporte con sus hallazgos (con fragmento de código) y se emite \code{done}. Los
+        analizadores no elegidos aparecen como \emph{omitido} y no aportan hallazgos.
+\end{enumerate}
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}rlLl@{}}
+\toprule
+\textbf{\#} & \textbf{Paso} & \textbf{Comando mostrado} & \textbf{Dónde} \\
+\midrule
+1 & Clonando repositorio & \code{git clone --depth 1 --branch \{branch\} \{url\}} & backend \\
+2 & Creando entorno aislado & \code{uv venv .venv} & sandbox \\
+3 & Instalando dependencias & \code{uv pip install -r requirements.txt} & sandbox \\
+4 & Bandit & \code{bandit -r . -f json} & backend \\
+5 & pip-audit & \code{pip-audit --path .venv/.../site-packages -f json} & sandbox \\
+6 & pytest & \code{coverage run -m pytest -q --maxfail=50} & sandbox \\
+7 & coverage & \code{coverage json} & sandbox \\
+8 & Ruff & \code{ruff check . --output-format json} & backend \\
+9 & Radon & \code{radon cc . -j \&\& radon mi . -j} & backend \\
+10 & Calculando score & agregación ponderada (\code{.ia\_voy.toml}) & backend \\
+11 & Indexando para el asistente & \code{ast} \flecha{} embeddings (Gemini) \flecha{} SQLite & backend \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{lstlisting}[language=JSON]
+{ "type": "snapshot",  "job": { "id": "job-3f2a...", "step": 0, "total": 11, "status": "running", ... } }
+{ "type": "step",      "index": 5, "total": 11, "name": "pytest", "command": "coverage run -m pytest -q ..." }
+{ "type": "log",       "line": "  139 passed, 1 failed, 3 skipped" }
+{ "type": "step_done", "index": 5 }
+{ "type": "done",      "repo_id": "r1a2b3c4d", "report_id": "r1a2b3c4d-2", "num": 2, "score": 74.1 }
+\end{lstlisting}
+
+\subsubsection*{Sandbox}
+
+\ruta{app/analysis/sandbox.py} escribe un script bash y lo corre en WSL2 (\code{wsl -d Ubuntu-24.04 bash -l}) o en un
+contenedor Docker desechable. El script copia el clon a una carpeta temporal y deja por cada fase un código de salida y
+su log; el backend lee los resultados:
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+\textbf{Fase} & \textbf{Hallazgos que genera} \\
+\midrule
+venv & Si falla, el problema es del sandbox (no del repo): las pruebas se simulan con un aviso. \\
+install & \code{DEPS} (alta) si no se pudieron instalar las dependencias (también instala las de pruebas que declare el proyecto). \\
+audit & Uno por paquete vulnerable, en su línea de \code{requirements.txt}, con las versiones corregidas. \\
+tests & \code{FAIL} / \code{ERROR} por prueba, con archivo y línea (JUnit \code{xunit1}). \\
+coverage & \code{COV} por archivo bajo la cobertura mínima. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsubsection*{Jobs persistentes}
+
+El proceso que corre un job guarda su estado con cada evento y renueva un latido cada 5 segundos. Un job
+\code{running} sin latido por más de 30 segundos se interrumpió (reinicio del servidor): se muestra como error y se
+puede reintentar desde el clonado. Cancelar desde otro worker marca el job y el proceso que lo corre lo detiene en su
+siguiente latido.
+
+\subsection{Score}
+
+\[
+\text{Score} = \frac{w_{\text{seg}}\cdot\text{Seg} + w_{\text{test}}\cdot\text{Test} + w_{\text{prac}}\cdot\text{Prác}}{w_{\text{seg}} + w_{\text{test}} + w_{\text{prac}}}
+\qquad (w = 50,\ 30,\ 20 \text{ por defecto})
+\]
+
+\begin{itemize}
+  \item \textcolor{seg}{\textbf{Seg}} $= 100 -$ penalización de los hallazgos de seguridad abiertos (alta 12, media 6, baja 2).
+  \item \textcolor{prac}{\textbf{Prác}} $= 100 -$ penalización de los de buenas prácticas (alta 6, media 3, baja 1).
+  \item En proyectos de más de 1000 líneas de Python la penalización se escala por cada 1000 líneas; Bandit no
+        revisa los archivos de prueba.
+  \item \textcolor{test}{\textbf{Test}} $=$ cobertura total $- 5$ por prueba que falla. Si no se eligió coverage, la
+        cobertura cuenta como 100 (\emph{no medida}).
+  \item Se calcula al leer, con los hallazgos abiertos y no ignorados y la configuración actual del proyecto.
+\end{itemize}
+
+\subsection{Asistente IA}
+
+El código del clon se parte con el \code{ast} de Python (una función o clase por fragmento) y cada fragmento se guarda
+con su embedding. Para cada pregunta se buscan los 6 fragmentos más parecidos, se arma el contexto con el reporte y el
+hallazgo mencionado, y Gemini responde un JSON con esquema (\code{answer}, \code{sources}, \code{finding\_id}).
+\code{POST /api/chat/stream} entrega el texto de \code{answer} mientras se genera (eventos \code{delta}) y al final la
+respuesta con las fuentes validadas (\code{done}): solo quedan las ubicaciones que estaban en el contexto.
+
+\subsection{Compartir}
+
+\code{POST /api/report/\{id\}/share} crea un enlace \ruta{/r/\{share\_id\}} con expiración (1, 7, 30 días o nunca),
+contraseña opcional (scrypt) y fragmentos de código opcionales. La vista pública muestra solo hallazgos abiertos de
+severidad alta y media. Con contraseña, \code{/unlock} entrega un token firmado de 12 horas; tras 10 intentos fallidos
+en 15 minutos responde \code{429}.
+
+% ============================================================================
+\section{Contrato de la API}
+
+Base \code{/api}. Autenticación \code{Authorization: Bearer <token>} salvo donde se indica. Todo está implementado en
+el backend.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}p{6.5cm}>{\raggedright\arraybackslash}p{6.7cm}@{}}
+\toprule
+\textbf{Método} & \textbf{Ruta} & \textbf{Uso} \\
+\midrule
+\endhead
+\multicolumn{3}{@{}l}{\textbf{\color{branddark}Autenticación y GitHub}} \\
+POST & \ruta{/api/auth/github/authorize} & \code{\{url, state\}} (sin sesión) \\
+POST & \ruta{/api/auth/github/callback} & \code{\{code, state\}} \flecha{} \code{\{token, user\}} \\
+GET & \ruta{/api/auth/me} & Usuario de la sesión (con su equipo) \\
+POST & \ruta{/api/auth/logout} & \code{204} \\
+GET & \ruta{/api/github/status}, \ruta{/repos?q=}, \ruta{/repos/\{owner\}/\{repo\}/branches} & Cuenta, repos y ramas \\
+\multicolumn{3}{@{}l}{\textbf{\color{branddark}Equipo}} \\
+GET/PATCH & \ruta{/api/team} & Equipo y miembros; renombrar (dueño) \\
+POST & \ruta{/api/team/invites} & Enlace de invitación (dueño) \\
+GET & \ruta{/api/team/invites/\{code\}} & Vista previa antes de unirse \\
+POST & \ruta{/api/team/join} & Unirse con \code{\{code\}} \\
+DELETE & \ruta{/api/team/members/\{id|me\}} & Quitar a alguien (dueño) o salir \\
+POST & \ruta{/api/team/members/\{id\}/owner} & Ceder el equipo \\
+\multicolumn{3}{@{}l}{\textbf{\color{branddark}Análisis}} \\
+POST & \ruta{/api/analyze} & \code{\{url, branch, analyzers, sandbox, index\}} \flecha{} \code{\{job\_id\}} \\
+GET / DELETE & \ruta{/api/jobs/\{id\}} & Estado / cancelar \\
+POST & \ruta{/api/jobs/\{id\}/retry} & Reintentar \\
+WS & \ruta{/ws/jobs/\{id\}} & Progreso en vivo \\
+POST & \ruta{/api/repos/\{id\}/analyze} & Re-analizar (mismos analizadores) \\
+\multicolumn{3}{@{}l}{\textbf{\color{branddark}Repositorios, reportes y tablero}} \\
+GET & \ruta{/api/dashboard?repo=}, \ruta{/api/repos}, \ruta{/api/repos/\{id\}/history} & Tablero, repos e historial \\
+GET & \ruta{/api/report/\{id|latest\}?repo=} & Reporte completo \\
+GET & \ruta{/api/report/\{id\}/export?format=} & JSON, HTML, Markdown o SARIF \\
+\multicolumn{3}{@{}l}{\textbf{\color{branddark}Editor, asistente, comparativa y configuración}} \\
+GET & \ruta{/api/repos/\{id\}/tree}, \ruta{/api/file?repo=\&path=} & Árbol y archivo \\
+PUT & \ruta{/api/file} & Guardar (respaldo + re-análisis del archivo) \\
+POST & \ruta{/api/fix} & Parches de corrección automática \\
+POST & \ruta{/api/chat/stream}, \ruta{/api/chat} & Asistente (SSE / respuesta completa) \\
+GET & \ruta{/api/repos/\{id\}/index} & Estado del índice del asistente \\
+GET / POST & \ruta{/api/repos/\{id\}/analyses}, \ruta{/api/diff} & Comparativa \\
+GET / PUT & \ruta{/api/projects/\{id\}/config} & Configuración del proyecto \\
+GET & \ruta{/api/health} & Estado de servicios \\
+\multicolumn{3}{@{}l}{\textbf{\color{branddark}Compartir}} \\
+POST & \ruta{/api/report/\{id\}/share} & \code{\{password?, expires\_days, include\_code\}} \flecha{} \code{\{share\_id, url, expires\_at\}} \\
+GET & \ruta{/api/public/r/\{id\}?token=} & Vista pública (sin sesión) \\
+POST & \ruta{/api/public/r/\{id\}/unlock} & \code{\{password\}} \flecha{} \code{\{token\}} \\
+\bottomrule
+\end{longtable}
+
+\subsection*{Códigos de error relevantes}
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}llL@{}}
+\toprule
+\textbf{HTTP} & \textbf{code} & \textbf{Cuándo} \\
+\midrule
+401 & \code{unauthorized}, \code{session\_expired} & Sin token, token alterado o vencido (el frontend cierra sesión) \\
+401 & \code{password\_required} & Enlace público con contraseña sin desbloquear \\
+400 & \code{invalid\_state} & \code{state} de OAuth inexistente, usado o vencido \\
+403 & \code{not\_owner}, \code{wrong\_password} & Acción solo del dueño del equipo; contraseña incorrecta \\
+404 & \code{not\_found} & No existe o es de otro equipo (no se revela cuál) \\
+409 & \code{github\_not\_connected} & Token de GitHub revocado \\
+409 & \code{already\_running}, \code{owner\_must\_transfer} & Análisis en curso; dueño que quiere salir con miembros \\
+410 & \code{expired} & Enlace compartido o invitación vencidos \\
+422 & \code{invalid\_url}, \code{missing\_analyzers}, \code{invalid\_config} & Datos no válidos \\
+429 & \code{too\_many\_attempts} & Demasiadas contraseñas incorrectas en un enlace \\
+503 & \code{llm\_not\_configured}, \code{llm\_rate\_limited}, \code{llm\_busy} & Asistente sin clave o modelos saturados \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ============================================================================
+\section{Seguridad}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+\textbf{Riesgo} & \textbf{Medida} \\
+\midrule
+Robo del token de GitHub & Solo lo maneja el backend; cifrado con Fernet en SQLite. Al clonar viaja como cabecera en variables de entorno de git, nunca en \code{.git/config} ni en la línea de comandos. \\
+Login CSRF & \code{state} de un uso (backend) + comparación con el \code{state} iniciado en la pestaña (frontend). \\
+Sesiones falsificadas & Firma HMAC-SHA256 comparada en tiempo constante; vencimiento de 30 días. \\
+Acceso a datos de otro equipo & Repos, reportes, jobs, archivos y chat se filtran por el equipo; lo ajeno responde \code{404}. \\
+Código malicioso en un repo & pip-audit, pytest y coverage corren en el sandbox, sin las variables de entorno del backend. \textbf{WSL2 no aísla el disco} (\code{/mnt/c}): para repos ajenos usar Docker. \\
+Clonar direcciones internas & Solo se aceptan URL \code{https://github.com/owner/repo}. \\
+Rutas fuera del clon (editor) & Rutas relativas sin \code{..} ni partes ocultas; los enlaces simbólicos que salen del clon se rechazan. \\
+Enlaces públicos & Contraseña con scrypt, token de 12 horas firmado, bloqueo tras 10 intentos fallidos, código fuente solo si se pidió. \\
+Prompt injection & El prompt trata el código del repo como datos; las fuentes que cita el modelo se validan contra el contexto. \\
+WebSocket sin cabeceras & El navegador no puede enviar \code{Authorization}: el id aleatorio de 64 bits del job actúa como credencial de solo lectura. \\
+Secretos en git & \code{.env}, \code{data/} (base de datos y \code{secrets.json}) y \code{.venv/} están en \code{.gitignore}. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ============================================================================
+\section{Puesta en marcha}
+
+\subsection{Requisitos}
+\begin{itemize}
+  \item \textbf{Node.js 20.19 o superior} (Vite 8 no arranca con Node 18) y \textbf{Python 3.12 o superior}.
+  \item \textbf{Git} en la máquina del backend.
+  \item Para el sandbox: \textbf{WSL2 con Ubuntu-24.04 y \code{uv}}, o \textbf{Docker Desktop} corriendo.
+  \item Una \textbf{OAuth App} de GitHub: \emph{Homepage URL} \code{http://localhost:5173} y \emph{Authorization
+        callback URL} \code{http://localhost:5173/github/callback}.
+  \item Opcional: una clave de Gemini para el asistente.
+\end{itemize}
+
+\subsection{Backend}
+\begin{lstlisting}[language=texto]
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+copy .env.example .env      # llenar GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GEMINI_API_KEY
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+\end{lstlisting}
+
+\subsection{Frontend}
+\begin{lstlisting}[language=texto]
+cd frontend
+npm ci
+npm run dev                 # http://localhost:5173 (backend real)
+npm test                    # pruebas unitarias
+npm run test:e2e            # los 5 flujos del spec en Chrome (MSW)
+\end{lstlisting}
+
+% ============================================================================
+\section{Pruebas}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+\textbf{Archivo} & \textbf{Qué cubre} \\
+\midrule
+\multicolumn{2}{@{}l}{\textbf{\color{branddark}Backend (pytest)}} \\
+\ruta{test\_auth.py}, \ruta{test\_github.py} & Login, \code{state} inválido, reutilizado o vencido, token revocado, repos y ramas. \\
+\ruta{test\_analysis.py} & Análisis completo, clonado, árbol, editor, re-análisis, WebSocket, cancelar y reintentar. \\
+\ruta{test\_sandbox.py} & Lectura de JUnit, coverage y pip-audit; job con un sandbox falso; sandbox roto o apagado. \\
+\ruta{test\_jobs.py} & Jobs vistos desde otro worker, interrumpidos y reintentados, cancelados de forma remota, WebSocket remoto; analizadores elegidos. \\
+\ruta{test\_teams.py} & Equipos propios, invitar y unirse, conflictos de nombres, salir, quitar, ceder; migración de bases anteriores. \\
+\ruta{test\_share.py} & Enlaces, contraseña, expiración, fuerza bruta, reglas ignoradas, fragmentos de código. \\
+\ruta{test\_assistant.py} & Índice, contexto, fuentes validadas, respaldo entre modelos, streaming SSE. \\
+\ruta{test\_compare.py}, \ruta{test\_config*.py} & Comparativa; configuración y \code{.ia\_voy.toml}. \\
+\multicolumn{2}{@{}l}{\textbf{\color{branddark}Frontend}} \\
+\ruta{tests/unit} (Vitest) & Reductor del job, parches, score, sugerencias del asistente, lector de SSE. \\
+\ruta{tests/e2e} (Playwright) & Los 5 flujos del spec, reintento de un análisis con error, equipo y validación de analizadores. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{listo}[Resultado]
+Backend: 188 pruebas pasan sin llamadas de red (GitHub, git, el LLM y el sandbox se sustituyen por dobles).
+Frontend: 22 pruebas unitarias y 8 e2e. Además se probaron de punta a punta el sandbox WSL2 con el repo de ejemplo y
+el streaming contra Gemini real.
+\end{listo}
+
+% ============================================================================
+\section{Mapa de conocimiento (graphify)}
+
+graphify convierte el repositorio en un grafo: extrae del código (AST, sin LLM) funciones, tipos, imports y llamadas,
+y de la documentación los conceptos y sus relaciones. Luego agrupa los nodos en comunidades y señala los más
+conectados.
+
+\begin{center}
+\begin{tikzpicture}
+  \foreach \x/\v/\l in {0/1909/nodos, 3.9/3907/relaciones, 7.8/183/comunidades, 11.7/85\%/extraídas del código}{
+    \node[draw=brand,fill=brandsoft,rounded corners=4pt,minimum width=3.5cm,minimum height=1.6cm,align=center] at (\x,0)
+      {{\Large\bfseries\color{branddark}\v}\\[-1pt]{\scriptsize\color{muted}\l}};
+  }
+\end{tikzpicture}
+\end{center}
+
+{\small El 15\,\% restante son 575 relaciones \emph{inferidas}; ninguna ambigua. No hay ciclos de importación.}
+
+\subsection{Nodos más conectados}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}rlrL@{}}
+\toprule
+\textbf{\#} & \textbf{Nodo} & \textbf{Conexiones} & \textbf{Por qué es central} \\
+\midrule
+1 & \code{Settings} & 122 & Toda la configuración del backend pasa por él. \\
+2 & \code{ApiError} & 76 & Formato de error compartido. \\
+3 & \code{AnalysisStore} & 71 & Repos, reportes y hallazgos en SQLite. \\
+4 & \code{Workspace} & 50 & Copia de trabajo del repo (editor, análisis, asistente). \\
+5 & \code{JobManager} & 37 & Ciclo de vida de los análisis. \\
+6 & \code{LLM} & 32 & Cliente de Gemini y Groq. \\
+7 & \code{Job} & 31 & Estado de un análisis. \\
+8 & \code{LlmError} & 26 & Fallos de los modelos y respaldo. \\
+9 & \code{FindingInput} & 24 & Contrato entre los analizadores y el almacén. \\
+10 & \code{seed()} & 24 & Datos de demostración usados por muchas pruebas. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Cómo consultar el grafo}
+
+\begin{lstlisting}[language=texto]
+graphify query "como funciona el login con GitHub"     # contexto amplio (BFS)
+graphify path "AnalyzeForm" "JobManager"               # camino entre dos conceptos
+graphify explain "JobManager"                          # explicación de un nodo
+graphify update .                                      # actualizar tras cambiar código (sin costo)
+\end{lstlisting}
+
+El grafo interactivo está en \ruta{graphify-out/graph.html} y el reporte completo en \ruta{graphify-out/GRAPH\_REPORT.md}.
+
+% ============================================================================
+\section{Pendientes y limitaciones}
+
+\subsection{Siguientes pasos}
+\begin{enumerate}
+  \item \textbf{Túnel de Cloudflare:} conectarlo y que \code{/api/health} muestre su estado y su URL real.
+  \item \textbf{Sandbox Docker:} probarlo de punta a punta antes de publicar la app para otras personas.
+  \item \textbf{QA manual} de los 5 flujos contra el backend real con una cuenta de GitHub (los e2e usan MSW).
+\end{enumerate}
+
+\subsection{Limitaciones conocidas}
+\begin{itemize}
+  \item El sandbox WSL2 puede leer el disco de Windows; las pruebas del repo corren con acceso a la red.
+  \item \code{/api/github/repos} trae los 100 repos con actividad más reciente; la búsqueda filtra sobre ellos.
+  \item SQLite es suficiente para desarrollo y pocos usuarios; para varios servidores conviene PostgreSQL.
+  \item Un usuario pertenece a un solo equipo a la vez.
+  \item Los repos de organizaciones que restringen OAuth Apps requieren que un administrador apruebe la app.
+\end{itemize}
+
+\end{document}

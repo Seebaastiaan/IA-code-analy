@@ -1,9 +1,14 @@
+import { useMutation } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
+import { invalidateAnalysis } from '@/shared/api/invalidate'
+import { queryClient } from '@/shared/api/queryClient'
 import { paths } from '@/shared/constants/paths'
-import { Card, Icon, PageHeader, Spinner, buttonClass } from '@/shared/ui'
+import { toast } from '@/shared/hooks/useToast'
+import { Button, Card, Icon, PageHeader, Spinner, buttonClass } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
-import { JOB_STEPS } from '../constants/jobSteps'
+import { analysisApi } from '../api/analysis.api'
+import { JOB_STEPS, NEXT_STEPS } from '../constants/jobSteps'
 import { useJobStore } from '../store/job.store'
 import type { Job } from '../types'
 
@@ -75,11 +80,25 @@ function Terminal({ job }: { job: Job }) {
 }
 
 export function JobView({ jobId }: { jobId: string }) {
-  const { job, connect } = useJobStore()
+  const { job, connect, markCancelled } = useJobStore()
 
   useEffect(() => {
     connect(jobId)
   }, [jobId, connect])
+
+  const cancel = useMutation({
+    mutationFn: () => analysisApi.cancel(jobId),
+    onSuccess: () => {
+      markCancelled()
+      void invalidateAnalysis(queryClient)
+      toast('Análisis cancelado', { tone: 'info' })
+    },
+  })
+  const retry = useMutation({
+    mutationFn: () => analysisApi.retry(jobId),
+    onSuccess: () => connect(jobId, true),
+    onError: (e) => toast(e.message, { tone: 'err' }),
+  })
 
   if (!job || job.id !== jobId)
     return (
@@ -105,19 +124,29 @@ export function JobView({ jobId }: { jobId: string }) {
         title={<span className="break-all">{job.name}</span>}
         actions={
           <>
-            {(err || cancelled) && (
-              <Link to={paths.analyze({ url: job.url, branch: job.branch })} className={buttonClass('primary')}>
-                <Icon name="refresh" className="w-4 h-4" />
-                Volver a intentar
-              </Link>
+            {job.status === 'running' && (
+              <Button variant="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                Cancelar
+              </Button>
             )}
-            {done && job.repo_id && job.report_id && (
+            {(err || cancelled) && (
               <>
-                <Link to={paths.analyze()} className={buttonClass('secondary')}>
-                  Nuevo análisis
+                <Link to={paths.analyze({ url: job.url, branch: job.branch })} className={buttonClass('secondary')}>
+                  Editar parámetros
                 </Link>
-                <Link to={paths.report(job.repo_id, job.report_id)} className={buttonClass('primary')}>
-                  Ver reporte <Icon name="arrow" className="w-4 h-4" />
+                <Button onClick={() => retry.mutate()} disabled={retry.isPending}>
+                  <Icon name="refresh" className="w-4 h-4" />
+                  Reintentar
+                </Button>
+              </>
+            )}
+            {done && job.repo_id && (
+              <>
+                <Link to={paths.files(job.repo_id)} className={buttonClass('secondary')}>
+                  Ver archivos
+                </Link>
+                <Link to={paths.repos()} className={buttonClass('primary')}>
+                  Ver en Repositorios <Icon name="arrow" className="w-4 h-4" />
                 </Link>
               </>
             )}
@@ -128,7 +157,7 @@ export function JobView({ jobId }: { jobId: string }) {
       <Card className="p-5 mb-4">
         <div className="flex items-center justify-between mb-2 text-sm">
           <span className="font-medium">
-            {err ? 'El análisis se detuvo' : done ? 'Análisis completado' : cancelled ? 'Análisis cancelado' : `${JOB_STEPS[job.step]?.name ?? ''}…`}
+            {err ? 'El análisis se detuvo' : done ? 'Entorno listo · análisis guardado en el repositorio' : cancelled ? 'Análisis cancelado' : `${JOB_STEPS[job.step]?.name ?? ''}…`}
           </span>
           <span className={cn('font-mono tabular-nums', err ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500')}>{pct}%</span>
         </div>
@@ -164,6 +193,16 @@ export function JobView({ jobId }: { jobId: string }) {
                 </li>
               )
             })}
+          </ol>
+          <p className="mt-4 mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Siguientes sprints</p>
+          <ol className="space-y-1">
+            {NEXT_STEPS.map((s) => (
+              <li key={s.name} className="flex items-center gap-3 rounded-lg px-2 py-1.5 opacity-60">
+                <span className="w-6 h-6 rounded-full border-2 border-dashed border-slate-200 dark:border-slate-700" />
+                <span className="text-sm text-slate-400 flex-1">{s.name}</span>
+                <span className="text-[10px] font-mono text-slate-400">S{s.sprint}</span>
+              </li>
+            ))}
           </ol>
         </Card>
         <Terminal job={job} />

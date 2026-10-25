@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { authApi, useSession } from '@/features/auth'
+import { useSelectedRepo } from '@/features/repos/store/selectedRepo.store'
 import { paths } from '@/shared/constants/paths'
 
 export function UserMenu() {
@@ -10,6 +11,7 @@ export function UserMenu() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { user, signOut } = useSession()
+  const repoId = useSelectedRepo((s) => s.repoId)
 
   // Cierra al hacer clic fuera
   useEffect(() => {
@@ -20,6 +22,11 @@ export function UserMenu() {
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
   }, [open])
+
+  const go = (to: string) => {
+    setOpen(false)
+    navigate(to)
+  }
 
   const logout = async () => {
     setOpen(false)
@@ -46,6 +53,16 @@ export function UserMenu() {
             {user?.login && <p className="text-xs text-slate-500">@{user.login}</p>}
             {user && <p className="text-xs text-slate-500">{`${user.team.name} · ${user.team.members} miembro(s)`}</p>}
           </div>
+          <button
+            type="button"
+            onClick={() => go(repoId ? paths.settings(repoId) : paths.repos())}
+            className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            Configuración
+          </button>
+          <button type="button" onClick={() => go(paths.team())} className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
+            Equipo
+          </button>
           <button type="button" onClick={logout} className="w-full text-left px-3 py-2 rounded-lg text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10">
             Cerrar sesión
           </button>

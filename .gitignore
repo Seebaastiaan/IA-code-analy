@@ -13,9 +13,16 @@ dist-ssr/
 
 # Configuración local de herramientas
 .claude/
+graphify-out/cache/
 
 # SO / editores
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+graphify-out/.graphify_labels.pending.json
+
+# Material interno del equipo (no va al repo oficial)
+docs/sprint4/
+Planeacion_v3_IA_VOY.docx

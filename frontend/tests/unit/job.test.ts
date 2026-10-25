@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { reduceJob } from '@/features/analysis/store/job.store'
 import type { Job } from '@/features/analysis/types'
 
-const base: Job = { id: 'job-1', url: 'https://github.com/e/r', name: 'e/r', branch: 'main', step: 0, total: 11, status: 'running', logs: [] }
+const base: Job = { id: 'job-1', url: 'https://github.com/e/r', name: 'e/r', branch: 'main', step: 0, total: 2, status: 'running', logs: [] }
 
 describe('reduceJob', () => {
   it('el snapshot reemplaza el estado (reconexión)', () => {
@@ -21,12 +21,12 @@ describe('reduceJob', () => {
   })
 
   it('marca error con detalle', () => {
-    const j = reduceJob(base, { type: 'error', step: 5, title: 't', detail: 'd', hint: 'h' })
-    expect(j).toMatchObject({ status: 'error', step: 5, error: { title: 't', detail: 'd', hint: 'h' } })
+    const j = reduceJob(base, { type: 'error', step: 1, title: 't', detail: 'd', hint: 'h' })
+    expect(j).toMatchObject({ status: 'error', step: 1, error: { title: 't', detail: 'd', hint: 'h' } })
   })
 
-  it('al terminar guarda el reporte y llega al 100 %', () => {
-    const j = reduceJob(base, { type: 'done', repo_id: 'r1', report_id: 'r1-129', num: 129, score: 74 })
-    expect(j).toMatchObject({ status: 'done', step: 11, repo_id: 'r1', report_id: 'r1-129' })
+  it('al terminar guarda el análisis en el repositorio y llega al 100 %', () => {
+    const j = reduceJob(base, { type: 'done', repo_id: 'r1', report_id: 'r1-4', num: 4 })
+    expect(j).toMatchObject({ status: 'done', step: 2, repo_id: 'r1', report_id: 'r1-4' })
   })
 })

@@ -2,6 +2,7 @@ import json
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from cryptography.fernet import Fernet
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,12 +22,14 @@ class Settings(BaseSettings):
     # Carpeta de los repos clonados. Vacía = fuera del proyecto (ver app.analysis.clone.clones_root):
     # dentro de OneDrive/Dropbox la sincronización bloquea los archivos recién clonados.
     clones_path: str = ""
-    # Pausa visual entre los pasos del análisis (11 pasos) para seguirlos en la terminal en vivo
+    # Pausa visual antes de crear el entorno cuando no hay sandbox (la terminal alcanza a mostrar el paso)
     job_step_seconds: float = 0.9
-    # API de IA (Gemini). El análisis no la usa: el motor es determinista (docs/adr/ADR-001)
-    gemini_api_key: str = ""
-    # gemini-2.5-flash ya no está disponible para claves nuevas
-    gemini_model: str = "gemini-3.8-flash"
+    # Dónde se crea el entorno aislado (app.analysis.sandbox): off = en el backend, wsl o docker
+    sandbox: Literal["off", "wsl", "docker"] = "off"
+    sandbox_wsl_distro: str = "Ubuntu-24.04"
+    sandbox_docker_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
+    # Límite del sandbox por análisis
+    sandbox_timeout_s: int = 600
 
     @property
     def github_redirect_uri(self) -> str:

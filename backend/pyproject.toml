@@ -1,6 +1,6 @@
 [project]
 name = "ia-voy-backend"
-version = "0.1.0"
+version = "0.4.0"
 description = "API de IA voy: análisis de repositorios Python"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,14 +9,10 @@ dependencies = [
     "httpx>=0.28",
     "pydantic-settings>=2.6",
     "cryptography>=44",
-    # Analizadores estáticos: corren sobre el clon (análisis) y sobre un archivo (editor)
-    "ruff>=0.15",
-    "bandit>=1.8",
-    "radon>=6.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3"]
+dev = ["pytest>=8.3", "ruff>=0.15"]
 
 [build-system]
 requires = ["hatchling"]
@@ -30,7 +26,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 160
-# Proyecto de ejemplo con problemas a propósito (lo analiza app/seed.py)
+# Proyecto de ejemplo con problemas a propósito (golden repo de QA)
 extend-exclude = ["seed_data"]
 
 [tool.ruff.lint]

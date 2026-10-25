@@ -1,3 +1,4 @@
-export { reposApi, useRepo, useRepos, useRepoTree } from './api/repos.api'
+export { reposApi, useFile, useRepo, useRepoHistory, useRepos, useRepoTree } from './api/repos.api'
+export { useReanalyze } from './hooks/useReanalyze'
 export { useSelectedRepo } from './store/selectedRepo.store'
-export type { Repo, TreeEntry } from './types'
+export type { Repo, SavedReport, TreeEntry } from './types'

@@ -4,14 +4,13 @@ import re
 import sqlite3
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app.analysis.jobs import Job, JobManager, jobs, now_iso
-from app.assistant.llm import model_label
 from app.auth import current_user_id
 from app.config import Settings, get_settings
-from app.db import get_db
+from app.db import connect, get_db
 from app.errors import ApiError
 from app.teams.store import team_id_of
 
@@ -37,18 +36,15 @@ Config = Annotated[Settings, Depends(get_settings)]
 class AnalyzeRequest(BaseModel):
     url: str
     branch: str = "main"
+    # Crear el entorno aislado en el sandbox (SANDBOX=wsl|docker); False = en el backend
+    sandbox: bool = True
 
 
 class JobStarted(BaseModel):
     job_id: str
 
 
-def _latest_cat(conn: sqlite3.Connection, repo_id: str) -> dict | None:
-    row = conn.execute("SELECT seg, test, prac FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
-    return dict(row) if row else None
-
-
-def _start(conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_id: str, url: str, branch: str) -> Job:
+def _start(conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_id: str, url: str, branch: str, sandbox: bool = True) -> Job:
     m = REPO_URL.match(url.strip())
     if not m:
         raise ApiError(422, "invalid_url", "Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)")
@@ -70,11 +66,11 @@ def _start(conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_
             raise ApiError(409, "already_running", "Ya hay un análisis en curso para este repositorio")
         conn.execute("UPDATE repos SET status = 'analizando', error = NULL, branch = ?, url = ? WHERE id = ?", (branch, url, repo_id))
     conn.commit()
-    return jobs.start(settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, _latest_cat(conn, repo_id))
+    return jobs.start(settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, sandbox=sandbox)
 
 
 def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: str) -> Job:
-    """El job si es del equipo del usuario."""
+    """El job si es del equipo del usuario (corra en este proceso o en otro)."""
     job = jobs.get(conn, job_id)
     if job is None or job.team_id != team_id_of(conn, user_id):
         raise ApiError(404, "not_found", "Análisis no encontrado")
@@ -86,7 +82,7 @@ def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: s
 
 @router.post("/api/analyze", response_model=JobStarted)
 async def analyze(body: AnalyzeRequest, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> JobStarted:
-    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main")
+    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox)
     return JobStarted(job_id=job.id)
 
 
@@ -95,18 +91,44 @@ def job_snapshot(job_id: str, user_id: UserId, jobs: Jobs, conn: Db) -> dict:
     return _own_job(conn, jobs, job_id, user_id).public()
 
 
+@router.delete("/api/jobs/{job_id}", status_code=204)
+def cancel_job(job_id: str, user_id: UserId, jobs: Jobs, settings: Config, conn: Db) -> Response:
+    jobs.cancel(settings, _own_job(conn, jobs, job_id, user_id))
+    return Response(status_code=204)
+
+
+@router.post("/api/jobs/{job_id}/retry", response_model=JobStarted)
+async def retry_job(job_id: str, user_id: UserId, jobs: Jobs, settings: Config, conn: Db) -> JobStarted:
+    job = _own_job(conn, jobs, job_id, user_id)
+    if job.status == "running":
+        raise ApiError(409, "already_running", "El análisis sigue en curso")
+    if job.status == "done":
+        raise ApiError(409, "already_done", "El análisis ya terminó; inicia uno nuevo")
+    jobs.retry(settings, job)
+    return JobStarted(job_id=job.id)
+
+
 @router.websocket("/ws/jobs/{job_id}")
-async def job_socket(ws: WebSocket, job_id: str, jobs: Jobs) -> None:
+async def job_socket(ws: WebSocket, job_id: str, jobs: Jobs, settings: Config) -> None:
     # El navegador no puede enviar Authorization en un WebSocket: el id del job (aleatorio, de 64 bits)
     # funciona como credencial de lectura del progreso.
     await ws.accept()
-    job = jobs.get(None, job_id)
+    conn = connect(settings.database_path)
+    try:
+        job = jobs.get(conn, job_id)
+    finally:
+        conn.close()
     if job is None:
         await ws.close(code=4404, reason="Job no encontrado")
         return
-    queue = jobs.subscribe(job)
+    # Corre en este proceso: eventos al instante. En otro worker: se leen de la tabla jobs.
+    queue = jobs.subscribe(job) if jobs.is_local(job) else None
 
     async def pump() -> None:
+        if queue is None:
+            async for msg in jobs.follow_remote(settings, job_id):
+                await ws.send_json(msg)
+            return
         while True:
             await ws.send_json(await queue.get())
 
@@ -124,18 +146,38 @@ async def job_socket(ws: WebSocket, job_id: str, jobs: Jobs) -> None:
     finally:
         for t in tasks:
             t.cancel()
-        jobs.unsubscribe(job, queue)
+        if queue is not None:
+            jobs.unsubscribe(job, queue)
+
+
+# ─── Re-análisis ───
+# Lista de repos, análisis guardados, árbol y archivos: app.repos
+
+
+@router.post("/api/repos/{repo_id}/analyze", response_model=JobStarted)
+async def reanalyze(repo_id: str, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> JobStarted:
+    repo = conn.execute("SELECT * FROM repos WHERE id = ? AND team_id = ?", (repo_id, team_id_of(conn, user_id))).fetchone()
+    if repo is None:
+        raise ApiError(404, "not_found", "Repositorio no encontrado")
+    return JobStarted(job_id=_start(conn, jobs, settings, user_id, repo["url"], repo["branch"]).id)
+
+
+def sandbox_service(settings: Settings) -> dict:
+    """Dónde se crea el entorno aislado del paso 2 (app.analysis.sandbox)."""
+    if settings.sandbox == "off":
+        return {"id": "sandbox", "name": "Sandbox", "role": "Apagado: el entorno se crea en el backend (SANDBOX=off)", "status": "standby", "label": "Apagado"}
+    name = f"Sandbox WSL2 ({settings.sandbox_wsl_distro})" if settings.sandbox == "wsl" else "Sandbox Docker"
+    return {"id": "sandbox", "name": name, "role": "Crea el entorno aislado (uv venv)", "status": "ok", "label": "Activo"}
 
 
 @router.get("/api/health")
 def health(settings: Config) -> dict:
-    def configured(key: str) -> dict:
-        return {"status": "ok", "label": "Configurado"} if key else {"status": "standby", "label": "Sin configurar"}
-
+    github = {"status": "ok", "label": "Configurado"} if settings.github_client_id else {"status": "standby", "label": "Sin configurar"}
     return {
         "tunnel_host": None,
         "services": [
-            {"id": "llm", "name": model_label(settings.gemini_model), "role": "Modelo principal", **configured(settings.gemini_api_key)},
+            {"id": "github", "name": "GitHub OAuth", "role": "Inicio de sesión y repos privados", **github},
+            sandbox_service(settings),
             {"id": "tunnel", "name": "Cloudflare Tunnel", "role": "Acceso público", "status": "down", "label": "Inactivo"},
         ],
     }

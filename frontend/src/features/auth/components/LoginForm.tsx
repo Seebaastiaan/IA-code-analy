@@ -14,7 +14,7 @@ export function GithubMark({ className = 'w-5 h-5' }: { className?: string }) {
 export function LoginForm() {
   const location = useLocation()
   // Vuelve a la página que pidió login, o al tablero
-  const login = useGithubLogin((location.state as { from?: string } | null)?.from ?? paths.dashboard())
+  const login = useGithubLogin((location.state as { from?: string } | null)?.from ?? paths.repos())
   const busy = login.isPending || login.isSuccess
 
   return (

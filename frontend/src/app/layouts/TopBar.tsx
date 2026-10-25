@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useMatches, useNavigate } from 'react-router'
 import { JobPill } from '@/features/analysis'
-import { useSelectedRepo } from '@/features/repos/store/selectedRepo.store'
 import { paths } from '@/shared/constants/paths'
 import { Icon, ThemeToggle } from '@/shared/ui'
 import { UserMenu } from './UserMenu'
@@ -12,16 +11,15 @@ function usePageTitle() {
   return (match?.handle as { title: string } | undefined)?.title ?? 'IA voy'
 }
 
-/** Enter → reporte del repo activo filtrado por el texto. */
+/** Enter → lista de repositorios filtrada por el texto. */
 function GlobalSearch() {
   const [q, setQ] = useState('')
   const navigate = useNavigate()
-  const repoId = useSelectedRepo((s) => s.repoId)
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
     if (!q.trim()) return
-    navigate(repoId ? `${paths.report(repoId)}?tab=hallazgos&q=${encodeURIComponent(q.trim())}` : paths.repos())
+    navigate(`${paths.repos()}?q=${encodeURIComponent(q.trim())}`)
     setQ('')
   }
 
@@ -34,7 +32,7 @@ function GlobalSearch() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         aria-label="Buscar"
-        placeholder="Buscar archivo, regla o hallazgo… (Enter)"
+        placeholder="Buscar repositorio… (Enter)"
         className="w-full rounded-xl bg-slate-100 dark:bg-slate-900 border border-transparent focus:border-brand-400 focus:bg-white dark:focus:bg-slate-900 focus:ring-4 focus:ring-brand-500/10 pl-9 pr-3 py-2 text-sm outline-none transition placeholder:text-slate-400"
       />
     </form>

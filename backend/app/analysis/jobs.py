@@ -1,34 +1,57 @@
 """
-Jobs de análisis (en memoria del proceso). El paso 1 (clonar) es REAL: descarga el repo con git, usando el
-token de GitHub del usuario si lo tiene. Después corren Ruff, Bandit y Radon sobre el clon
-(app.analysis.pipeline); el entorno, las dependencias, pip-audit, pytest y coverage se simulan hasta tener
-sandbox. La terminal del usuario avanza por WebSocket con cada paso y al final se guarda el reporte.
+Jobs de análisis (Sprint 4: hasta "Creando entorno aislado").
+
+1. Clonar: REAL. Descarga el repo con git, usando el token de GitHub del usuario si lo tiene, y detecta
+   sus lenguajes (IA voy solo analiza Python).
+2. Crear entorno aislado: REAL. `uv venv` en el sandbox (SANDBOX=wsl|docker) o `python -m venv` en el
+   backend (SANDBOX=off).
+
+Al terminar se guarda el registro del análisis en `reports` (rama, commit, duración y lenguajes): es la
+historia del repositorio donde los siguientes sprints agregarán hallazgos y score. La terminal del usuario
+avanza por WebSocket con cada paso.
+
+Persistencia (tabla `jobs`): el proceso que corre un job guarda su estado con cada evento y renueva un
+latido (`heartbeat`). Así:
+- GET /api/jobs/{id} y el WebSocket funcionan desde cualquier worker (el que no lo corre lee la tabla).
+- Un job "running" sin latido reciente se interrumpió (reinicio del servidor): se muestra como error y se
+  puede reintentar (desde el clonado).
+- Cancelar desde otro worker marca el job; el que lo corre lo ve en su latido y lo detiene.
 """
 
 import asyncio
+import json
 import logging
-import random
 import secrets
 import sqlite3
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from cryptography.fernet import Fernet
 
-from app.analyses.analyzers import AnalyzerError
+from app.analyses.config_file import import_repo_config
 from app.analyses.store import AnalysisStore
-from app.analyses.views import report_scores
-from app.analyses.workspace import Workspace
-from app.analysis import fake, languages, pipeline
+from app.analysis import languages, sandbox
 from app.analysis.clone import CloneError, Cloner, clone_dir
+from app.analysis.steps import CLONE_STEP, JOB_STEPS, VENV_STEP
 from app.config import Settings
-from app.db import session
+from app.db import connect, session
 from app.github.store import GithubAccountStore
 
 log = logging.getLogger(__name__)
-# "Indexando para el asistente" en fake.JOB_STEPS
-INDEX_STEP = 10
+# Cada cuánto el proceso que corre un job renueva su latido y revisa si lo cancelaron desde otro worker
+HEARTBEAT_S = 5.0
+# Sin latido por más de esto, el job se considera interrumpido
+STALE_S = 30.0
+# Cada cuánto el WebSocket de un job que corre en otro worker lee su estado
+REMOTE_POLL_S = 0.5
+
+INTERRUPTED = {
+    "title": "El análisis se interrumpió",
+    "detail": "El servidor se reinició mientras corría el análisis.",
+    "hint": "Reintenta: el análisis empieza de nuevo desde el clonado.",
+}
 
 
 def now_iso() -> str:
@@ -44,22 +67,29 @@ class Job:
     url: str
     name: str
     branch: str
-    seed: int
-    cat: dict
-    # Inicio del análisis (time.monotonic) para la duración que muestra el reporte
+    db_path: str
+    # Crear el entorno en el sandbox (si SANDBOX lo permite); False = en el backend
+    sandbox: bool = True
+    # Inicio del análisis (time.monotonic) para la duración que se guarda
     started: float = field(default_factory=time.monotonic)
     step: int = 0
-    total: int = len(fake.JOB_STEPS)
+    total: int = len(JOB_STEPS)
     status: str = "running"
     logs: list[str] = field(default_factory=list)
     error: dict | None = None
     commit: str | None = None
     report_id: str | None = None
-    # Lenguajes del repo (al clonar); el reporte los muestra
+    # Evento "done" ({num}) para quien siga el job desde otro worker
+    done: dict | None = None
+    # Lenguajes del repo (al clonar); se guardan con el análisis
     repo_languages: list[languages.Language] = field(default_factory=list)
-    result: pipeline.PipelineResult | None = None
     listeners: set[asyncio.Queue] = field(default_factory=set)
     task: asyncio.Task | None = None
+    heartbeat: asyncio.Task | None = None
+
+    @property
+    def options(self) -> dict:
+        return {"sandbox": self.sandbox}
 
     def public(self) -> dict:
         return {
@@ -68,24 +98,76 @@ class Job:
         }
 
 
+def _from_row(row: sqlite3.Row, db_path: str) -> Job:
+    opts = json.loads(row["options"])
+    return Job(
+        id=row["id"], user_id=row["user_id"], team_id=row["team_id"], repo_id=row["repo_id"], url=row["url"], name=row["name"],
+        branch=row["branch"], db_path=db_path, sandbox=opts.get("sandbox", True),
+        step=row["step"], total=row["total"], status=row["status"], logs=json.loads(row["logs"]),
+        error=json.loads(row["error"]) if row["error"] else None, commit=row["commit_sha"], report_id=row["report_id"],
+        done=json.loads(row["done"]) if row["done"] else None,
+    )
+
+
+def _stale(row: sqlite3.Row) -> bool:
+    return row["status"] == "running" and time.time() - row["heartbeat"] > STALE_S
+
+
 class JobManager:
     def __init__(self, cloner: Cloner | None = None) -> None:
+        # Jobs que corre ESTE proceso
         self._jobs: dict[str, Job] = {}
         self.cloner = cloner or Cloner()
+        # Una conexión por base de datos para guardar el progreso (solo desde el hilo del event loop)
+        self._conns: dict[str, sqlite3.Connection] = {}
 
-    # ─── Consulta ───
+    def _conn(self, db_path: str) -> sqlite3.Connection:
+        if db_path not in self._conns:
+            self._conns[db_path] = connect(db_path)
+        return self._conns[db_path]
+
+    # ─── Consulta (cualquier worker) ───
 
     def get(self, conn: sqlite3.Connection, job_id: str) -> Job | None:
-        return self._jobs.get(job_id)
+        """El job, corra en este proceso o en otro. Uno interrumpido (sin latido) queda en error."""
+        if job_id in self._jobs:
+            return self._jobs[job_id]
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        if _stale(row):
+            conn.execute("UPDATE jobs SET status = 'error', error = ? WHERE id = ? AND status = 'running'", (json.dumps(INTERRUPTED), job_id))
+            conn.commit()
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return _from_row(row, "")
 
     def running_for_repo(self, conn: sqlite3.Connection, repo_id: str) -> Job | None:
-        return next((j for j in self._jobs.values() if j.repo_id == repo_id and j.status == "running"), None)
+        local = next((j for j in self._jobs.values() if j.repo_id == repo_id and j.status == "running"), None)
+        if local:
+            return local
+        rows = conn.execute("SELECT * FROM jobs WHERE repo_id = ? AND status = 'running'", (repo_id,)).fetchall()
+        alive = [r for r in rows if not _stale(r)]
+        return _from_row(alive[0], "") if alive else None
+
+    def is_local(self, job: Job) -> bool:
+        return job.id in self._jobs
 
     # ─── Eventos ───
+
+    def _persist(self, job: Job) -> None:
+        # Una cancelación hecha desde otro worker no se pisa
+        self._conn(job.db_path).execute(
+            """UPDATE jobs SET step = ?, total = ?, status = CASE WHEN status = 'cancelled' THEN status ELSE ? END, logs = ?, error = ?,
+               commit_sha = ?, report_id = ?, done = ?, heartbeat = ? WHERE id = ?""",
+            (job.step, job.total, job.status, json.dumps(job.logs, ensure_ascii=False), json.dumps(job.error, ensure_ascii=False) if job.error else None,
+             job.commit, job.report_id, json.dumps(job.done) if job.done else None, time.time(), job.id),
+        )
+        self._conn(job.db_path).commit()
 
     def _emit(self, job: Job, msg: dict) -> None:
         if msg["type"] == "log":
             job.logs.append(msg["line"])
+        self._persist(job)
         for q in job.listeners:
             q.put_nowait(msg)
 
@@ -98,20 +180,95 @@ class JobManager:
     def unsubscribe(self, job: Job, q: asyncio.Queue) -> None:
         job.listeners.discard(q)
 
+    async def follow_remote(self, settings: Settings, job_id: str) -> AsyncIterator[dict]:
+        """Eventos de un job que corre en otro worker, reconstruidos leyendo su fila cada REMOTE_POLL_S."""
+        conn = connect(settings.database_path)
+        try:
+            job = self.get(conn, job_id)
+            yield {"type": "snapshot", "job": job.public()}
+            while job.status == "running":
+                await asyncio.sleep(REMOTE_POLL_S)
+                new = self.get(conn, job_id)
+                for line in new.logs[len(job.logs):]:
+                    yield {"type": "log", "line": line}
+                for i in range(job.step, new.step):
+                    yield {"type": "step_done", "index": i}
+                    if i + 1 < new.total and (new.status == "running" or i + 1 < new.step):
+                        name, command = JOB_STEPS[i + 1]
+                        yield {"type": "step", "index": i + 1, "total": new.total, "name": name, "command": command.format(branch=new.branch, url=new.url)}
+                if new.status == "done" and new.done:
+                    yield {"type": "done", "repo_id": new.repo_id, "report_id": new.report_id, **new.done}
+                elif new.status == "error" and new.error:
+                    yield {"type": "error", "step": new.step, **new.error}
+                job = new
+        finally:
+            conn.close()
+
     # ─── Ciclo de vida ───
 
-    def start(self, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, prev_cat: dict | None) -> Job:
-        seed = random.randrange(2**31)
+    def start(self, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, sandbox: bool = True) -> Job:
         job = Job(
             id=f"job-{secrets.token_hex(8)}", user_id=user_id, team_id=team_id, repo_id=repo_id, url=url, name=name, branch=branch,
-            seed=seed, cat=fake.next_categories(prev_cat, random.Random(seed)), logs=[f"$ ia-voy analyze {url} --branch {branch}"],
+            db_path=settings.database_path, sandbox=sandbox, logs=[f"$ ia-voy analyze {url} --branch {branch}"],
         )
+        # seed y cat: columnas de la tabla que usarán los analizadores (Sprint 5)
+        self._conn(job.db_path).execute(
+            """INSERT INTO jobs (id, user_id, team_id, repo_id, url, name, branch, seed, cat, options, step, total, status, logs, heartbeat, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, '{}', ?, 0, ?, 'running', ?, ?, ?)""",
+            (job.id, user_id, team_id, repo_id, url, name, branch, json.dumps(job.options), job.total,
+             json.dumps(job.logs, ensure_ascii=False), time.time(), now_iso()),
+        )
+        self._conn(job.db_path).commit()
         self._jobs[job.id] = job
-        job.task = asyncio.create_task(self._run(settings, job))
+        self._launch(settings, job)
         return job
 
+    def retry(self, settings: Settings, job: Job) -> Job:
+        """Reintenta en este proceso. Un job de otro worker (interrumpido) empieza de nuevo desde el clonado."""
+        if not self.is_local(job):
+            job.db_path = settings.database_path
+            job.step = 0
+            self._jobs[job.id] = job
+        self._emit(job, {"type": "log", "line": "— Reintentando —"})
+        job.started = time.monotonic()
+        _set_repo(settings, job.repo_id, "analizando", None)
+        self._launch(settings, job)
+        return job
+
+    def cancel(self, settings: Settings, job: Job) -> None:
+        if job.task and not job.task.done():
+            job.task.cancel()
+        job.status = "cancelled"
+        with session(settings.database_path) as conn:
+            # Si corre en otro worker, ese proceso lo ve en su siguiente latido y lo detiene
+            conn.execute("UPDATE jobs SET status = 'cancelled' WHERE id = ?", (job.id,))
+            has_reports = conn.execute("SELECT 1 FROM reports WHERE repo_id = ?", (job.repo_id,)).fetchone()
+        _set_repo(settings, job.repo_id, "listo" if has_reports else "error", None if has_reports else "Análisis cancelado")
+
+    def _launch(self, settings: Settings, job: Job) -> None:
+        job.status = "running"
+        job.error = None
+        self._persist(job)
+        job.task = asyncio.create_task(self._run(settings, job))
+        if job.heartbeat is None or job.heartbeat.done():
+            job.heartbeat = asyncio.create_task(self._beat(job))
+
+    async def _beat(self, job: Job) -> None:
+        """Latido del job mientras corre; detiene el job si lo cancelaron desde otro worker."""
+        conn = self._conn(job.db_path)
+        while job.status == "running":
+            await asyncio.sleep(HEARTBEAT_S)
+            row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job.id,)).fetchone()
+            if row and row["status"] == "cancelled" and job.status == "running":
+                job.status = "cancelled"
+                if job.task and not job.task.done():
+                    job.task.cancel()
+                return
+            conn.execute("UPDATE jobs SET heartbeat = ? WHERE id = ? AND status = 'running'", (time.time(), job.id))
+            conn.commit()
+
     def _start_step(self, job: Job) -> None:
-        name, command = fake.JOB_STEPS[job.step]
+        name, command = JOB_STEPS[job.step]
         command = command.format(branch=job.branch, url=job.url)
         self._emit(job, {"type": "step", "index": job.step, "total": job.total, "name": name, "command": command})
         self._emit(job, {"type": "log", "line": f"[{job.step + 1:02d}/{job.total}] {name} → {command}"})
@@ -131,7 +288,7 @@ class JobManager:
         _set_repo(settings, job.repo_id, "error", err.title)
 
     async def _clone(self, settings: Settings, job: Job) -> bool:
-        """Paso 1 real. Devuelve False si falló (el job queda en error)."""
+        """Paso 1. Devuelve False si falló (el job queda en error)."""
         attempt = secrets.token_hex(4)
         token = _github_token(settings, job.user_id)
         try:
@@ -139,6 +296,7 @@ class JobManager:
         except CloneError as err:
             self._fail(settings, job, err)
             return False
+        # Si se cancela aquí, el hilo de git termina solo y su carpeta temporal se limpia en el próximo clonado
         await asyncio.to_thread(self.cloner.promote, settings, job.repo_id, attempt)
         job.commit = result.commit
         # IA voy analiza solo Python: sin Python no hay nada que analizar; con poco, se avisa.
@@ -147,6 +305,7 @@ class JobManager:
         py = languages.python_files(job.repo_languages)
         with session(settings.database_path) as conn:
             conn.execute("UPDATE repos SET files = ? WHERE id = ?", (py, job.repo_id))
+            import_repo_config(AnalysisStore(conn), clone_dir(settings, job.repo_id), job.repo_id)
         found = f"  lenguajes: {languages.summary(job.repo_languages)}"
         if py == 0:
             self._emit(job, {"type": "log", "line": found})
@@ -162,45 +321,50 @@ class JobManager:
         self._finish_step(job, f"  commit {result.commit} · {py} archivos .py · {result.seconds} s\n{found}")
         return True
 
-    async def _analyze(self, settings: Settings, job: Job) -> bool:
-        """
-        Pasos 2-7. Ruff, Bandit y Radon corren en un hilo mientras la terminal avanza; el entorno, las
-        dependencias, pip-audit, pytest y coverage se simulan. Deja `job.result` listo.
-        """
-        static_task = asyncio.create_task(asyncio.to_thread(pipeline.analyze_static, settings, job.repo_id))
+    async def _venv(self, settings: Settings, job: Job) -> bool:
+        """Paso 2: entorno aislado en el sandbox o, sin sandbox, en el backend. Devuelve False si falló."""
+        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id) if job.sandbox else (None, None)
+        if reason:
+            self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); el entorno se crea en el backend"})
         try:
-            while job.step <= pipeline.COVERAGE_STEP:
-                self._start_step(job)
-                if job.step >= pipeline.BANDIT_STEP and job.result is None:
-                    static = await static_task
-                    job.result = await asyncio.to_thread(pipeline.build, settings, job.repo_id, static, job.branch, job.commit, job.seed, job.cat)
+            if runner:
+                phase, where = await runner.wait(), f"el sandbox {settings.sandbox.upper()}"
+            else:
                 await asyncio.sleep(settings.job_step_seconds)
-                self._finish_step(job, pipeline.step_summary(job.step, job.result))
-        except AnalyzerError as exc:
-            self._fail(settings, job, CloneError("Los analizadores fallaron", str(exc), "Vuelve a intentarlo; si se repite, revisa el log del backend."))
+                phase, where = await asyncio.to_thread(sandbox.local_venv, settings, job.repo_id), "el backend"
+        finally:
+            if runner:
+                runner.close()
+        if not phase.ok:
+            self._fail(settings, job, CloneError(
+                "No se pudo crear el entorno aislado",
+                sandbox.summary(phase, where).strip(),
+                "Revisa que el sandbox tenga uv y Python 3.12 (o usa SANDBOX=off) y vuelve a intentarlo.",
+            ))
             return False
+        self._finish_step(job, sandbox.summary(phase, where))
         return True
 
     async def _run(self, settings: Settings, job: Job) -> None:
         try:
-            self._start_step(job)
-            if not await self._clone(settings, job):
-                return
-            if not await self._analyze(settings, job):
-                return
-            while job.step < job.total:
+            # Un reintento retoma el paso donde falló; si fue el clonado, se vuelve a clonar
+            if job.step == CLONE_STEP:
                 self._start_step(job)
-                await asyncio.sleep(settings.job_step_seconds)
-                summary = "  omitido: el asistente IA aún no está habilitado" if job.step == INDEX_STEP else pipeline.step_summary(job.step, job.result)
-                self._finish_step(job, summary)
-            num, score = _save_report(settings, job)
+                if not await self._clone(settings, job):
+                    return
+            if job.step == VENV_STEP:
+                self._start_step(job)
+                if not await self._venv(settings, job):
+                    return
+            num = _save_report(settings, job)
             job.status = "done"
-            self._emit(job, {"type": "log", "line": f"Análisis #{num} completado."})
-            self._emit(job, {"type": "done", "repo_id": job.repo_id, "report_id": job.report_id, "num": num, "score": score})
+            job.done = {"num": num}
+            self._emit(job, {"type": "log", "line": f"Análisis #{num} guardado en el repositorio."})
+            self._emit(job, {"type": "done", "repo_id": job.repo_id, "report_id": job.report_id, "num": num})
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            # Nunca dejar un job colgado en "running": el usuario ve el error y puede volver a analizar
+            # Nunca dejar un job colgado en "running": el usuario ve el error y puede reintentar
             log.exception("Fallo inesperado en el job %s", job.id)
             self._fail(settings, job, CloneError("Error inesperado durante el análisis", f"{type(exc).__name__}: {exc}", "Vuelve a intentarlo; si se repite, revisa la terminal del backend."))
 
@@ -216,16 +380,16 @@ def _set_repo(settings: Settings, repo_id: str, status: str, error: str | None) 
         conn.execute("UPDATE repos SET status = ?, error = ? WHERE id = ?", (status, error, repo_id))
 
 
-def _save_report(settings: Settings, job: Job) -> tuple[int, float]:
-    """Guarda el reporte con sus hallazgos (app.analyses) y devuelve (número, score global)."""
+def _save_report(settings: Settings, job: Job) -> int:
+    """Guarda el análisis en el repositorio (app.analyses.store) y devuelve su número."""
     with session(settings.database_path) as conn:
         store = AnalysisStore(conn)
-        job.result.report.duration_s = round(time.monotonic() - job.started)
-        job.result.report.languages = [{"name": lang.name, "files": lang.files} for lang in job.repo_languages]
-        job.report_id, num = store.save_report(job.repo_id, job.result.report, Workspace(settings, job.repo_id))
+        job.report_id, num = store.save_report(
+            job.repo_id, branch=job.branch, commit=job.commit or "0000000", duration_s=time.monotonic() - job.started,
+            languages=[{"name": lang.name, "files": lang.files} for lang in job.repo_languages],
+        )
         conn.execute("UPDATE repos SET status = 'listo', error = NULL, branch = ? WHERE id = ?", (job.branch, job.repo_id))
-        score = report_scores(store, store.report(job.report_id), store.config(job.repo_id)).global_
-    return num, score
+    return num
 
 
 jobs = JobManager()

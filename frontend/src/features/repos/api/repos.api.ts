@@ -1,10 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { http } from '@/shared/api/http'
-import type { ReanalyzeResponse, Repo, TreeEntry } from '../types'
+import type { FileResponse, ReanalyzeResponse, Repo, SavedReport, TreeEntry } from '../types'
 
 export const reposApi = {
   list: () => http.get<Repo[]>(EP.repos.list),
+  history: (repoId: string) => http.get<SavedReport[]>(EP.repos.history(repoId)),
   reanalyze: (repoId: string) => http.post<ReanalyzeResponse>(EP.repos.analyze(repoId)),
   tree: (repoId: string) => http.get<TreeEntry[]>(EP.repos.tree(repoId)),
 }
@@ -17,7 +18,21 @@ export const useRepos = () =>
     refetchInterval: (q) => (q.state.data?.some((r) => r.status === 'analizando') ? 3000 : false),
   })
 
+/** Análisis guardados del repo, del más reciente al más antiguo. */
+export const useRepoHistory = (repoId: string | null) =>
+  useQuery({ queryKey: ['history', repoId], queryFn: () => reposApi.history(repoId ?? ''), enabled: Boolean(repoId) })
+
 export const useRepoTree = (repoId: string) => useQuery({ queryKey: ['tree', repoId], queryFn: () => reposApi.tree(repoId) })
+
+export const fileQuery = (repoId: string, path: string) =>
+  queryOptions({
+    queryKey: ['file', repoId, path],
+    queryFn: () => http.get<FileResponse>(EP.file, { repo: repoId, path }),
+    staleTime: Infinity,
+  })
+
+/** Archivo del último clon, en solo lectura. */
+export const useFile = (repoId: string, path: string | null) => useQuery({ ...fileQuery(repoId, path ?? ''), enabled: Boolean(path) })
 
 /** Un repo de la lista (comparte caché con la pantalla de repositorios). */
 export function useRepo(repoId: string | null | undefined) {

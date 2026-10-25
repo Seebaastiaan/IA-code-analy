@@ -8,7 +8,7 @@ export default function AnalyzePage() {
   if (jobId) return <JobView jobId={jobId} />
   return (
     <>
-      <PageHeader title="Nuevo análisis" subtitle="Indica un repositorio de Python; IA voy lo clona, ejecuta los analizadores y genera el reporte. Otros lenguajes no se analizan." />
+      <PageHeader title="Nuevo análisis" subtitle="Indica un repositorio de Python; IA voy lo clona, crea su entorno aislado y guarda el análisis en Repositorios. Otros lenguajes no se analizan." />
       <AnalyzeForm />
     </>
   )

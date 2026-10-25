@@ -31,7 +31,7 @@ export function reduceJob(job: Job | null, m: JobMessage): Job | null {
 function notify(job: Job, m: JobMessage) {
   if (m.type === 'done') {
     void invalidateAnalysis(queryClient)
-    toast('Análisis completado', { action: { label: 'Ver reporte', onClick: () => navigateTo(paths.report(m.repo_id, m.report_id)) } })
+    toast(`Análisis #${m.num} guardado`, { action: { label: 'Ver repositorios', onClick: () => navigateTo(paths.repos()) } })
   } else if (m.type === 'error') {
     void invalidateAnalysis(queryClient)
     toast(`El análisis falló en ${JOB_STEPS[m.step]?.name ?? 'un paso'}`, { tone: 'err', action: { label: 'Ver detalle', onClick: () => navigateTo(paths.job(job.id)) } })
@@ -46,6 +46,7 @@ interface JobState {
   job: Job | null
   /** Se suscribe al WebSocket del job (no reabre si ya está conectado, salvo `force`) */
   connect: (jobId: string, force?: boolean) => void
+  markCancelled: () => void
 }
 
 export const useJobStore = create<JobState>((set, get) => ({
@@ -62,5 +63,12 @@ export const useJobStore = create<JobState>((set, get) => ({
         if (next) notify(next, m)
       },
     })
+  },
+  markCancelled: () => {
+    socket?.close()
+    socket = null
+    socketJobId = null
+    const job = get().job
+    if (job) set({ job: { ...job, status: 'cancelled' } })
   },
 }))

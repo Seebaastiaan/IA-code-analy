@@ -56,15 +56,15 @@ def test_repo_sin_python_se_detiene_con_mensaje_claro(client):
     assert repo["status"] == "error" and repo["last_report_id"] is None
 
 
-def test_python_minoritario_avisa_y_el_reporte_lo_dice(client):
+def test_python_minoritario_avisa_y_el_historial_lo_dice(client):
     use_files(client, {"main.py": "print(1)\n", **{f"web/{i}.js": "" for i in range(5)}})
     job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
     assert job["status"] == "done"
     logs = "\n".join(job["logs"])
     assert "lenguajes: JavaScript 5 · Python 1" in logs
     assert "aviso: solo 1 de 6 archivos de código son Python; el resto no se analiza" in logs
-    report = client.get(f"/api/report/{job['report_id']}").json()
-    assert report["languages"] == [{"name": "JavaScript", "files": 5}, {"name": "Python", "files": 1}]
+    [saved] = client.get(f"/api/repos/{job['repo_id']}/history").json()
+    assert saved["languages"] == [{"name": "JavaScript", "files": 5}, {"name": "Python", "files": 1}]
 
 
 def test_proyecto_python_con_html_no_avisa(client):

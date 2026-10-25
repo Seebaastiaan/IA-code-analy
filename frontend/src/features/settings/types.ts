@@ -13,7 +13,7 @@ export interface ProjectConfig {
 export type ServiceStatus = 'ok' | 'standby' | 'down'
 
 export interface ServiceHealth {
-  id: 'llm' | 'llm_fallback' | 'tunnel' | 'sandbox'
+  id: 'github' | 'sandbox' | 'tunnel'
   name: string
   role: string
   status: ServiceStatus

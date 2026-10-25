@@ -1,6 +1,8 @@
+import secrets
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends
@@ -41,7 +43,15 @@ CREATE TABLE IF NOT EXISTS team_members (
     joined_at   TEXT NOT NULL
 );
 
--- user_id = quien lo agregó; team_id = el equipo que lo ve
+CREATE TABLE IF NOT EXISTS team_invites (
+    code        TEXT PRIMARY KEY,
+    team_id     TEXT NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
+    created_by  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+-- user_id = quien lo agregó; team_id = el equipo que lo ve (ver _migrate_teams para bases anteriores)
 CREATE TABLE IF NOT EXISTS repos (
     id          TEXT PRIMARY KEY,
     team_id     TEXT NOT NULL,
@@ -55,6 +65,32 @@ CREATE TABLE IF NOT EXISTS repos (
     created_at  TEXT NOT NULL,
     UNIQUE (team_id, name)
 );
+
+-- Jobs de análisis (app.analysis.jobs). `heartbeat` (time.time()) lo renueva el proceso que corre el job:
+-- uno "running" sin latido reciente se interrumpió (reinicio del servidor). JSON en cat, options, logs, error, done.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    team_id     TEXT NOT NULL,
+    repo_id     TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    branch      TEXT NOT NULL,
+    seed        INTEGER NOT NULL,
+    cat         TEXT NOT NULL,
+    options     TEXT NOT NULL,
+    step        INTEGER NOT NULL DEFAULT 0,
+    total       INTEGER NOT NULL,
+    status      TEXT NOT NULL,
+    logs        TEXT NOT NULL DEFAULT '[]',
+    error       TEXT,
+    commit_sha  TEXT,
+    report_id   TEXT,
+    done        TEXT,
+    heartbeat   REAL NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jobs_repo ON jobs (repo_id, status);
 
 CREATE TABLE IF NOT EXISTS reports (
     id          TEXT PRIMARY KEY,
@@ -76,6 +112,15 @@ CREATE TABLE IF NOT EXISTS reports (
     coverage        TEXT NOT NULL DEFAULT '[]',
     complexity      TEXT NOT NULL DEFAULT '[]',
     UNIQUE (repo_id, num)
+);
+
+-- Equivalente de .ia_voy.toml; los valores son JSON
+CREATE TABLE IF NOT EXISTS project_config (
+    repo_id     TEXT PRIMARY KEY REFERENCES repos (id) ON DELETE CASCADE,
+    weights     TEXT NOT NULL,
+    thresholds  TEXT NOT NULL,
+    ignored     TEXT NOT NULL,
+    excluded    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS findings (
@@ -123,12 +168,48 @@ MIGRATIONS = {
 }
 
 
+def _migrate_teams(conn: sqlite3.Connection) -> None:
+    """
+    Bases anteriores a los equipos: los repos eran de un usuario (UNIQUE user_id, name). Cada usuario
+    recibe un equipo propio y la tabla repos se reconstruye con team_id (SQLite no cambia un UNIQUE).
+    """
+    if "team_id" in {row["name"] for row in conn.execute("PRAGMA table_info(repos)")}:
+        return
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    for user in conn.execute("SELECT id, name FROM users WHERE id NOT IN (SELECT user_id FROM team_members)").fetchall():
+        team_id = f"t{secrets.token_hex(6)}"
+        conn.execute("INSERT INTO teams (id, name, created_at) VALUES (?, ?, ?)", (team_id, f"Equipo de {user['name']}", now))
+        conn.execute("INSERT INTO team_members (user_id, team_id, role, joined_at) VALUES (?, ?, 'owner', ?)", (user["id"], team_id, now))
+    conn.commit()
+    # Procedimiento de SQLite para cambiar una tabla: nueva → copiar → borrar la vieja → renombrar.
+    # Sin claves foráneas mientras tanto (reports, findings… apuntan a repos y no deben borrarse en cascada).
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript(
+        """
+        BEGIN;
+        CREATE TABLE repos_con_equipo (
+            id TEXT PRIMARY KEY, team_id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,
+            branch TEXT NOT NULL, files INTEGER NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL,
+            UNIQUE (team_id, name)
+        );
+        INSERT INTO repos_con_equipo (id, team_id, user_id, name, url, branch, files, status, error, created_at)
+            SELECT r.id, COALESCE(m.team_id, 't-' || r.user_id), r.user_id, r.name, r.url, r.branch, r.files, r.status, r.error, r.created_at
+            FROM repos r LEFT JOIN team_members m ON m.user_id = r.user_id;
+        DROP TABLE repos;
+        ALTER TABLE repos_con_equipo RENAME TO repos;
+        COMMIT;
+        """
+    )
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     for table, columns in MIGRATIONS.items():
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         for name, ddl in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    _migrate_teams(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS repos_team ON repos (team_id)")
     conn.commit()
 
