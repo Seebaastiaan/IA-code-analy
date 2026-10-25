@@ -48,7 +48,8 @@ def list_repos(store: Analyses, user_id: UserId, jobs: Jobs) -> list[Repo]:
 def repo_history(repo_id: str, store: Analyses, user_id: UserId, limit: int = Query(default=HISTORY_POINTS, ge=1, le=100)) -> list[SavedReport]:
     """Análisis guardados del repo, del más reciente al más antiguo."""
     require_repo(store, user_id, repo_id)
-    return [report_view(r) for r in store.recent_reports(repo_id, limit)]
+    ignored = store.config(repo_id).ignored
+    return [report_view(store, r, ignored) for r in store.recent_reports(repo_id, limit)]
 
 
 @router.get("/repos/{repo_id}/tree", response_model=list[TreeEntry])

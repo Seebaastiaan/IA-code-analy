@@ -1,10 +1,11 @@
 /**
- * "Backend" en memoria para desarrollar el front sin servidor. Imita al backend del Sprint 4 (clonar →
- * crear entorno aislado → guardar el análisis en el repositorio) lo justo para que la UI sea creíble.
+ * "Backend" en memoria para desarrollar el front sin servidor. Imita al backend del Sprint 5 (clonar →
+ * entorno → dependencias → Bandit → pip-audit → guardar el análisis con sus hallazgos de Seguridad) lo justo
+ * para que la UI sea creíble.
  * El estado se reinicia al recargar la página.
  */
 import type { Job, JobMessage } from '@/features/analysis/types'
-import type { Repo, SavedReport, TreeEntry } from '@/features/repos/types'
+import type { FindingCounts, Repo, SavedReport, TreeEntry } from '@/features/repos/types'
 import type { ProjectConfig } from '@/features/settings/types'
 import { JOB_STEPS } from '@/features/analysis/constants/jobSteps'
 import { FILES } from './fixtures/code'
@@ -41,7 +42,7 @@ const PY = (r: Record<string, string>) => Object.keys(r).filter((p) => p.endsWit
 
 // ───────────────────────── Datos iniciales ─────────────────────────
 
-function seedRepo(id: string, name: string, branch: string, history: { commit: string; agoMs: number; s: number }[]): RepoRecord {
+function seedRepo(id: string, name: string, branch: string, history: { commit: string; agoMs: number; s: number; findings: FindingCounts }[]): RepoRecord {
   const files = PY(FILES)
   return {
     id,
@@ -58,6 +59,7 @@ function seedRepo(id: string, name: string, branch: string, history: { commit: s
       commit: h.commit,
       created_at: iso(h.agoMs),
       duration_s: h.s,
+      findings: h.findings,
       languages: [
         { name: 'Python', files },
         { name: 'Markdown', files: 1 },
@@ -70,13 +72,13 @@ function seedRepo(id: string, name: string, branch: string, history: { commit: s
 
 const repos: RepoRecord[] = [
   seedRepo('r1', 'equipo/api-pagos', 'main', [
-    { commit: 'f04b2d9', agoMs: 14 * DAY, s: 14 },
-    { commit: '91ce07b', agoMs: 7 * DAY, s: 12 },
-    { commit: 'a3f9c1e', agoMs: 2 * 3_600_000, s: 11 },
+    { commit: 'f04b2d9', agoMs: 14 * DAY, s: 48, findings: { alta: 4, media: 3, baja: 2 } },
+    { commit: '91ce07b', agoMs: 7 * DAY, s: 45, findings: { alta: 3, media: 3, baja: 2 } },
+    { commit: 'a3f9c1e', agoMs: 2 * 3_600_000, s: 41, findings: { alta: 2, media: 3, baja: 1 } },
   ]),
   seedRepo('r2', 'equipo/etl-ventas', 'develop', [
-    { commit: '5c1e8aa', agoMs: 3 * DAY, s: 18 },
-    { commit: '7bd21aa', agoMs: DAY, s: 16 },
+    { commit: '5c1e8aa', agoMs: 3 * DAY, s: 52, findings: { alta: 1, media: 2, baja: 4 } },
+    { commit: '7bd21aa', agoMs: DAY, s: 50, findings: { alta: 0, media: 1, baja: 3 } },
   ]),
   { id: 'r3', name: 'equipo/bot-soporte', url: 'https://github.com/equipo/bot-soporte', branch: 'main', files: 0, status: 'analizando', error: null, reports: [], content: {}, jobId: null },
   { id: 'r4', name: 'equipo/landing-web', url: 'https://github.com/equipo/landing-web', branch: 'main', files: 0, status: 'error', error: 'El repositorio no tiene código Python', reports: [], content: {}, jobId: null },
@@ -114,6 +116,7 @@ export function repoView(r: RepoRecord): Repo {
     last_report_id: last?.id ?? null,
     last_report_num: last?.num ?? null,
     reports: r.reports.length,
+    findings: last?.findings ?? null,
     error: r.error,
     progress: job && job.status === 'running' ? { job_id: job.id, step: job.step, total: job.total, name: JOB_STEPS[job.step]?.name ?? '' } : null,
   }
@@ -195,7 +198,8 @@ function finishJob(job: JobRecord) {
   const num = (repo.reports.at(-1)?.num ?? 0) + 1
   const files = PY(FILES)
   const report: SavedReport = {
-    id: `${repo.id}-${num}`, num, branch: job.branch, commit: job.commit, created_at: new Date().toISOString(), duration_s: 9,
+    id: `${repo.id}-${num}`, num, branch: job.branch, commit: job.commit, created_at: new Date().toISOString(), duration_s: 43,
+    findings: { alta: 2, media: 3, baja: 1 },
     languages: [{ name: 'Python', files }, { name: 'Markdown', files: 1 }],
   }
   repo.reports.push(report)
@@ -207,13 +211,16 @@ function finishJob(job: JobRecord) {
   repo.jobId = null
   job.status = 'done'
   job.report_id = report.id
-  emit(job, { type: 'log', line: `Análisis #${num} guardado en el repositorio.` })
+  emit(job, { type: 'log', line: `Análisis #${num} guardado en el repositorio con 6 hallazgo(s) de seguridad.` })
   emit(job, { type: 'done', repo_id: repo.id, report_id: report.id, num })
 }
 
 const SUMMARY: Record<number, (j: JobRecord) => string[]> = {
   0: (j) => [`  commit ${j.commit} · ${PY(FILES)} archivos .py · 1.8 s`, `  lenguajes: Python ${PY(FILES)} · Markdown 1`],
   1: () => ['  entorno listo en el sandbox WSL · Python 3.12.7 · copiados 11 archivos'],
+  2: () => ['  Installed 14 packages in 1.2s'],
+  3: () => ['  1 alta · 3 media · 1 baja'],
+  4: () => ['  1 paquete(s) vulnerable(s)'],
 }
 
 function tick(job: JobRecord) {

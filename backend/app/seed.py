@@ -4,8 +4,8 @@ Datos de demostración para la pantalla Repositorios sin tener que clonar un rep
     python -m app.seed --login tu-usuario-de-github
 
 Copia `seed_data/demo_repo` (el golden repo del equipo de QA) como clon de un repo de ese usuario (ya debe
-haber entrado con GitHub) y guarda 3 análisis semanales en su historia. Es idempotente: volver a correrlo
-reemplaza los análisis del repo de demostración.
+haber entrado con GitHub) y guarda 3 análisis semanales en su historia, con los hallazgos reales de Bandit
+sobre el golden repo. Es idempotente: volver a correrlo reemplaza los análisis del repo de demostración.
 """
 
 import argparse
@@ -13,6 +13,7 @@ import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from app.analyses.analyzers import bandit_findings_dir
 from app.analyses.store import AnalysisStore
 from app.analyses.workspace import Workspace
 from app.analysis import languages
@@ -45,16 +46,19 @@ def seed(login: str, settings: Settings | None = None) -> str:
     shutil.copytree(DEMO_SOURCE, ws.root)
     found = languages.detect(ws.root)
     langs = [{"name": lang.name, "files": lang.files} for lang in found]
+    # Bandit lee el código (no lo ejecuta): se corre de verdad. pip-audit necesita el sandbox y aquí no corre.
+    findings = bandit_findings_dir(ws.root, ws.list_files(store.config(repo_id).excluded))
 
     now = datetime.now(UTC).replace(microsecond=0)
     for weeks_ago, seconds in HISTORY:
         store.save_report(
             repo_id, branch="main", commit=f"{0xA3F9C1E - weeks_ago * 4099:07x}", duration_s=seconds, languages=langs,
+            findings=findings, workspace=ws,
             created_at=(now - timedelta(weeks=weeks_ago, hours=2)).isoformat().replace("+00:00", "Z"),
         )
     store.set_repo_status(repo_id, "listo", files=languages.python_files(found))
     print(f"Repo de demostración listo: {DEMO_NAME} (id {repo_id}, usuario {user['login']})")
-    print(f"  {languages.summary(found)} · {len(HISTORY)} análisis guardados")
+    print(f"  {languages.summary(found)} · {len(HISTORY)} análisis guardados · {len(findings)} hallazgos de Bandit en cada uno")
     print(f"  Copia de trabajo: {ws.root}")
     conn.close()
     return repo_id

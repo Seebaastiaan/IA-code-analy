@@ -23,6 +23,12 @@ class Progress(BaseModel):
     name: str
 
 
+class FindingCounts(BaseModel):
+    alta: int
+    media: int
+    baja: int
+
+
 class Repo(BaseModel):
     id: str
     name: str
@@ -36,6 +42,8 @@ class Repo(BaseModel):
     last_report_num: int | None
     # Análisis guardados del repo
     reports: int = 0
+    # Hallazgos abiertos del último análisis por severidad
+    findings: FindingCounts | None = None
     error: str | None
     progress: Progress | None = None
 
@@ -46,7 +54,7 @@ class Language(BaseModel):
 
 
 class SavedReport(BaseModel):
-    """Un análisis guardado en el repositorio (Sprint 4: hasta el entorno aislado, todavía sin hallazgos ni score)."""
+    """Un análisis guardado en el repositorio (Sprint 5: con sus hallazgos de Seguridad, todavía sin score)."""
 
     id: str
     num: int
@@ -55,3 +63,5 @@ class SavedReport(BaseModel):
     created_at: str
     duration_s: int
     languages: list[Language]
+    # Hallazgos abiertos de Bandit y pip-audit por severidad (sin las reglas ignoradas)
+    findings: FindingCounts

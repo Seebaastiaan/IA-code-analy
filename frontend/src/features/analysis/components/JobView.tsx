@@ -157,7 +157,7 @@ export function JobView({ jobId }: { jobId: string }) {
       <Card className="p-5 mb-4">
         <div className="flex items-center justify-between mb-2 text-sm">
           <span className="font-medium">
-            {err ? 'El análisis se detuvo' : done ? 'Entorno listo · análisis guardado en el repositorio' : cancelled ? 'Análisis cancelado' : `${JOB_STEPS[job.step]?.name ?? ''}…`}
+            {err ? 'El análisis se detuvo' : done ? 'Seguridad revisada · análisis guardado en el repositorio' : cancelled ? 'Análisis cancelado' : `${JOB_STEPS[job.step]?.name ?? ''}…`}
           </span>
           <span className={cn('font-mono tabular-nums', err ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500')}>{pct}%</span>
         </div>

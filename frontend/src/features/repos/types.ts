@@ -14,13 +14,22 @@ export interface Repo {
   last_report_num: number | null
   /** Análisis guardados del repo */
   reports: number
+  /** Hallazgos abiertos del último análisis por severidad */
+  findings: FindingCounts | null
   /** Mensaje del último error, si status = error */
   error: string | null
   /** Progreso del job en curso, si status = analizando */
   progress: { job_id: string; step: number; total: number; name: string } | null
 }
 
-/** Un análisis guardado en el repositorio (Sprint 4: hasta el entorno aislado, sin hallazgos ni score). */
+/** Hallazgos abiertos por severidad (sin las reglas ignoradas en Configuración) */
+export interface FindingCounts {
+  alta: number
+  media: number
+  baja: number
+}
+
+/** Un análisis guardado en el repositorio (Sprint 5: con sus hallazgos de Seguridad, todavía sin score). */
 export interface SavedReport {
   id: string
   num: number
@@ -29,6 +38,8 @@ export interface SavedReport {
   created_at: string
   duration_s: number
   languages: { name: string; files: number }[]
+  /** Hallazgos de Bandit y pip-audit */
+  findings: FindingCounts
 }
 
 export interface TreeEntry {

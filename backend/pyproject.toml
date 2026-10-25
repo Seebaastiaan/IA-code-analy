@@ -1,6 +1,6 @@
 [project]
 name = "ia-voy-backend"
-version = "0.4.0"
+version = "0.5.0"
 description = "API de IA voy: análisis de repositorios Python"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,6 +9,8 @@ dependencies = [
     "httpx>=0.28",
     "pydantic-settings>=2.6",
     "cryptography>=44",
+    # Analizador de seguridad: lee el código del clon (no lo ejecuta)
+    "bandit>=1.8",
 ]
 
 [project.optional-dependencies]

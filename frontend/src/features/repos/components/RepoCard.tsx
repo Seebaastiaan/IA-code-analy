@@ -6,7 +6,7 @@ import { timeAgo } from '@/shared/utils/format'
 import { useReanalyze } from '../hooks/useReanalyze'
 import type { Repo } from '../types'
 
-/** Etapas del análisis en el Sprint 4 y lo que llega después. */
+/** Etapas del análisis en el Sprint 5 y lo que llega después. */
 function Stage({ done, label, next }: { done: boolean; label: string; next?: string }) {
   return (
     <span
@@ -61,7 +61,7 @@ export function RepoCard({ repo, selected, onSelect }: { repo: Repo; selected: b
           <div className="flex flex-wrap gap-1.5">
             <Stage done label="Clonado" />
             <Stage done label="Entorno aislado" />
-            <Stage done={false} label="Hallazgos" next="S5" />
+            <Stage done label={repo.findings ? `Seguridad · ${repo.findings.alta + repo.findings.media + repo.findings.baja} hallazgo(s)` : 'Seguridad'} />
             <Stage done={false} label="Score" next="S6" />
           </div>
         </div>

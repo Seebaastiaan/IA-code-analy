@@ -1,26 +1,31 @@
 """
-Paso 2 del análisis: crear el entorno aislado (`uv venv`) donde, en los siguientes sprints, se instalarán
-las dependencias y correrán pip-audit, pytest y coverage. En el Sprint 4 el sandbox solo crea el entorno.
+Pasos del análisis que EJECUTAN código del repo: crear el entorno (`uv venv`), instalar sus dependencias y
+correr pip-audit sobre ellas (pasos 2, 3 y 5). Bandit solo lee el código y corre en el backend
+(app.analyses.analyzers). pytest y coverage se agregan a este mismo script en el Sprint 6.
 
 Un script bash (SCRIPT) corre en WSL2 o en Docker según `SANDBOX`:
 - `wsl`: `wsl -d {SANDBOX_WSL_DISTRO} bash -l script.sh SRC OUT`. Aísla del entorno de Windows (variables,
   procesos) pero NO del disco. Pensado para repos propios.
 - `docker`: contenedor desechable con el clon montado de solo lectura. Aislamiento real.
 - `off`: sin sandbox; el entorno se crea en el backend con `python -m venv` (`local_venv`), fuera del clon.
+  Las dependencias del repo NO se instalan en el backend (ejecutarían código ajeno), así que pip-audit no corre.
 
-El script copia el clon a una carpeta temporal del sandbox (el clon no se toca) y deja en OUT `venv.code`
-(código de salida) y `venv.log`. El job espera ese `.code` para avanzar la terminal en vivo.
+El script copia el clon a una carpeta temporal del sandbox (el clon no se toca) y deja en OUT un
+`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más `audit.json`. El job espera cada
+`.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
 """
 
 import asyncio
+import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
 from app.analysis.clone import clone_dir, clones_root, remove_tree
@@ -28,6 +33,7 @@ from app.config import Settings
 
 log = logging.getLogger(__name__)
 
+PHASES = ("venv", "install", "audit")
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 LOG_TAIL_LINES = 12
 # Límite para crear el entorno local (SANDBOX=off)
@@ -40,26 +46,46 @@ SRC="$1"; OUT="$2"
 # Id de sesión (setsid): al detener el sandbox se matan todos sus procesos, no solo el lanzador de Windows
 echo $$ > "$OUT/pid"
 export PATH="$HOME/.local/bin:$PATH"
-export UV_NO_PROGRESS=1
+export PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1 UV_NO_PROGRESS=1
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# phase NOMBRE SEGUNDOS COMANDO...: corre la fase con límite de tiempo y deja su código y su log en OUT
+phase() {
+  local name="$1" secs="$2"; shift 2
+  timeout --kill-after=10 "$secs" "$@" > "$OUT/$name.log" 2>&1
+  echo $? > "$OUT/$name.code"
+}
+skip() { for p in "$@"; do echo skip > "$OUT/$p.code"; done; }
+
 # Solo el código: sin .git, entornos, node_modules ni archivos de más de 5 MB
-timeout --kill-after=10 300 bash -c '
+phase venv 300 bash -c '
   cd "$1" || exit 1
   find . \( -name .git -o -name node_modules -o -name .venv -o -name venv -o -name env -o -name __pycache__ \
             -o -name .mypy_cache -o -name .pytest_cache -o -name .tox -o -name dist -o -name build \) -prune \
          -o -type f -size -5M -print0 | tar --null -T - -cf - | tar -xf - -C "$2" || exit 1
   echo "copiados $(find "$2" -type f | wc -l) archivos"
-  cd "$2" && uv venv -q .venv --python 3.12 && .venv/bin/python --version' _ "$SRC" "$WORK" > "$OUT/venv.log" 2>&1
-echo $? > "$OUT/venv.code"
+  cd "$2" && uv venv -q .venv --python 3.12 && .venv/bin/python --version' _ "$SRC" "$WORK"
+cd "$WORK" || { skip install audit; exit 0; }
+if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit; exit 0; fi
+export VIRTUAL_ENV="$WORK/.venv"; export PATH="$VIRTUAL_ENV/bin:$PATH"
+
+phase install 600 bash -c '
+  if [ -f requirements.txt ]; then uv pip install -r requirements.txt || exit $?
+  elif [ -f pyproject.toml ] || [ -f setup.py ]; then uv pip install -e . || exit $?
+  else echo "Sin requirements.txt ni pyproject.toml: no hay dependencias que instalar"
+  fi'
+
+# pip-audit revisa solo las dependencias instaladas del proyecto
+SITE="$(echo "$VIRTUAL_ENV"/lib/python3*/site-packages)"
+phase audit 300 env -u VIRTUAL_ENV uvx pip-audit --path "$SITE" -f json -o "$OUT/audit.json" --progress-spinner off
 """
 
 
 @dataclass
 class PhaseResult:
     name: str
-    # Código de salida; None = no llegó a correr (el sandbox se cayó o se detuvo)
+    # Código de salida; None = no llegó a correr (una fase anterior falló, o el sandbox se cayó o se detuvo)
     code: int | None
     log_tail: str = ""
 
@@ -68,13 +94,20 @@ class PhaseResult:
         return self.code == 0
 
 
+@dataclass
+class SandboxOutput:
+    phases: dict[str, PhaseResult] = field(default_factory=dict)
+    audit: dict | None = None
+
+
 def _tail(text: str) -> str:
     return "\n".join(text.strip().splitlines()[-LOG_TAIL_LINES:])
 
 
 def _wsl_path(path: Path) -> str:
     """C:\\Users\\ana\\x → /mnt/c/Users/ana/x (las unidades de Windows dentro de WSL)."""
-    p = PureWindowsPath(path.resolve())
+    # Una ruta que ya trae unidad se traduce tal cual (en Linux o macOS resolve() la volvería relativa al cwd)
+    p = PureWindowsPath(path) if PureWindowsPath(path).drive else PureWindowsPath(path.resolve())
     if not p.drive:
         return path.resolve().as_posix()
     return f"/mnt/{p.drive.rstrip(':').lower()}/" + "/".join(p.parts[1:])
@@ -105,7 +138,7 @@ def _available(settings: Settings) -> str | None:
 
 
 class SandboxRun:
-    """Un sandbox en marcha. `wait()` espera a que termine de crear el entorno."""
+    """Un sandbox en marcha. `wait(fase)` espera a que esa fase termine."""
 
     def __init__(self, settings: Settings, proc: subprocess.Popen, out: Path, name: str = ""):
         self.settings = settings
@@ -115,30 +148,36 @@ class SandboxRun:
         self.name = name
         self.deadline = time.monotonic() + settings.sandbox_timeout_s
 
-    def _read(self) -> PhaseResult | None:
-        code_file = self.out / "venv.code"
+    def _read(self, name: str) -> PhaseResult | None:
+        code_file = self.out / f"{name}.code"
         if not code_file.is_file():
             return None
         text = code_file.read_text(encoding="utf-8", errors="replace").strip()
         if not text:
             return None  # el script aún está escribiendo el archivo
-        log_file = self.out / "venv.log"
+        log_file = self.out / f"{name}.log"
         tail = _tail(log_file.read_text(encoding="utf-8", errors="replace")) if log_file.is_file() else ""
-        return PhaseResult("venv", int(text) if text.lstrip("-").isdigit() else None, tail)
+        return PhaseResult(name, int(text) if text.lstrip("-").isdigit() else None, tail)
 
-    async def wait(self) -> PhaseResult:
+    async def wait(self, name: str) -> PhaseResult:
         while True:
-            result = self._read()
+            result = self._read(name)
             if result is not None:
                 return result
             if self.proc.poll() is not None:
-                # Terminó sin crear el entorno: lo que dijo el lanzador explica por qué
+                # Terminó sin llegar a esta fase: lo que dijo el lanzador explica por qué
                 launcher = (self.out / "launcher.log").read_text(encoding="utf-8", errors="replace").strip() if (self.out / "launcher.log").is_file() else ""
-                return self._read() or PhaseResult("venv", None, launcher[-600:] or "El sandbox terminó antes de crear el entorno")
+                return self._read(name) or PhaseResult(name, None, launcher[-600:] or "El sandbox terminó antes de esta fase")
             if time.monotonic() > self.deadline:
                 self.stop()
-                return PhaseResult("venv", None, "Se agotó el tiempo del sandbox (SANDBOX_TIMEOUT_S)")
+                return PhaseResult(name, None, "Se agotó el tiempo del sandbox (SANDBOX_TIMEOUT_S)")
             await asyncio.sleep(0.3)
+
+    def output(self) -> SandboxOutput:
+        return SandboxOutput(
+            phases={name: self._read(name) or PhaseResult(name, None) for name in PHASES},
+            audit=_load_json(self.out / "audit.json"),
+        )
 
     def _kill_inside(self) -> None:
         """Matar wsl.exe / docker CLI no detiene lo que corre dentro: se mata la sesión del script o el contenedor."""
@@ -167,6 +206,13 @@ class SandboxRun:
     def close(self) -> None:
         self.stop()
         shutil.rmtree(self.out, ignore_errors=True)
+
+
+def _load_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | None]:
@@ -223,6 +269,11 @@ def local_venv(settings: Settings, repo_id: str) -> PhaseResult:
     return PhaseResult("venv", done.returncode, _tail(out))
 
 
+def _last_line(text: str, default: str) -> str:
+    lines = text.strip().splitlines()
+    return lines[-1] if lines else default
+
+
 def summary(phase: PhaseResult, where: str) -> str:
     """Línea de la terminal al terminar el paso 2."""
     if phase.ok:
@@ -232,5 +283,50 @@ def summary(phase: PhaseResult, where: str) -> str:
         return f"  entorno listo en {where}" + (f" · {extra}" if extra else "")
     if phase.code == 124:
         return "  no se pudo crear el entorno: tardó más de lo permitido"
-    lines = phase.log_tail.strip().splitlines()
-    return "  no se pudo crear el entorno: " + (lines[-1] if lines else "sin detalle")
+    return "  no se pudo crear el entorno: " + _last_line(phase.log_tail, "sin detalle")
+
+
+def install_summary(phase: PhaseResult) -> str:
+    """Línea de la terminal al terminar el paso 3 (no detiene el análisis: se reporta como hallazgo)."""
+    if phase.ok:
+        return "  " + _last_line(phase.log_tail, "dependencias instaladas")
+    if phase.code is None:
+        return "  no corrió: " + _last_line(phase.log_tail, "el sandbox se detuvo antes")
+    reason = "tardó más de lo permitido" if phase.code == 124 else _last_line(phase.log_tail, f"código {phase.code}")
+    return f"  ERROR al instalar: {reason}"
+
+
+def audit_summary(phase: PhaseResult, out: SandboxOutput) -> str:
+    """Línea de la terminal al terminar el paso 5."""
+    if out.audit is None:
+        return "  pip-audit no devolvió resultado: " + _last_line(phase.log_tail, f"código {phase.code}")
+    return f"  {len(parse_audit(out.audit))} paquete(s) vulnerable(s)"
+
+
+# ───────────────────────── Lectura de resultados ─────────────────────────
+
+
+@dataclass
+class Vulnerability:
+    package: str
+    version: str
+    ids: list[str]
+    fix_versions: list[str]
+    description: str
+
+
+def parse_audit(data: dict | None) -> list[Vulnerability]:
+    vulns = []
+    for dep in (data or {}).get("dependencies") or []:
+        found = dep.get("vulns") or []
+        if not found:
+            continue
+        ids = list(dict.fromkeys(v.get("id", "?") for v in found))
+        fixes = sorted({f for v in found for f in v.get("fix_versions") or []}, key=_version_key)
+        description = next((v.get("description") for v in found if v.get("description")), "") or ""
+        vulns.append(Vulnerability(dep.get("name", "?"), dep.get("version", "?"), ids, fixes, description))
+    return vulns
+
+
+def _version_key(v: str) -> tuple:
+    return tuple(int(p) if p.isdigit() else 0 for p in re.split(r"[.\-+]", v))

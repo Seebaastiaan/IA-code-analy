@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * Flujos del Sprint 4 de punta a punta en el navegador: analizar hasta el entorno aislado, ver el
- * análisis guardado en Repositorios, los archivos del clon, la configuración y el equipo.
+ * Flujos del Sprint 5 de punta a punta en el navegador: analizar hasta pip-audit, ver el análisis
+ * guardado en Repositorios con sus hallazgos de Seguridad, los archivos del clon, la configuración y el equipo.
  * Backend simulado con MSW (`.env.e2e`): su estado vive en memoria de la pestaña, así que cada flujo
  * navega dentro de la app (sin recargar) y empieza con datos limpios.
  */
@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('iavoy-mock-speed', '500'))
 })
 
-test('1 · analizar un repositorio hasta el entorno aislado y verlo en Repositorios', async ({ page }) => {
+test('1 · analizar un repositorio hasta pip-audit y verlo en Repositorios', async ({ page }) => {
   await page.goto('/repos')
   await expect(page.getByRole('heading', { name: 'Repositorios', level: 1 })).toBeVisible()
   await page.getByRole('navigation').getByRole('link', { name: 'Nuevo análisis' }).click()
@@ -21,18 +21,19 @@ test('1 · analizar un repositorio hasta el entorno aislado y verlo en Repositor
   await page.getByLabel('Rama').fill('main')
   await page.getByRole('button', { name: 'Iniciar análisis' }).click()
 
-  // Progreso en vivo por WebSocket: solo 2 pasos en el Sprint 4
+  // Progreso en vivo por WebSocket: 5 pasos en el Sprint 5
   await expect(page).toHaveURL(/\/analyze\/jobs\//)
-  await expect(page.getByText('[01/2] Clonando repositorio')).toBeVisible()
-  await expect(page.getByText('[02/2] Creando entorno aislado')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByRole('main').getByText('Entorno listo · análisis guardado en el repositorio')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByText('Análisis #1 guardado en el repositorio.')).toBeVisible()
+  await expect(page.getByText('[01/5] Clonando repositorio')).toBeVisible()
+  await expect(page.getByText('[04/5] Bandit')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('[05/5] pip-audit')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('main').getByText('Seguridad revisada · análisis guardado en el repositorio')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Análisis #1 guardado en el repositorio con 6 hallazgo(s) de seguridad.')).toBeVisible()
 
   await page.getByRole('link', { name: 'Ver en Repositorios' }).click()
   await expect(page).toHaveURL(/\/repos$/)
   await page.getByRole('button', { name: 'Ver historial de equipo/servicio-facturas' }).click()
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(2) // encabezado + el análisis #1
-  await expect(page.getByRole('table').getByText('Entorno listo')).toBeVisible()
+  await expect(page.getByRole('table').getByText('altas')).toBeVisible()
 })
 
 test('1b · una rama que no existe detiene el análisis y se puede reintentar', async ({ page }) => {
@@ -42,7 +43,7 @@ test('1b · una rama que no existe detiene el análisis y se puede reintentar', 
   await page.getByRole('button', { name: 'Iniciar análisis' }).click()
   await expect(page.getByText('La rama no existe').first()).toBeVisible({ timeout: 10_000 })
   await page.getByRole('button', { name: /Reintentar/ }).click()
-  await expect(page.getByRole('main').getByText('Entorno listo · análisis guardado en el repositorio')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('main').getByText('Seguridad revisada · análisis guardado en el repositorio')).toBeVisible({ timeout: 10_000 })
 })
 
 test('1c · un repositorio sin Python se detiene con un mensaje claro', async ({ page }) => {
@@ -97,7 +98,7 @@ test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await expect(page.getByText('5 miembro(s)')).toBeVisible()
 })
 
-test('fuera del Sprint 4: tablero, reporte, editor y asistente no existen todavía', async ({ page }) => {
+test('fuera del Sprint 5: tablero, reporte, editor y asistente no existen todavía', async ({ page }) => {
   await page.goto('/repos')
   const nav = page.getByRole('navigation')
   for (const name of ['Tablero', 'Reporte', 'Editor', 'Asistente IA', 'Comparativa']) {

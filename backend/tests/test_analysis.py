@@ -1,4 +1,4 @@
-"""Análisis del Sprint 4: clonar → crear entorno aislado → guardar el análisis en el repositorio."""
+"""Análisis del Sprint 5: clonar → entorno → dependencias → Bandit → pip-audit → guardar el análisis en el repositorio."""
 
 import time
 
@@ -21,20 +21,25 @@ def wait_done(client, job_id: str, timeout: float = 5) -> dict:
     pytest.fail("el job no terminó")
 
 
-def test_analisis_llega_al_entorno_y_se_guarda_en_repos(client):
+def test_analisis_llega_a_pip_audit_y_se_guarda_en_repos(client):
     job_id = client.post("/api/analyze", json={"url": URL, "branch": "develop"}).json()["job_id"]
     job = wait_done(client, job_id)
     assert job["status"] == "done"
-    assert job["step"] == job["total"] == len(JOB_STEPS) == 2
-    assert job["logs"][-1] == "Análisis #1 guardado en el repositorio."
+    assert job["step"] == job["total"] == len(JOB_STEPS) == 5
+    assert job["logs"][-1] == "Análisis #1 guardado en el repositorio con 0 hallazgo(s) de seguridad."
     logs = "\n".join(job["logs"])
-    assert "[01/2] Clonando repositorio" in logs and "[02/2] Creando entorno aislado" in logs
+    assert "[01/5] Clonando repositorio" in logs and "[02/5] Creando entorno aislado" in logs
+    assert "[03/5] Instalando dependencias" in logs and "[04/5] Bandit" in logs and "[05/5] pip-audit" in logs
     assert "entorno listo en el backend · Python 3.12.7" in logs
+    # Sin sandbox (SANDBOX=off) las dependencias no se instalan y pip-audit no corre
+    assert "omitido: sin sandbox las dependencias del repo no se instalan en el backend" in logs
+    assert "0 alta · 0 media · 0 baja" in logs
 
     [repo] = client.get("/api/repos").json()
     assert repo["name"] == "ana/api-pagos"
     assert repo["status"] == "listo" and repo["branch"] == "develop"
     assert repo["last_report_id"] == job["report_id"] and repo["last_report_num"] == 1 and repo["reports"] == 1
+    assert repo["findings"] == {"alta": 0, "media": 0, "baja": 0}
     assert "scores" not in repo
 
 
@@ -51,11 +56,12 @@ def test_historial_de_analisis_guardados(client):
     first = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
     repo_id = first["repo_id"]
     second = wait_done(client, client.post(f"/api/repos/{repo_id}/analyze").json()["job_id"])
-    assert second["repo_id"] == repo_id and second["logs"][-1] == "Análisis #2 guardado en el repositorio."
+    assert second["repo_id"] == repo_id and second["logs"][-1] == "Análisis #2 guardado en el repositorio con 0 hallazgo(s) de seguridad."
     history = client.get(f"/api/repos/{repo_id}/history").json()
     assert [h["num"] for h in history] == [2, 1]
     assert history[0]["id"] == second["report_id"] and history[0]["commit"] == "abc1234" and history[0]["branch"] == "main"
     assert {"name": "Python", "files": 3} in history[0]["languages"]
+    assert history[0]["findings"] == {"alta": 0, "media": 0, "baja": 0}
     assert len(client.get("/api/repos").json()) == 1
 
 

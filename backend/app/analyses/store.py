@@ -3,8 +3,14 @@ import secrets
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
+from app.analyses.models import FindingInput
+from app.errors import ApiError
 from app.teams.store import team_id_of
+
+if TYPE_CHECKING:  # workspace importa el clon; aquí solo se usa como tipo
+    from app.analyses.workspace import Workspace
 
 # Pesos y umbrales por defecto de .ia_voy.toml (el cálculo del score llega en el Sprint 6)
 DEFAULT_WEIGHTS = {"seg": 50, "test": 30, "prac": 20}
@@ -89,11 +95,14 @@ class AnalysisStore:
 
     # ─── Análisis guardados (reportes) ───
 
-    def save_report(self, repo_id: str, branch: str, commit: str, duration_s: float, languages: list[dict], created_at: str | None = None) -> tuple[str, int]:
+    def save_report(
+        self, repo_id: str, branch: str, commit: str, duration_s: float, languages: list[dict],
+        findings: list[FindingInput] | None = None, workspace: "Workspace | None" = None, created_at: str | None = None,
+    ) -> tuple[str, int]:
         """
-        Guarda un análisis como el siguiente del repo y devuelve (id, número). En el Sprint 4 el análisis
-        llega hasta el entorno aislado: se guardan rama, commit, duración y lenguajes; los hallazgos y el
-        score (columnas seg/test/prac y tabla findings) los llenan los analizadores en los siguientes sprints.
+        Guarda un análisis como el siguiente del repo y devuelve (id, número). En el Sprint 5 el análisis
+        llega hasta pip-audit: se guardan rama, commit, duración, lenguajes y los hallazgos de Seguridad
+        (Bandit y pip-audit) en la tabla findings. El score (columnas seg/test/prac) lo calcula el Sprint 6.
         """
         last = self.conn.execute("SELECT MAX(num) FROM reports WHERE repo_id = ?", (repo_id,)).fetchone()[0]
         num = (last or 0) + 1
@@ -103,8 +112,25 @@ class AnalysisStore:
                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)""",
             (report_id, repo_id, num, branch, commit, created_at or now_iso(), round(duration_s), json.dumps(languages)),
         )
+        lines: dict[str, list[str]] = {}
+        for f in findings or []:
+            code = f.code if f.code is not None else _line_text(workspace, lines, f.file, f.line)
+            self.conn.execute(
+                """INSERT INTO findings (report_id, sev, cat, tool, rule, file, line, msg, why, rec, code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (report_id, f.sev, f.cat, f.tool, f.rule, f.file, f.line, f.msg, f.why, f.rec, code),
+            )
         self.conn.commit()
         return report_id, num
+
+    def finding_counts(self, report_id: str, ignored: list[str]) -> dict[str, int]:
+        """Hallazgos abiertos del análisis por severidad, sin las reglas que el proyecto ignora."""
+        counts = {"alta": 0, "media": 0, "baja": 0}
+        rows = self.conn.execute("SELECT sev, rule FROM findings WHERE report_id = ? AND status = 'open'", (report_id,)).fetchall()
+        for row in rows:
+            if row["rule"] not in ignored:
+                counts[row["sev"]] += 1
+        return counts
 
     def report(self, report_id: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
@@ -115,3 +141,16 @@ class AnalysisStore:
     def recent_reports(self, repo_id: str, limit: int) -> list[sqlite3.Row]:
         """Últimos `limit` análisis, del más reciente al más antiguo."""
         return self.conn.execute("SELECT * FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT ?", (repo_id, limit)).fetchall()
+
+
+def _line_text(workspace: "Workspace | None", cache: dict[str, list[str]], path: str, line: int) -> str:
+    """Texto de la línea señalada (permite reconocer el hallazgo aunque el archivo cambie de lugar)."""
+    if workspace is None:
+        return ""
+    if path not in cache:
+        try:
+            cache[path] = workspace.read(path).splitlines()
+        except ApiError:
+            cache[path] = []
+    rows = cache[path]
+    return rows[line - 1].strip()[:500] if 0 < line <= len(rows) else ""

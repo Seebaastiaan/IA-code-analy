@@ -91,7 +91,7 @@ export function AnalyzeForm() {
             </div>
           </div>
 
-          <Option checked={sandbox} onChange={setSandbox} title="Crear el entorno en el sandbox" desc="uv venv dentro de WSL2 o Docker; sin sandbox, el entorno se crea en el backend" />
+          <Option checked={sandbox} onChange={setSandbox} title="Ejecutar en el sandbox" desc="Entorno, dependencias y pip-audit dentro de WSL2 o Docker; sin sandbox el entorno se crea en el backend y pip-audit no corre" />
 
           <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
             <Link to={paths.repos()} className={buttonClass('secondary')}>
@@ -121,7 +121,7 @@ export function AnalyzeForm() {
           </ol>
           <p className="mt-4 flex items-center gap-2 text-xs text-slate-500">
             <Icon name="clock" className="w-4 h-4" />
-            Tiempo estimado: menos de 1 minuto
+            Tiempo estimado: 1 – 3 minutos
           </p>
         </Card>
         <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-5 text-sm">

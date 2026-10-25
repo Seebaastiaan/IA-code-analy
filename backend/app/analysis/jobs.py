@@ -1,14 +1,17 @@
 """
-Jobs de análisis (Sprint 4: hasta "Creando entorno aislado").
+Jobs de análisis (Sprint 5: hasta pip-audit).
 
 1. Clonar: REAL. Descarga el repo con git, usando el token de GitHub del usuario si lo tiene, y detecta
    sus lenguajes (IA voy solo analiza Python).
 2. Crear entorno aislado: REAL. `uv venv` en el sandbox (SANDBOX=wsl|docker) o `python -m venv` en el
    backend (SANDBOX=off).
+3. Instalar dependencias: REAL, solo en el sandbox (instalar ejecuta código del repo).
+4. Bandit: REAL. Lee el código en el backend mientras el sandbox avanza.
+5. pip-audit: REAL, en el sandbox, sobre las dependencias instaladas.
 
-Al terminar se guarda el registro del análisis en `reports` (rama, commit, duración y lenguajes): es la
-historia del repositorio donde los siguientes sprints agregarán hallazgos y score. La terminal del usuario
-avanza por WebSocket con cada paso.
+Al terminar se guarda el análisis en `reports` con sus hallazgos de Seguridad (tabla `findings`). pytest,
+coverage, Ruff, Radon y el score llegan en el Sprint 6. La terminal del usuario avanza por WebSocket con
+cada paso.
 
 Persistencia (tabla `jobs`): el proceso que corre un job guarda su estado con cada evento y renueva un
 latido (`heartbeat`). Así:
@@ -30,11 +33,14 @@ from datetime import UTC, datetime
 
 from cryptography.fernet import Fernet
 
+from app.analyses.analyzers import AnalyzerError
 from app.analyses.config_file import import_repo_config
+from app.analyses.models import FindingInput
 from app.analyses.store import AnalysisStore
-from app.analysis import languages, sandbox
+from app.analyses.workspace import Workspace
+from app.analysis import languages, pipeline, sandbox
 from app.analysis.clone import CloneError, Cloner, clone_dir
-from app.analysis.steps import CLONE_STEP, JOB_STEPS, VENV_STEP
+from app.analysis.steps import AUDIT_STEP, CLONE_STEP, JOB_STEPS, VENV_STEP
 from app.config import Settings
 from app.db import connect, session
 from app.github.store import GithubAccountStore
@@ -68,7 +74,8 @@ class Job:
     name: str
     branch: str
     db_path: str
-    # Crear el entorno en el sandbox (si SANDBOX lo permite); False = en el backend
+    # Crear el entorno, instalar dependencias y correr pip-audit en el sandbox (si SANDBOX lo permite);
+    # False = el entorno se crea en el backend y pip-audit no corre
     sandbox: bool = True
     # Inicio del análisis (time.monotonic) para la duración que se guarda
     started: float = field(default_factory=time.monotonic)
@@ -83,6 +90,8 @@ class Job:
     done: dict | None = None
     # Lenguajes del repo (al clonar); se guardan con el análisis
     repo_languages: list[languages.Language] = field(default_factory=list)
+    # Hallazgos de Bandit y pip-audit; no se guardan en la tabla `jobs` (un reintento vuelve a analizar)
+    findings: list[FindingInput] = field(default_factory=list)
     listeners: set[asyncio.Queue] = field(default_factory=set)
     task: asyncio.Task | None = None
     heartbeat: asyncio.Task | None = None
@@ -321,28 +330,76 @@ class JobManager:
         self._finish_step(job, f"  commit {result.commit} · {py} archivos .py · {result.seconds} s\n{found}")
         return True
 
-    async def _venv(self, settings: Settings, job: Job) -> bool:
-        """Paso 2: entorno aislado en el sandbox o, sin sandbox, en el backend. Devuelve False si falló."""
+    async def _analyze(self, settings: Settings, job: Job) -> bool:
+        """
+        Pasos 2-5. Bandit corre en un hilo mientras el sandbox crea el entorno, instala las dependencias y
+        corre pip-audit; la terminal avanza al terminar cada fase. Sin sandbox el entorno se crea en el
+        backend y las dependencias no se instalan, así que pip-audit no corre. Devuelve False si el job
+        quedó en error.
+        """
+        job.step = VENV_STEP
         runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id) if job.sandbox else (None, None)
         if reason:
-            self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); el entorno se crea en el backend"})
+            self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); el entorno se crea en el backend y pip-audit no corre"})
+        static_task = asyncio.create_task(asyncio.to_thread(pipeline.analyze_static, settings, job.repo_id))
         try:
+            # Paso 2: entorno aislado
+            self._start_step(job)
             if runner:
-                phase, where = await runner.wait(), f"el sandbox {settings.sandbox.upper()}"
+                phase, where = await runner.wait("venv"), f"el sandbox {settings.sandbox.upper()}"
             else:
                 await asyncio.sleep(settings.job_step_seconds)
                 phase, where = await asyncio.to_thread(sandbox.local_venv, settings, job.repo_id), "el backend"
+            if not phase.ok:
+                self._fail(settings, job, CloneError(
+                    "No se pudo crear el entorno aislado",
+                    sandbox.summary(phase, where).strip(),
+                    "Revisa que el sandbox tenga uv y Python 3.12 (o usa SANDBOX=off) y vuelve a intentarlo.",
+                ))
+                return False
+            self._finish_step(job, sandbox.summary(phase, where))
+
+            # Paso 3: dependencias (una instalación fallida no detiene el análisis: queda como hallazgo)
+            self._start_step(job)
+            install = None
+            if runner:
+                install = await runner.wait("install")
+                summary = sandbox.install_summary(install)
+            else:
+                await asyncio.sleep(settings.job_step_seconds)
+                summary = "  omitido: sin sandbox las dependencias del repo no se instalan en el backend"
+            self._finish_step(job, summary)
+
+            # Paso 4: Bandit
+            self._start_step(job)
+            static = await static_task
+            self._finish_step(job, pipeline.bandit_summary(static.findings))
+
+            # Paso 5: pip-audit
+            self._start_step(job)
+            findings = list(static.findings)
+            if runner:
+                audit = await runner.wait("audit")
+                out = runner.output()
+                summary = sandbox.audit_summary(audit, out)
+                findings += pipeline.audit_findings(Workspace(settings, job.repo_id), static.files, out)
+                if install is not None and not install.ok:
+                    findings.append(pipeline.install_finding(static.files, install.log_tail))
+            else:
+                await asyncio.sleep(settings.job_step_seconds)
+                summary = "  omitido: sin sandbox no hay dependencias instaladas que revisar"
+            self._finish_step(job, summary)
+            job.findings = findings
+        except AnalyzerError as exc:
+            self._fail(settings, job, CloneError("Bandit falló", str(exc), "Vuelve a intentarlo; si se repite, revisa el log del backend."))
+            return False
         finally:
             if runner:
                 runner.close()
-        if not phase.ok:
-            self._fail(settings, job, CloneError(
-                "No se pudo crear el entorno aislado",
-                sandbox.summary(phase, where).strip(),
-                "Revisa que el sandbox tenga uv y Python 3.12 (o usa SANDBOX=off) y vuelve a intentarlo.",
-            ))
-            return False
-        self._finish_step(job, sandbox.summary(phase, where))
+            if not static_task.done():
+                static_task.cancel()
+            elif not static_task.cancelled():
+                static_task.exception()  # ya se informó (o no hacía falta): que asyncio no la reporte como perdida
         return True
 
     async def _run(self, settings: Settings, job: Job) -> None:
@@ -352,14 +409,13 @@ class JobManager:
                 self._start_step(job)
                 if not await self._clone(settings, job):
                     return
-            if job.step == VENV_STEP:
-                self._start_step(job)
-                if not await self._venv(settings, job):
-                    return
+            # Un reintento a partir del entorno vuelve a correr los pasos 2-5 (el sandbox es uno solo)
+            if job.step <= AUDIT_STEP and not await self._analyze(settings, job):
+                return
             num = _save_report(settings, job)
             job.status = "done"
             job.done = {"num": num}
-            self._emit(job, {"type": "log", "line": f"Análisis #{num} guardado en el repositorio."})
+            self._emit(job, {"type": "log", "line": f"Análisis #{num} guardado en el repositorio con {len(job.findings)} hallazgo(s) de seguridad."})
             self._emit(job, {"type": "done", "repo_id": job.repo_id, "report_id": job.report_id, "num": num})
         except asyncio.CancelledError:
             pass
@@ -387,6 +443,7 @@ def _save_report(settings: Settings, job: Job) -> int:
         job.report_id, num = store.save_report(
             job.repo_id, branch=job.branch, commit=job.commit or "0000000", duration_s=time.monotonic() - job.started,
             languages=[{"name": lang.name, "files": lang.files} for lang in job.repo_languages],
+            findings=job.findings, workspace=Workspace(settings, job.repo_id),
         )
         conn.execute("UPDATE repos SET status = 'listo', error = NULL, branch = ? WHERE id = ?", (job.branch, job.repo_id))
     return num

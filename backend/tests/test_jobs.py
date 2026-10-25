@@ -59,7 +59,7 @@ def test_job_interrumpido_se_ve_como_error_y_se_reintenta(client, worker2, setti
     assert worker2.post(f"/api/jobs/{job['id']}/retry").status_code == 200
     again = wait_done(worker2, job["id"])
     assert again["status"] == "done" and "— Reintentando —" in again["logs"]
-    assert any("[01/2] Clonando repositorio" in line for line in again["logs"][again["logs"].index("— Reintentando —"):])
+    assert any("[01/5] Clonando repositorio" in line for line in again["logs"][again["logs"].index("— Reintentando —"):])
 
 
 def test_un_job_vivo_en_otro_worker_bloquea_otro_analisis(client, worker2, settings):
@@ -99,4 +99,4 @@ def test_websocket_de_un_job_en_otro_worker(client, worker2, settings, monkeypat
                 break
     assert types[0] == "snapshot" and types[-1] == "done"
     assert "log" in types and "step" in types
-    assert steps_done == sorted(set(steps_done)) and steps_done[-1] == 1
+    assert steps_done == sorted(set(steps_done)) and steps_done[-1] == 4
