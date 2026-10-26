@@ -1,4 +1,4 @@
-import type { RepoStatus } from '@/shared/types/common'
+import type { RepoStatus, Scores } from '@/shared/types/common'
 
 export interface Repo {
   id: string
@@ -12,34 +12,12 @@ export interface Repo {
   files: number
   last_report_id: string | null
   last_report_num: number | null
-  /** Análisis guardados del repo */
-  reports: number
-  /** Hallazgos abiertos del último análisis por severidad */
-  findings: FindingCounts | null
+  /** Score del último análisis (con la configuración actual del proyecto) */
+  scores: Scores | null
   /** Mensaje del último error, si status = error */
   error: string | null
   /** Progreso del job en curso, si status = analizando */
   progress: { job_id: string; step: number; total: number; name: string } | null
-}
-
-/** Hallazgos abiertos por severidad (sin las reglas ignoradas en Configuración) */
-export interface FindingCounts {
-  alta: number
-  media: number
-  baja: number
-}
-
-/** Un análisis guardado en el repositorio (Sprint 5: con sus hallazgos de Seguridad, todavía sin score). */
-export interface SavedReport {
-  id: string
-  num: number
-  branch: string
-  commit: string
-  created_at: string
-  duration_s: number
-  languages: { name: string; files: number }[]
-  /** Hallazgos de Bandit y pip-audit */
-  findings: FindingCounts
 }
 
 export interface TreeEntry {

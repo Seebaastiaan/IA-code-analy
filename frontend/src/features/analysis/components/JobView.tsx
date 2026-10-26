@@ -142,11 +142,11 @@ export function JobView({ jobId }: { jobId: string }) {
             )}
             {done && job.repo_id && (
               <>
-                <Link to={paths.files(job.repo_id)} className={buttonClass('secondary')}>
-                  Ver archivos
+                <Link to={paths.repos()} className={buttonClass('secondary')}>
+                  Ver en Repositorios
                 </Link>
-                <Link to={paths.repos()} className={buttonClass('primary')}>
-                  Ver en Repositorios <Icon name="arrow" className="w-4 h-4" />
+                <Link to={paths.dashboard()} className={buttonClass('primary')}>
+                  Ver en el tablero <Icon name="arrow" className="w-4 h-4" />
                 </Link>
               </>
             )}
@@ -157,7 +157,7 @@ export function JobView({ jobId }: { jobId: string }) {
       <Card className="p-5 mb-4">
         <div className="flex items-center justify-between mb-2 text-sm">
           <span className="font-medium">
-            {err ? 'El análisis se detuvo' : done ? 'Seguridad revisada · análisis guardado en el repositorio' : cancelled ? 'Análisis cancelado' : `${JOB_STEPS[job.step]?.name ?? ''}…`}
+            {err ? 'El análisis se detuvo' : done ? 'Análisis completado · score en el tablero' : cancelled ? 'Análisis cancelado' : `${JOB_STEPS[job.step]?.name ?? ''}…`}
           </span>
           <span className={cn('font-mono tabular-nums', err ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500')}>{pct}%</span>
         </div>

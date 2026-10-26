@@ -26,7 +26,8 @@ export const router = createBrowserRouter([
       {
         Component: AppShell,
         children: [
-          { index: true, element: <Navigate to={paths.repos()} replace /> },
+          { index: true, element: <Navigate to={paths.dashboard()} replace /> },
+          { path: '/dashboard', handle: { title: 'Tablero' }, lazy: page(() => import('@/features/dashboard/pages/DashboardPage')) },
           { path: '/analyze', handle: { title: 'Nuevo análisis' }, lazy: page(() => import('@/features/analysis/pages/AnalyzePage')) },
           { path: '/analyze/jobs/:jobId', handle: { title: 'Nuevo análisis' }, lazy: page(() => import('@/features/analysis/pages/AnalyzePage')) },
           { path: '/repos', handle: { title: 'Repositorios' }, lazy: page(() => import('@/features/repos/pages/ReposPage')) },

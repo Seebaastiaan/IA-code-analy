@@ -20,13 +20,14 @@ export interface NavGroup {
 const scoped = (fn: (repoId: string) => string) => (repoId: string | null) => (repoId ? fn(repoId) : paths.repos())
 
 /**
- * Sprint 4: análisis hasta el entorno aislado, repositorios y configuración. Tablero, reporte, editor,
- * asistente IA y comparativa se agregan en los siguientes sprints.
+ * Sprint 6: tablero con el score, análisis completo (10 pasos), repositorios y configuración. Reporte,
+ * editor, asistente IA y comparativa se agregan en los siguientes sprints.
  */
 export const NAV: NavGroup[] = [
   {
     group: 'Principal',
     items: [
+      { id: 'dashboard', label: 'Tablero', icon: 'home', to: paths.dashboard },
       { id: 'analyze', label: 'Nuevo análisis', icon: 'plus', to: () => paths.analyze(), match: (p) => p.startsWith('/analyze/') },
       { id: 'repos', label: 'Repositorios', icon: 'folder', to: paths.repos },
       { id: 'files', label: 'Archivos', icon: 'file', to: scoped((id) => paths.files(id)) },

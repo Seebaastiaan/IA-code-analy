@@ -1,9 +1,11 @@
 """
 Copia de trabajo de un repo analizado: el clon de app.analysis.clone (`CLONES_PATH/{repo_id}/`). La crea
-el job al clonar; la pantalla Archivos la lee (solo lectura). Toda ruta que llega del navegador pasa por `resolve`.
+el job al clonar; el editor la lee y la modifica. Toda ruta que llega del navegador pasa por `resolve`.
 """
 
 import os
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from app.analysis.clone import clone_dir
@@ -33,6 +35,8 @@ class Workspace:
         self.settings = settings
         self.repo_id = repo_id
         self.root = clone_dir(settings, repo_id).resolve()
+        # Respaldos del editor junto a la base de datos: data/backups/{repo_id}/{fecha}/{ruta}
+        self.backup_root = Path(settings.database_path).parent / "backups" / repo_id
 
     def exists(self) -> bool:
         return self.root.is_dir()
@@ -53,13 +57,34 @@ class Workspace:
         if not full.is_file():
             raise not_found(path)
         if full.stat().st_size > MAX_FILE_BYTES:
-            raise ApiError(413, "file_too_large", "El archivo es demasiado grande para mostrarlo (máx. 1 MB)")
+            raise ApiError(413, "file_too_large", "El archivo es demasiado grande para el editor (máx. 1 MB)")
         try:
             # newline="" conserva los saltos de línea tal cual (\r\n incluidos)
             with open(full, encoding="utf-8", newline="") as fh:
                 return fh.read()
         except UnicodeDecodeError as exc:
             raise ApiError(415, "binary_file", "El archivo no es texto UTF-8") from exc
+
+    def read_lines(self, path: str) -> list[str] | None:
+        """Líneas del archivo o None si no se puede leer (para fragmentos de código)."""
+        try:
+            return self.read(path).split("\n")
+        except ApiError:
+            return None
+
+    def write(self, path: str, content: str) -> None:
+        """Guarda respaldando antes la versión anterior en `data/backups/{repo_id}/{fecha}/{ruta}`."""
+        full = self.resolve(path)
+        if not full.is_file():
+            raise not_found(path)
+        if len(content.encode()) > MAX_FILE_BYTES:
+            raise ApiError(413, "file_too_large", "El archivo es demasiado grande para el editor (máx. 1 MB)")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = self.backup_root / stamp / path
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(full, backup)
+        with open(full, "w", encoding="utf-8", newline="") as fh:
+            fh.write(content)
 
     def list_files(self, excluded: list[str]) -> list[str]:
         """Archivos de texto del repo (rutas posix), sin carpetas ocultas, entornos ni rutas excluidas."""
@@ -85,3 +110,10 @@ def is_excluded(path: str, excluded: list[str]) -> bool:
     """Si `path` es una ruta excluida o está dentro de una carpeta excluida."""
     return any(path == e.strip("/") or path.startswith(e.strip("/") + "/") for e in excluded if e.strip("/"))
 
+
+def snippet(lines: list[str] | None, line: int, radius: int = 2) -> list[dict] | None:
+    """±`radius` líneas alrededor de `line` (1-based), en el formato de `SnippetLine` del frontend."""
+    if not lines or not 1 <= line <= len(lines):
+        return None
+    start, end = max(1, line - radius), min(len(lines), line + radius)
+    return [{"line": n, "text": lines[n - 1].rstrip("\r")} for n in range(start, end + 1)]

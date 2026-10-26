@@ -8,6 +8,7 @@ const withQuery = (base: string, query: Record<string, string | number | boolean
 /** Constructores de URL. Usar siempre estos en lugar de strings sueltos. */
 export const paths = {
   login: () => '/login',
+  dashboard: () => '/dashboard',
   analyze: (prefill?: { url?: string; branch?: string }) => withQuery('/analyze', { ...prefill }),
   job: (jobId: string) => `/analyze/jobs/${jobId}`,
   repos: () => '/repos',

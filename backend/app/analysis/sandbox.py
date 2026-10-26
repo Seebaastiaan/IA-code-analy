@@ -1,18 +1,16 @@
 """
-Pasos del análisis que EJECUTAN código del repo: crear el entorno (`uv venv`), instalar sus dependencias y
-correr pip-audit sobre ellas (pasos 2, 3 y 5). Bandit solo lee el código y corre en el backend
-(app.analyses.analyzers). pytest y coverage se agregan a este mismo script en el Sprint 6.
+Sandbox de los pasos que EJECUTAN código del repo analizado: entorno `uv`, dependencias, pip-audit,
+pytest y coverage (pasos 2, 3, 5, 6 y 7). Ruff, Bandit y Radon solo leen el código y corren en el backend.
 
-Un script bash (SCRIPT) corre en WSL2 o en Docker según `SANDBOX`:
+Un solo script bash (SCRIPT) corre en WSL2 o en Docker según `SANDBOX`:
 - `wsl`: `wsl -d {SANDBOX_WSL_DISTRO} bash -l script.sh SRC OUT`. Aísla del entorno de Windows (variables,
-  procesos) pero NO del disco. Pensado para repos propios.
-- `docker`: contenedor desechable con el clon montado de solo lectura. Aislamiento real.
-- `off`: sin sandbox; el entorno se crea en el backend con `python -m venv` (`local_venv`), fuera del clon.
-  Las dependencias del repo NO se instalan en el backend (ejecutarían código ajeno), así que pip-audit no corre.
+  procesos) pero NO del disco: el código analizado puede leer /mnt/c. Pensado para repos propios.
+- `docker`: contenedor desechable con el clon montado de solo lectura. Aislamiento real: úsalo con repos ajenos.
+- `off`: no se ejecuta nada; pipeline simula esos pasos (marcados "(simulado)").
 
-El script copia el clon a una carpeta temporal del sandbox (el clon no se toca) y deja en OUT un
-`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más `audit.json`. El job espera cada
-`.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
+El script copia el clon a una carpeta temporal del sandbox (el clon del editor no se toca) y deja en OUT un
+`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más audit.json, junit.xml y
+coverage.json. El job espera cada `.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
 """
 
 import asyncio
@@ -25,19 +23,18 @@ import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
-from app.analysis.clone import clone_dir, clones_root, remove_tree
+from app.analysis.clone import clone_dir, clones_root
 from app.config import Settings
 
 log = logging.getLogger(__name__)
 
-PHASES = ("venv", "install", "audit")
+PHASES = ("venv", "install", "audit", "tests", "coverage")
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 LOG_TAIL_LINES = 12
-# Límite para crear el entorno local (SANDBOX=off)
-LOCAL_VENV_TIMEOUT_S = 120
 
 SCRIPT = r"""#!/usr/bin/env bash
 # Sandbox de IA voy (app/analysis/sandbox.py). Uso: sandbox.sh SRC OUT
@@ -58,34 +55,52 @@ phase() {
 }
 skip() { for p in "$@"; do echo skip > "$OUT/$p.code"; done; }
 
-# Solo el código: sin .git, entornos, node_modules ni archivos de más de 5 MB
+# Solo lo necesario para correr las pruebas: sin .git, entornos, node_modules ni archivos de más de 5 MB.
+# Copiar todo desde /mnt/c (videos, datasets, el historial de git) tardaba más que el límite del sandbox.
 phase venv 300 bash -c '
   cd "$1" || exit 1
   find . \( -name .git -o -name node_modules -o -name .venv -o -name venv -o -name env -o -name __pycache__ \
             -o -name .mypy_cache -o -name .pytest_cache -o -name .tox -o -name dist -o -name build \) -prune \
          -o -type f -size -5M -print0 | tar --null -T - -cf - | tar -xf - -C "$2" || exit 1
   echo "copiados $(find "$2" -type f | wc -l) archivos"
-  cd "$2" && uv venv -q .venv --python 3.12 && .venv/bin/python --version' _ "$SRC" "$WORK"
-cd "$WORK" || { skip install audit; exit 0; }
-if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit; exit 0; fi
+  cd "$2" && uv venv -q .venv --python 3.12' _ "$SRC" "$WORK"
+cd "$WORK" || { skip install audit tests coverage; exit 0; }
+if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit tests coverage; exit 0; fi
 export VIRTUAL_ENV="$WORK/.venv"; export PATH="$VIRTUAL_ENV/bin:$PATH"
 
 phase install 600 bash -c '
   if [ -f requirements.txt ]; then uv pip install -r requirements.txt || exit $?
   elif [ -f pyproject.toml ] || [ -f setup.py ]; then uv pip install -e . || exit $?
   else echo "Sin requirements.txt ni pyproject.toml: no hay dependencias que instalar"
-  fi'
+  fi
+  # Dependencias de las pruebas, si el proyecto las declara. Opcionales: si fallan, las pruebas corren igual.
+  for f in requirements-dev.txt requirements_dev.txt requirements-test.txt requirements_test.txt requirements-tests.txt \
+           test-requirements.txt dev-requirements.txt requirements/test.txt requirements/tests.txt requirements/dev.txt; do
+    [ -f "$f" ] && { uv pip install -q -r "$f" || echo "aviso: no se pudo instalar $f"; }
+  done
+  if [ -f pyproject.toml ]; then
+    for g in test tests testing dev; do
+      grep -qE "^[[:space:]]*$g[[:space:]]*=" pyproject.toml || continue
+      uv pip install -q --group "$g" 2>/dev/null || uv pip install -q -e ".[$g]" 2>/dev/null || true
+    done
+  fi
+  exit 0'
 
-# pip-audit revisa solo las dependencias instaladas del proyecto
+# Solo las dependencias del proyecto: pytest y coverage se instalan después
 SITE="$(echo "$VIRTUAL_ENV"/lib/python3*/site-packages)"
 phase audit 300 env -u VIRTUAL_ENV uvx pip-audit --path "$SITE" -f json -o "$OUT/audit.json" --progress-spinner off
+
+uv pip install -q pytest coverage > "$OUT/tools.log" 2>&1
+phase tests 600 coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider \
+  --junitxml="$OUT/junit.xml" -o junit_family=xunit1
+phase coverage 120 coverage json -q -o "$OUT/coverage.json"
 """
 
 
 @dataclass
 class PhaseResult:
     name: str
-    # Código de salida; None = no llegó a correr (una fase anterior falló, o el sandbox se cayó o se detuvo)
+    # Código de salida; None = la fase no corrió (una anterior falló o el sandbox se detuvo)
     code: int | None
     log_tail: str = ""
 
@@ -98,10 +113,14 @@ class PhaseResult:
 class SandboxOutput:
     phases: dict[str, PhaseResult] = field(default_factory=dict)
     audit: dict | None = None
+    junit: str | None = None
+    coverage: dict | None = None
 
-
-def _tail(text: str) -> str:
-    return "\n".join(text.strip().splitlines()[-LOG_TAIL_LINES:])
+    @property
+    def usable(self) -> bool:
+        """El entorno se creó: los resultados son del repo (si no, falló el sandbox mismo y se simula)."""
+        venv = self.phases.get("venv")
+        return venv is not None and venv.ok
 
 
 def _read_launcher(path: Path) -> str:
@@ -152,7 +171,7 @@ def _available(settings: Settings) -> str | None:
 
 
 class SandboxRun:
-    """Un sandbox en marcha. `wait(fase)` espera a que esa fase termine."""
+    """Un sandbox en marcha para un análisis. `wait(fase)` espera a que esa fase termine."""
 
     def __init__(self, settings: Settings, proc: subprocess.Popen, out: Path, name: str = ""):
         self.settings = settings
@@ -170,7 +189,9 @@ class SandboxRun:
         if not text:
             return None  # el script aún está escribiendo el archivo
         log_file = self.out / f"{name}.log"
-        tail = _tail(log_file.read_text(encoding="utf-8", errors="replace")) if log_file.is_file() else ""
+        tail = ""
+        if log_file.is_file():
+            tail = "\n".join(log_file.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-LOG_TAIL_LINES:])
         return PhaseResult(name, int(text) if text.lstrip("-").isdigit() else None, tail)
 
     async def wait(self, name: str) -> PhaseResult:
@@ -179,7 +200,7 @@ class SandboxRun:
             if result is not None:
                 return result
             if self.proc.poll() is not None:
-                # Terminó sin llegar a esta fase: lo que dijo el lanzador explica por qué
+                # Terminó sin llegar a esta fase (se cayó o se detuvo antes): lo que dijo el lanzador explica por qué
                 launcher = _read_launcher(self.out / "launcher.log")
                 return self._read(name) or PhaseResult(name, None, launcher[-600:] or "El sandbox terminó antes de esta fase")
             if time.monotonic() > self.deadline:
@@ -188,13 +209,19 @@ class SandboxRun:
             await asyncio.sleep(0.3)
 
     def output(self) -> SandboxOutput:
+        phases = {name: self._read(name) or PhaseResult(name, None) for name in PHASES}
         return SandboxOutput(
-            phases={name: self._read(name) or PhaseResult(name, None) for name in PHASES},
+            phases=phases,
             audit=_load_json(self.out / "audit.json"),
+            junit=(self.out / "junit.xml").read_text(encoding="utf-8", errors="replace") if (self.out / "junit.xml").is_file() else None,
+            coverage=_load_json(self.out / "coverage.json"),
         )
 
     def _kill_inside(self) -> None:
-        """Matar wsl.exe / docker CLI no detiene lo que corre dentro: se mata la sesión del script o el contenedor."""
+        """
+        Matar el proceso de Windows (wsl.exe / docker CLI) no detiene lo que corre dentro del sandbox: una
+        copia o unas pruebas seguirían vivas. WSL: se mata la sesión del script. Docker: el contenedor.
+        """
         if self.settings.sandbox == "docker":
             cmd = ["docker", "kill", self.name]
         else:
@@ -230,7 +257,7 @@ def _load_json(path: Path) -> dict | None:
 
 
 def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | None]:
-    """(sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se usa `local_venv`."""
+    """(sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se simula."""
     if settings.sandbox == "off":
         return None, None
     reason = _available(settings)
@@ -242,7 +269,7 @@ def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | No
     out.mkdir(parents=True)
     # newline="\n": bash no acepta los \r de Windows
     (out / "sandbox.sh").write_text(SCRIPT, encoding="utf-8", newline="\n")
-    # Entorno mínimo: el sandbox no hereda las claves del backend (.env ya cargado en os.environ)
+    # Entorno mínimo: el código analizado no hereda las claves del backend (.env ya cargado en os.environ)
     env = {k: v for k, v in os.environ.items() if k.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "LOCALAPPDATA", "PROGRAMDATA", "DOCKER_HOST"}}
     # Que wsl.exe escriba sus errores (p. ej. distro no encontrada) en UTF-8 y no en UTF-16
     env["WSL_UTF8"] = "1"
@@ -255,71 +282,62 @@ def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | No
     return SandboxRun(settings, proc, out, name), None
 
 
-def venv_dir(settings: Settings, repo_id: str) -> Path:
-    """Entorno local del repo (SANDBOX=off): junto al clon, no dentro, para no mezclarlo con el código."""
-    return clones_root(settings) / f"{repo_id}.venv"
-
-
-def local_venv(settings: Settings, repo_id: str) -> PhaseResult:
-    """Crea el entorno en el backend con el mismo Python que lo corre. No ejecuta nada del repo. Bloqueante."""
-    target = venv_dir(settings, repo_id)
-    remove_tree(target)
-    cmd = [sys.executable, "-m", "venv", "--without-pip", str(target)]
-    try:
-        done = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=LOCAL_VENV_TIMEOUT_S, creationflags=_NO_WINDOW)
-    except subprocess.TimeoutExpired:
-        return PhaseResult("venv", 124, "crear el entorno tardó demasiado")
-    except OSError as exc:
-        return PhaseResult("venv", None, str(exc))
-    out = done.stdout + done.stderr
-    if done.returncode == 0:
-        # Verifica que el intérprete del entorno arranca (y deja su versión en la terminal)
-        python = target / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        try:
-            check = subprocess.run([str(python), "--version"], check=False, capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return PhaseResult("venv", 1, f"el entorno no arranca: {exc}")
-        if check.returncode != 0:
-            return PhaseResult("venv", check.returncode, _tail(check.stdout + check.stderr))
-        out += check.stdout + check.stderr
-    return PhaseResult("venv", done.returncode, _tail(out))
-
-
-def _last_line(text: str, default: str) -> str:
-    lines = text.strip().splitlines()
-    return lines[-1] if lines else default
-
-
-def summary(phase: PhaseResult, where: str) -> str:
-    """Línea de la terminal al terminar el paso 2."""
-    if phase.ok:
-        copied = next((line for line in phase.log_tail.splitlines() if line.startswith("copiados ")), "")
-        python = next((line for line in phase.log_tail.splitlines() if line.startswith("Python ")), "")
-        extra = " · ".join(x for x in (python, copied) if x)
-        return f"  entorno listo en {where}" + (f" · {extra}" if extra else "")
-    if phase.code == 124:
-        return "  no se pudo crear el entorno: tardó más de lo permitido"
-    return "  no se pudo crear el entorno: " + _last_line(phase.log_tail, "sin detalle")
-
-
-def install_summary(phase: PhaseResult) -> str:
-    """Línea de la terminal al terminar el paso 3 (no detiene el análisis: se reporta como hallazgo)."""
-    if phase.ok:
-        return "  " + _last_line(phase.log_tail, "dependencias instaladas")
-    if phase.code is None:
-        return "  no corrió: " + _last_line(phase.log_tail, "el sandbox se detuvo antes")
-    reason = "tardó más de lo permitido" if phase.code == 124 else _last_line(phase.log_tail, f"código {phase.code}")
-    return f"  ERROR al instalar: {reason}"
-
-
-def audit_summary(phase: PhaseResult, out: SandboxOutput) -> str:
-    """Línea de la terminal al terminar el paso 5."""
-    if out.audit is None:
-        return "  pip-audit no devolvió resultado: " + _last_line(phase.log_tail, f"código {phase.code}")
-    return f"  {len(parse_audit(out.audit))} paquete(s) vulnerable(s)"
-
-
 # ───────────────────────── Lectura de resultados ─────────────────────────
+
+
+@dataclass
+class TestCase:
+    name: str
+    file: str
+    line: int
+    message: str
+    kind: str  # "failure" | "error"
+
+
+@dataclass
+class TestRun:
+    passed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    failures: list[TestCase] = field(default_factory=list)
+
+
+def parse_junit(xml: str | None) -> TestRun:
+    run = TestRun()
+    if not xml:
+        return run
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return run
+    for case in root.iter("testcase"):
+        bad = case.find("failure")
+        if bad is None:
+            bad = case.find("error")
+        if case.find("skipped") is not None:
+            run.skipped += 1
+        elif bad is not None:
+            run.failed += 1
+            # xunit1: `file` relativo y `line` desde 0
+            file = (case.get("file") or "").replace("\\", "/")
+            if not file:
+                file = (case.get("classname") or "").replace(".", "/") + ".py"
+            line = int(case.get("line") or -1) + 1
+            message = (bad.get("message") or bad.text or "").strip().splitlines()
+            run.failures.append(TestCase(case.get("name") or "?", file, max(line, 1), message[0][:300] if message else "", bad.tag))
+        else:
+            run.passed += 1
+    return run
+
+
+def parse_coverage(data: dict | None) -> dict[str, tuple[int, int]]:
+    """{archivo: (líneas ejecutadas, sentencias)} del coverage.json."""
+    files = (data or {}).get("files") or {}
+    out = {}
+    for path, info in files.items():
+        summary = info.get("summary") or {}
+        out[path.replace("\\", "/").removeprefix("./")] = (int(summary.get("covered_lines", 0)), int(summary.get("num_statements", 0)))
+    return out
 
 
 @dataclass

@@ -1,33 +1,18 @@
 import { Link } from 'react-router'
+import { CAT } from '@/shared/constants/categories'
 import { paths } from '@/shared/constants/paths'
-import { Card, Icon, Spinner, StatusChip, buttonClass } from '@/shared/ui'
-import { cn } from '@/shared/utils/cn'
+import { CATEGORIES } from '@/shared/types/common'
+import { Card, Icon, ProgressBar, ScoreRing, Spinner, StatusChip, buttonClass } from '@/shared/ui'
 import { timeAgo } from '@/shared/utils/format'
 import { useReanalyze } from '../hooks/useReanalyze'
 import type { Repo } from '../types'
 
-/** Etapas del análisis en el Sprint 5 y lo que llega después. */
-function Stage({ done, label, next }: { done: boolean; label: string; next?: string }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium',
-        done ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-slate-100 text-slate-400 dark:bg-slate-800',
-      )}
-    >
-      {done ? <Icon name="check" className="w-3 h-3" /> : <Icon name="clock" className="w-3 h-3" />}
-      {label}
-      {next && <span className="font-mono">{next}</span>}
-    </span>
-  )
-}
-
-export function RepoCard({ repo, selected, onSelect }: { repo: Repo; selected: boolean; onSelect: () => void }) {
+export function RepoCard({ repo }: { repo: Repo }) {
   const reanalyze = useReanalyze()
 
   return (
-    <Card className={cn('p-5 flex flex-col transition', selected && 'ring-2 ring-brand-500/60')}>
-      <button type="button" onClick={onSelect} className="flex items-start gap-3 text-left" aria-label={`Ver historial de ${repo.name}`}>
+    <Card className="p-5 flex flex-col">
+      <div className="flex items-start gap-3">
         <span className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 grid place-items-center text-slate-500">
           <Icon name="folder" />
         </span>
@@ -39,7 +24,7 @@ export function RepoCard({ repo, selected, onSelect }: { repo: Repo; selected: b
           </p>
         </div>
         <StatusChip status={repo.status} />
-      </button>
+      </div>
 
       {repo.status === 'analizando' ? (
         <div className="mt-5 flex-1 rounded-xl bg-brand-50 dark:bg-brand-500/10 p-3 text-xs text-brand-700 dark:text-brand-300 flex items-center gap-2">
@@ -48,21 +33,19 @@ export function RepoCard({ repo, selected, onSelect }: { repo: Repo; selected: b
         </div>
       ) : repo.status === 'error' ? (
         <div className="mt-5 flex-1 rounded-xl bg-rose-50 dark:bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300 font-mono">{repo.error}</div>
-      ) : repo.last_report_num ? (
-        <div className="mt-5 flex-1 space-y-3">
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-950 p-3 text-xs flex items-center gap-3">
-            <Icon name="save" className="w-4 h-4 text-slate-400" />
-            <span>
-              Análisis <b>#{repo.last_report_num}</b> guardado
-              {repo.commit && <span className="font-mono text-slate-500"> · {repo.commit}</span>}
-            </span>
-            <span className="ml-auto text-slate-400">{repo.reports} en total</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            <Stage done label="Clonado" />
-            <Stage done label="Entorno aislado" />
-            <Stage done label={repo.findings ? `Seguridad · ${repo.findings.alta + repo.findings.media + repo.findings.baja} hallazgo(s)` : 'Seguridad'} />
-            <Stage done={false} label="Score" next="S6" />
+      ) : repo.scores ? (
+        <div className="flex items-center gap-4 mt-5">
+          <ScoreRing value={repo.scores.global} size={64} stroke={6} />
+          <div className="flex-1 space-y-2">
+            {CATEGORIES.map((k) => (
+              <div key={k} className="flex items-center gap-2 text-xs">
+                <span className="w-16 text-slate-500 truncate">{CAT[k].shortLabel}</span>
+                <div className="flex-1">
+                  <ProgressBar value={repo.scores![k]} className={CAT[k].bar} />
+                </div>
+                <span className="w-6 text-right font-mono tabular-nums">{repo.scores![k]}</span>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}
@@ -83,12 +66,10 @@ export function RepoCard({ repo, selected, onSelect }: { repo: Repo; selected: b
               <Icon name="refresh" className="w-4 h-4" />
             </button>
           )}
-          <Link to={paths.settings(repo.id)} className={buttonClass('ghost')} title="Configuración" aria-label={`Configuración de ${repo.name}`}>
-            <Icon name="sliders" className="w-4 h-4" />
-          </Link>
           {repo.files > 0 && (
-            <Link to={paths.files(repo.id)} className={buttonClass('ghost', 'text-brand-600 dark:text-brand-300')} title="Ver archivos" aria-label={`Ver archivos de ${repo.name}`}>
-              Archivos <Icon name="chevron" className="w-4 h-4" />
+            <Link to={paths.files(repo.id)} className={buttonClass('ghost')} title="Ver archivos" aria-label={`Ver archivos de ${repo.name}`}>
+              <Icon name="folder" className="w-4 h-4" />
+              <span className="hidden sm:inline">Archivos</span>
             </Link>
           )}
         </div>

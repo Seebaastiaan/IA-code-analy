@@ -1,13 +1,15 @@
 import asyncio
+import json
 import random
 import re
 import sqlite3
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app.analysis.jobs import Job, JobManager, jobs, now_iso
+from app.analysis.pipeline import ALL_ANALYZERS, CATEGORY_ANALYZERS
 from app.auth import current_user_id
 from app.config import Settings, get_settings
 from app.db import connect, get_db
@@ -36,7 +38,8 @@ Config = Annotated[Settings, Depends(get_settings)]
 class AnalyzeRequest(BaseModel):
     url: str
     branch: str = "main"
-    # Crear el entorno aislado en el sandbox (SANDBOX=wsl|docker); False = en el backend
+    # Vacío = todos. Si se eligen, al menos uno de cada categoría (si no, esa categoría no tendría score)
+    analyzers: list[Literal["bandit", "pip-audit", "pytest", "coverage", "ruff", "radon"]] = []
     sandbox: bool = True
 
 
@@ -44,7 +47,29 @@ class JobStarted(BaseModel):
     job_id: str
 
 
-def _start(conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_id: str, url: str, branch: str, sandbox: bool = True) -> Job:
+def _latest_cat(conn: sqlite3.Connection, repo_id: str) -> dict | None:
+    row = conn.execute("SELECT seg, test, prac FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
+    return dict(row) if row else None
+
+
+CATEGORY_LABEL = {"seg": "Seguridad", "test": "Pruebas", "prac": "Buenas prácticas"}
+
+
+def _analyzers(chosen: list[str]) -> list[str]:
+    """Analizadores en orden canónico; 422 si alguna categoría quedó sin ninguno."""
+    if not chosen:
+        return list(ALL_ANALYZERS)
+    missing = [CATEGORY_LABEL[c] for c, tools in CATEGORY_ANALYZERS.items() if not set(tools) & set(chosen)]
+    if missing:
+        raise ApiError(422, "missing_analyzers", f"Elige al menos un analizador de: {', '.join(missing)}")
+    return [a for a in ALL_ANALYZERS if a in chosen]
+
+
+def _start(
+    conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_id: str, url: str, branch: str,
+    sandbox: bool = True, analyzers: list[str] | None = None,
+) -> Job:
+    chosen = _analyzers(analyzers or [])
     m = REPO_URL.match(url.strip())
     if not m:
         raise ApiError(422, "invalid_url", "Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)")
@@ -66,7 +91,10 @@ def _start(conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_
             raise ApiError(409, "already_running", "Ya hay un análisis en curso para este repositorio")
         conn.execute("UPDATE repos SET status = 'analizando', error = NULL, branch = ?, url = ? WHERE id = ?", (branch, url, repo_id))
     conn.commit()
-    return jobs.start(settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, sandbox=sandbox)
+    return jobs.start(
+        settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, _latest_cat(conn, repo_id),
+        sandbox=sandbox, analyzers=chosen,
+    )
 
 
 def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: str) -> Job:
@@ -82,7 +110,7 @@ def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: s
 
 @router.post("/api/analyze", response_model=JobStarted)
 async def analyze(body: AnalyzeRequest, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> JobStarted:
-    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox)
+    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers))
     return JobStarted(job_id=job.id)
 
 
@@ -151,7 +179,7 @@ async def job_socket(ws: WebSocket, job_id: str, jobs: Jobs, settings: Config) -
 
 
 # ─── Re-análisis ───
-# Lista de repos, análisis guardados, árbol y archivos: app.repos
+# Lista de repos, tablero, reporte, árbol y archivos: app.dashboard, app.reports y app.editor
 
 
 @router.post("/api/repos/{repo_id}/analyze", response_model=JobStarted)
@@ -159,15 +187,18 @@ async def reanalyze(repo_id: str, user_id: UserId, conn: Db, jobs: Jobs, setting
     repo = conn.execute("SELECT * FROM repos WHERE id = ? AND team_id = ?", (repo_id, team_id_of(conn, user_id))).fetchone()
     if repo is None:
         raise ApiError(404, "not_found", "Repositorio no encontrado")
-    return JobStarted(job_id=_start(conn, jobs, settings, user_id, repo["url"], repo["branch"]).id)
+    # Mismos analizadores que el último análisis del repo
+    last = conn.execute("SELECT analyzers FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
+    analyzers = json.loads(last["analyzers"] or "[]") if last else []
+    return JobStarted(job_id=_start(conn, jobs, settings, user_id, repo["url"], repo["branch"], analyzers=analyzers).id)
 
 
 def sandbox_service(settings: Settings) -> dict:
-    """Dónde se crea el entorno aislado del paso 2 (app.analysis.sandbox)."""
+    """Dónde corren pytest, coverage y pip-audit (app.analysis.sandbox)."""
     if settings.sandbox == "off":
-        return {"id": "sandbox", "name": "Sandbox", "role": "Apagado: el entorno se crea en el backend (SANDBOX=off)", "status": "standby", "label": "Apagado"}
+        return {"id": "sandbox", "name": "Sandbox", "role": "pytest, coverage y pip-audit simulados (SANDBOX=off)", "status": "standby", "label": "Apagado"}
     name = f"Sandbox WSL2 ({settings.sandbox_wsl_distro})" if settings.sandbox == "wsl" else "Sandbox Docker"
-    return {"id": "sandbox", "name": name, "role": "Crea el entorno aislado (uv venv)", "status": "ok", "label": "Activo"}
+    return {"id": "sandbox", "name": name, "role": "Ejecuta pytest, coverage y pip-audit", "status": "ok", "label": "Activo"}
 
 
 @router.get("/api/health")

@@ -3,18 +3,11 @@ import secrets
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
-from app.analyses.models import FindingInput
-from app.errors import ApiError
+from app.analyses.models import FindingInput, ReportInput
+from app.analyses.scoring import DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, category_scores, effective_coverage
+from app.analyses.workspace import Workspace, is_excluded, snippet
 from app.teams.store import team_id_of
-
-if TYPE_CHECKING:  # workspace importa el clon; aquí solo se usa como tipo
-    from app.analyses.workspace import Workspace
-
-# Pesos y umbrales por defecto de .ia_voy.toml (el cálculo del score llega en el Sprint 6)
-DEFAULT_WEIGHTS = {"seg": 50, "test": 30, "prac": 20}
-DEFAULT_THRESHOLDS = {"score": 70, "cov": 60}
 
 
 @dataclass
@@ -35,10 +28,7 @@ def now_iso() -> str:
 
 
 class AnalysisStore:
-    """
-    Repositorios del equipo, su configuración y los análisis guardados, en SQLite. El job de análisis
-    escribe; la pantalla Repositorios y la Configuración leen.
-    """
+    """Repos, reportes y hallazgos en SQLite. El job de análisis escribe; tablero, reporte y editor leen."""
 
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -93,44 +83,54 @@ class AnalysisStore:
         )
         self.conn.commit()
 
-    # ─── Análisis guardados (reportes) ───
+    # ─── Reportes ───
 
-    def save_report(
-        self, repo_id: str, branch: str, commit: str, duration_s: float, languages: list[dict],
-        findings: list[FindingInput] | None = None, workspace: "Workspace | None" = None, created_at: str | None = None,
-    ) -> tuple[str, int]:
-        """
-        Guarda un análisis como el siguiente del repo y devuelve (id, número). En el Sprint 5 el análisis
-        llega hasta pip-audit: se guardan rama, commit, duración, lenguajes y los hallazgos de Seguridad
-        (Bandit y pip-audit) en la tabla findings. El score (columnas seg/test/prac) lo calcula el Sprint 6.
-        """
+    def save_report(self, repo_id: str, data: ReportInput, workspace: Workspace | None = None) -> tuple[str, int]:
+        """Guarda el resultado de un análisis como el reporte siguiente del repo. Devuelve (id, número)."""
         last = self.conn.execute("SELECT MAX(num) FROM reports WHERE repo_id = ?", (repo_id,)).fetchone()[0]
         num = (last or 0) + 1
         report_id = f"{repo_id}-{num}"
-        self.conn.execute(
-            """INSERT INTO reports (id, repo_id, num, branch, commit_sha, created_at, duration_s, seg, test, prac, seed, languages)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)""",
-            (report_id, repo_id, num, branch, commit, created_at or now_iso(), round(duration_s), json.dumps(languages)),
+        # seg/test/prac quedan como foto del momento; el score que se muestra se recalcula al leer
+        cfg = self.config(repo_id)
+        ignored = set(cfg.ignored)
+        cats = category_scores(
+            ((f.cat, f.sev) for f in data.findings if f.rule not in ignored and not is_excluded(f.file, cfg.excluded)),
+            effective_coverage(data.coverage_total, data.analyzers), data.tests_failed, data.code_lines,
         )
-        lines: dict[str, list[str]] = {}
-        for f in findings or []:
-            code = f.code if f.code is not None else _line_text(workspace, lines, f.file, f.line)
-            self.conn.execute(
-                """INSERT INTO findings (report_id, sev, cat, tool, rule, file, line, msg, why, rec, code)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (report_id, f.sev, f.cat, f.tool, f.rule, f.file, f.line, f.msg, f.why, f.rec, code),
-            )
+        self.conn.execute(
+            """INSERT INTO reports (id, repo_id, num, branch, commit_sha, created_at, duration_s, seg, test, prac, seed,
+               coverage_total, tests_failed, avg_complexity, coverage, complexity, analyzers, languages, code_lines)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report_id, repo_id, num, data.branch, data.commit, data.created_at or now_iso(), round(data.duration_s),
+                round(cats["seg"]), round(cats["test"]), round(cats["prac"]), data.seed,
+                data.coverage_total, data.tests_failed, data.avg_complexity,
+                json.dumps([asdict(c) for c in data.coverage]), json.dumps([asdict(c) for c in data.complexity]), json.dumps(data.analyzers), json.dumps(data.languages), data.code_lines,
+            ),
+        )
+        self.add_findings(report_id, data.findings, workspace, commit=False)
         self.conn.commit()
         return report_id, num
 
-    def finding_counts(self, report_id: str, ignored: list[str]) -> dict[str, int]:
-        """Hallazgos abiertos del análisis por severidad, sin las reglas que el proyecto ignora."""
-        counts = {"alta": 0, "media": 0, "baja": 0}
-        rows = self.conn.execute("SELECT sev, rule FROM findings WHERE report_id = ? AND status = 'open'", (report_id,)).fetchall()
-        for row in rows:
-            if row["rule"] not in ignored:
-                counts[row["sev"]] += 1
-        return counts
+    def add_findings(self, report_id: str, findings: list[FindingInput], workspace: Workspace | None = None, lines_by_file: dict[str, list[str] | None] | None = None, commit: bool = True) -> list[int]:
+        """Inserta hallazgos con su fragmento de código (±2 líneas) tomado de la copia de trabajo."""
+        cache = dict(lines_by_file or {})
+        ids = []
+        for f in findings:
+            if f.file not in cache:
+                cache[f.file] = workspace.read_lines(f.file) if workspace else None
+            lines = cache[f.file]
+            code = f.code if f.code is not None else (lines[f.line - 1].rstrip("\r") if lines and 1 <= f.line <= len(lines) else "")
+            snip = snippet(lines, f.line)
+            cur = self.conn.execute(
+                """INSERT INTO findings (report_id, sev, cat, tool, rule, file, line, msg, why, rec, fix, code, snippet)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (report_id, f.sev, f.cat, f.tool, f.rule, f.file, f.line, f.msg, f.why, f.rec, int(f.fix), code, json.dumps(snip) if snip else None),
+            )
+            ids.append(cur.lastrowid)
+        if commit:
+            self.conn.commit()
+        return ids
 
     def report(self, report_id: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
@@ -138,19 +138,32 @@ class AnalysisStore:
     def latest_report(self, repo_id: str) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
 
+    def previous_report(self, repo_id: str, num: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM reports WHERE repo_id = ? AND num < ? ORDER BY num DESC LIMIT 1", (repo_id, num)).fetchone()
+
     def recent_reports(self, repo_id: str, limit: int) -> list[sqlite3.Row]:
-        """Últimos `limit` análisis, del más reciente al más antiguo."""
-        return self.conn.execute("SELECT * FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT ?", (repo_id, limit)).fetchall()
+        """Últimos `limit` reportes, del más antiguo al más reciente."""
+        rows = self.conn.execute("SELECT * FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT ?", (repo_id, limit)).fetchall()
+        return rows[::-1]
 
+    # ─── Hallazgos ───
 
-def _line_text(workspace: "Workspace | None", cache: dict[str, list[str]], path: str, line: int) -> str:
-    """Texto de la línea señalada (permite reconocer el hallazgo aunque el archivo cambie de lugar)."""
-    if workspace is None:
-        return ""
-    if path not in cache:
-        try:
-            cache[path] = workspace.read(path).splitlines()
-        except ApiError:
-            cache[path] = []
-    rows = cache[path]
-    return rows[line - 1].strip()[:500] if 0 < line <= len(rows) else ""
+    def findings(self, report_id: str, file: str | None = None) -> list[sqlite3.Row]:
+        if file is None:
+            return self.conn.execute("SELECT * FROM findings WHERE report_id = ? ORDER BY id", (report_id,)).fetchall()
+        return self.conn.execute("SELECT * FROM findings WHERE report_id = ? AND file = ? ORDER BY id", (report_id, file)).fetchall()
+
+    def findings_by_id(self, ids: list[int]) -> list[sqlite3.Row]:
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        return self.conn.execute(f"SELECT * FROM findings WHERE id IN ({marks}) ORDER BY id", ids).fetchall()
+
+    def resolve_findings(self, ids: list[int]) -> None:
+        self.conn.executemany("UPDATE findings SET status = 'resolved' WHERE id = ?", [(i,) for i in ids])
+        self.conn.commit()
+
+    def move_finding(self, finding_id: int, line: int, snip: list[dict] | None) -> None:
+        """El hallazgo sigue presente pero en otra línea (el archivo se editó)."""
+        self.conn.execute("UPDATE findings SET line = ?, snippet = ? WHERE id = ?", (line, json.dumps(snip) if snip else None, finding_id))
+        self.conn.commit()

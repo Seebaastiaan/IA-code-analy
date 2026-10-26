@@ -15,6 +15,7 @@ export function useReanalyze() {
     onSuccess: ({ job_id }, repo) => {
       connect(job_id)
       void queryClient.invalidateQueries({ queryKey: ['repos'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       toast(`Re-análisis de ${repo.name} en cola`, { tone: 'info', action: { label: 'Ver progreso', onClick: () => navigateTo(paths.job(job_id)) } })
     },
     onError: (e) => toast(e.message, { tone: 'err' }),

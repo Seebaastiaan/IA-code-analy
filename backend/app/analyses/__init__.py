@@ -1,1 +1,1 @@
-"""Datos de análisis compartidos: repositorios, configuración del proyecto y análisis guardados (store.py)."""
+"""Datos de análisis compartidos por tablero, reporte y editor (ver models.py y store.py)."""

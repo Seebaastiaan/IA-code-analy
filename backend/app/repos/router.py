@@ -1,6 +1,6 @@
 """
-Repositorios del equipo, sus análisis guardados y los archivos del último clon (solo lectura).
-docs/FRONTEND_SPEC.md §5.4 y §6.2.
+Archivos del último clon de un repositorio (solo lectura): árbol y contenido. La lista de repositorios y su
+historial pasaron al tablero (app.dashboard) en el Sprint 6. docs/FRONTEND_SPEC.md §6.2.
 """
 
 from typing import Annotated
@@ -8,16 +8,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.analyses.access import Analyses, Jobs, UserId, require_repo
-from app.analyses.schemas import Repo, SavedReport
-from app.analyses.views import repo_view, report_view
+from app.analyses.access import Analyses, UserId, require_repo
 from app.analyses.workspace import Workspace, language_of
 from app.config import Settings, get_settings
 from app.errors import ApiError
 
 router = APIRouter(prefix="/api", tags=["repositorios"])
 
-HISTORY_POINTS = 10
 Config = Annotated[Settings, Depends(get_settings)]
 
 
@@ -37,19 +34,6 @@ def workspace(settings: Settings, repo_id: str) -> Workspace:
     if not ws.exists():
         raise ApiError(404, "not_cloned", "Este repositorio aún no se ha clonado. Vuelve a analizarlo.")
     return ws
-
-
-@router.get("/repos", response_model=list[Repo])
-def list_repos(store: Analyses, user_id: UserId, jobs: Jobs) -> list[Repo]:
-    return [repo_view(store, jobs, r) for r in store.repos(user_id)]
-
-
-@router.get("/repos/{repo_id}/history", response_model=list[SavedReport])
-def repo_history(repo_id: str, store: Analyses, user_id: UserId, limit: int = Query(default=HISTORY_POINTS, ge=1, le=100)) -> list[SavedReport]:
-    """Análisis guardados del repo, del más reciente al más antiguo."""
-    require_repo(store, user_id, repo_id)
-    ignored = store.config(repo_id).ignored
-    return [report_view(store, r, ignored) for r in store.recent_reports(repo_id, limit)]
 
 
 @router.get("/repos/{repo_id}/tree", response_model=list[TreeEntry])

@@ -44,7 +44,7 @@ def test_cada_quien_empieza_con_su_equipo(client, other):
 
 def test_repos_de_otro_equipo_son_invisibles(client, other, settings):
     repo_id = seed("ana", settings)
-    assert other.get(f"/api/repos/{repo_id}/history").status_code == 404
+    assert other.get(f"/api/report/latest?repo={repo_id}").status_code == 404
     assert other.get("/api/repos").json() == []
 
 
@@ -60,7 +60,7 @@ def test_unirse_comparte_repos_y_analisis(client, other, settings):
     assert other.get("/api/auth/me").json()["team"] == {"name": "Equipo de Ana López", "members": 2}
 
     # Beto ve y analiza los repos del equipo; Ana ve lo que Beto agrega
-    assert other.get(f"/api/repos/{repo_id}/history").status_code == 200
+    assert other.get(f"/api/report/latest?repo={repo_id}").status_code == 200
     job = wait_done(other, other.post("/api/analyze", json={"url": URL}).json()["job_id"])
     assert job["status"] == "done"
     assert "ana/api-pagos" in {r["name"] for r in client.get("/api/repos").json()}
@@ -96,7 +96,7 @@ def test_salir_del_equipo(client, other, settings):
 
     team = other.delete("/api/team/members/me").json()
     assert team["name"] == "Equipo de Beto Ruiz" and team["role"] == "owner" and team["repos"] == 0
-    assert other.get(f"/api/repos/{repo_id}/history").status_code == 404
+    assert other.get(f"/api/report/latest?repo={repo_id}").status_code == 404
     assert len(client.get("/api/team").json()["members"]) == 1
 
 

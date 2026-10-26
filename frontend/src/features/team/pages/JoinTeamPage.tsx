@@ -10,7 +10,7 @@ export default function JoinTeamPage() {
   const { code = '' } = useParams()
   const navigate = useNavigate()
   const { data: invite, error, isPending } = useInvitePreview(code)
-  const join = useTeamMutation(teamApi.join, { success: 'Te uniste al equipo', switchesTeam: true, onDone: () => navigate(paths.repos(), { replace: true }) })
+  const join = useTeamMutation(teamApi.join, { success: 'Te uniste al equipo', switchesTeam: true, onDone: () => navigate(paths.dashboard(), { replace: true }) })
 
   if (isPending) return <PageLoader />
   if (error || !invite) {
@@ -36,7 +36,7 @@ export default function JoinTeamPage() {
         {invite.already_member ? (
           <>
             <p className="text-sm mt-5">Ya eres parte de este equipo.</p>
-            <Link to={paths.repos()} className={buttonClass('primary', 'w-full mt-4')}>
+            <Link to={paths.dashboard()} className={buttonClass('primary', 'w-full mt-4')}>
               Ir al tablero
             </Link>
           </>
@@ -55,7 +55,7 @@ export default function JoinTeamPage() {
               {join.isPending && <Spinner />}
               Unirme al equipo
             </Button>
-            <Link to={paths.repos()} className={buttonClass('ghost', 'w-full mt-2 justify-center')}>
+            <Link to={paths.dashboard()} className={buttonClass('ghost', 'w-full mt-2 justify-center')}>
               Ahora no
             </Link>
           </>

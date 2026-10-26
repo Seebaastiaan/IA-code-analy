@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { reduceJob } from '@/features/analysis/store/job.store'
 import type { Job } from '@/features/analysis/types'
 
-const base: Job = { id: 'job-1', url: 'https://github.com/e/r', name: 'e/r', branch: 'main', step: 0, total: 2, status: 'running', logs: [] }
+const base: Job = { id: 'job-1', url: 'https://github.com/e/r', name: 'e/r', branch: 'main', step: 0, total: 10, status: 'running', logs: [] }
 
 describe('reduceJob', () => {
   it('el snapshot reemplaza el estado (reconexión)', () => {
@@ -25,8 +25,8 @@ describe('reduceJob', () => {
     expect(j).toMatchObject({ status: 'error', step: 1, error: { title: 't', detail: 'd', hint: 'h' } })
   })
 
-  it('al terminar guarda el análisis en el repositorio y llega al 100 %', () => {
-    const j = reduceJob(base, { type: 'done', repo_id: 'r1', report_id: 'r1-4', num: 4 })
-    expect(j).toMatchObject({ status: 'done', step: 2, repo_id: 'r1', report_id: 'r1-4' })
+  it('al terminar guarda el análisis con su score y llega al 100 %', () => {
+    const j = reduceJob(base, { type: 'done', repo_id: 'r1', report_id: 'r1-4', num: 4, score: 74 })
+    expect(j).toMatchObject({ status: 'done', step: 10, repo_id: 'r1', report_id: 'r1-4' })
   })
 })

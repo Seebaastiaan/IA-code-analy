@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 from app.analysis import clone as clone_mod
 from app.analysis import router as analysis_router
-from app.analysis import sandbox
 from app.analysis.clone import CloneError, CloneResult
 from app.analysis.jobs import JobManager
 from app.config import Settings, get_settings
@@ -70,19 +69,6 @@ class FakeCloner:
         return CloneResult(py_files=len(clone_mod.python_files(tmp)), seconds=0.1, commit="abc1234")
 
     promote = staticmethod(clone_mod.promote)
-
-
-@pytest.fixture(autouse=True)
-def fast_venv(monkeypatch):
-    """`python -m venv` tarda segundos en Windows: las pruebas del job usan un entorno instantáneo (test_sandbox prueba el real)."""
-    calls: list[str] = []
-
-    def fake(settings, repo_id):
-        calls.append(repo_id)
-        return sandbox.PhaseResult("venv", 0, "Python 3.12.7")
-
-    monkeypatch.setattr(sandbox, "local_venv", fake)
-    return calls
 
 
 @pytest.fixture

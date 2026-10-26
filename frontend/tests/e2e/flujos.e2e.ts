@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * Flujos del Sprint 5 de punta a punta en el navegador: analizar hasta pip-audit, ver el análisis
- * guardado en Repositorios con sus hallazgos de Seguridad, los archivos del clon, la configuración y el equipo.
+ * Flujos del Sprint 6 de punta a punta en el navegador: analizar con los 10 pasos, ver el score en
+ * Repositorios y en el tablero, los archivos del clon, la configuración y el equipo.
  * Backend simulado con MSW (`.env.e2e`): su estado vive en memoria de la pestaña, así que cada flujo
  * navega dentro de la app (sin recargar) y empieza con datos limpios.
  */
@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('iavoy-mock-speed', '500'))
 })
 
-test('1 · analizar un repositorio hasta pip-audit y verlo en Repositorios', async ({ page }) => {
+test('1 · analizar un repositorio y ver su score en Repositorios', async ({ page }) => {
   await page.goto('/repos')
   await expect(page.getByRole('heading', { name: 'Repositorios', level: 1 })).toBeVisible()
   await page.getByRole('navigation').getByRole('link', { name: 'Nuevo análisis' }).click()
@@ -21,19 +21,18 @@ test('1 · analizar un repositorio hasta pip-audit y verlo en Repositorios', asy
   await page.getByLabel('Rama').fill('main')
   await page.getByRole('button', { name: 'Iniciar análisis' }).click()
 
-  // Progreso en vivo por WebSocket: 5 pasos en el Sprint 5
+  // Progreso en vivo por WebSocket: 10 pasos en el Sprint 6
   await expect(page).toHaveURL(/\/analyze\/jobs\//)
-  await expect(page.getByText('[01/5] Clonando repositorio')).toBeVisible()
-  await expect(page.getByText('[04/5] Bandit')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByText('[05/5] pip-audit')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByRole('main').getByText('Seguridad revisada · análisis guardado en el repositorio')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByText('Análisis #1 guardado en el repositorio con 6 hallazgo(s) de seguridad.')).toBeVisible()
+  await expect(page.getByText('[01/10] Clonando repositorio')).toBeVisible()
+  await expect(page.getByText('[06/10] pytest')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('[10/10] Calculando score')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('main').getByText('Análisis completado · score en el tablero')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Análisis #1 completado.')).toBeVisible()
 
   await page.getByRole('link', { name: 'Ver en Repositorios' }).click()
   await expect(page).toHaveURL(/\/repos$/)
-  await page.getByRole('button', { name: 'Ver historial de equipo/servicio-facturas' }).click()
-  await expect(page.getByRole('table').getByRole('row')).toHaveCount(2) // encabezado + el análisis #1
-  await expect(page.getByRole('table').getByText('altas')).toBeVisible()
+  await expect(page.getByText('equipo/servicio-facturas')).toBeVisible()
+  await expect(page.getByLabel('Re-analizar equipo/servicio-facturas')).toBeVisible()
 })
 
 test('1b · una rama que no existe detiene el análisis y se puede reintentar', async ({ page }) => {
@@ -43,7 +42,7 @@ test('1b · una rama que no existe detiene el análisis y se puede reintentar', 
   await page.getByRole('button', { name: 'Iniciar análisis' }).click()
   await expect(page.getByText('La rama no existe').first()).toBeVisible({ timeout: 10_000 })
   await page.getByRole('button', { name: /Reintentar/ }).click()
-  await expect(page.getByRole('main').getByText('Seguridad revisada · análisis guardado en el repositorio')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('main').getByText('Análisis completado · score en el tablero')).toBeVisible({ timeout: 15_000 })
 })
 
 test('1c · un repositorio sin Python se detiene con un mensaje claro', async ({ page }) => {
@@ -53,13 +52,16 @@ test('1c · un repositorio sin Python se detiene con un mensaje claro', async ({
   await expect(page.getByText('El repositorio no tiene código Python').first()).toBeVisible({ timeout: 10_000 })
 })
 
-test('2 · repositorios: análisis guardados y archivos del clon', async ({ page }) => {
+test('2 · tablero: score, tendencia y hallazgos prioritarios; archivos del clon', async ({ page }) => {
   await page.goto('/repos')
-  await page.getByRole('button', { name: 'Ver historial de equipo/api-pagos' }).click()
-  const saved = page.getByRole('table')
-  await expect(saved.getByRole('row')).toHaveCount(4) // encabezado + 3 análisis
-  await expect(saved.getByText('a3f9c1e')).toBeVisible()
+  await page.getByRole('navigation').getByRole('link', { name: 'Tablero' }).click()
+  await expect(page.getByRole('heading', { name: 'Resumen del equipo', level: 1 })).toBeVisible()
+  await expect(page.getByText('Score global')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Tendencia' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Atención prioritaria' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Análisis recientes' })).toBeVisible()
 
+  await page.getByRole('navigation').getByRole('link', { name: 'Repositorios' }).click()
   await page.getByRole('link', { name: 'Ver archivos de equipo/api-pagos' }).click()
   await expect(page).toHaveURL(/\/repos\/r1\/files/)
   await page.getByRole('button', { name: 'utils.py' }).click()
@@ -98,12 +100,12 @@ test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await expect(page.getByText('5 miembro(s)')).toBeVisible()
 })
 
-test('fuera del Sprint 5: tablero, reporte, editor y asistente no existen todavía', async ({ page }) => {
+test('fuera del Sprint 6: reporte, editor, asistente y comparativa no existen todavía', async ({ page }) => {
   await page.goto('/repos')
   const nav = page.getByRole('navigation')
-  for (const name of ['Tablero', 'Reporte', 'Editor', 'Asistente IA', 'Comparativa']) {
+  for (const name of ['Reporte', 'Editor', 'Asistente IA', 'Comparativa']) {
     await expect(nav.getByRole('link', { name })).toHaveCount(0)
   }
-  await page.goto('/dashboard')
+  await page.goto('/repos/r1/reports/latest')
   await expect(page.getByText(/no existe|no encontrada|404/i).first()).toBeVisible()
 })

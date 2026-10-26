@@ -22,14 +22,14 @@ class Settings(BaseSettings):
     # Carpeta de los repos clonados. Vacía = fuera del proyecto (ver app.analysis.clone.clones_root):
     # dentro de OneDrive/Dropbox la sincronización bloquea los archivos recién clonados.
     clones_path: str = ""
-    # Pausa visual antes de crear el entorno cuando no hay sandbox (la terminal alcanza a mostrar el paso)
+    # Segundos de la animación por paso del análisis simulado (10 pasos)
     job_step_seconds: float = 0.9
-    # Dónde se crea el entorno aislado (app.analysis.sandbox): off = en el backend, wsl o docker
+    # Dónde corren pytest, coverage y pip-audit (app.analysis.sandbox): off = simulados, wsl o docker
     sandbox: Literal["off", "wsl", "docker"] = "off"
     sandbox_wsl_distro: str = "Ubuntu-24.04"
     sandbox_docker_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
-    # Límite del sandbox por análisis
-    sandbox_timeout_s: int = 600
+    # Límite de todo el sandbox (instalar dependencias + pruebas) por análisis
+    sandbox_timeout_s: int = 1200
 
     @property
     def github_redirect_uri(self) -> str:

@@ -3,15 +3,15 @@
 Analizador de calidad de código **Python** para equipos. El usuario indica un repositorio de GitHub (URL +
 rama); el backend lo clona, lo analiza y guarda el resultado en el historial del repositorio.
 
-> Estado: **Sprint 5 (27 oct)** — Seguridad: dependencias, Bandit y pip-audit. Pruebas: 109 de backend · 12 unitarias del frontend · 7 e2e.
+> Estado: **Sprint 6 (3 nov)** — Análisis completo, score ponderado y tablero. Pruebas: 123 de backend · 12 unitarias del frontend · 7 e2e.
 
 ## Objetivo del sprint
 
-Llevar el análisis hasta el paso 5: instalar las dependencias del repo en el sandbox y revisar su seguridad con Bandit (código) y pip-audit (dependencias).
+Completar los pasos 6 a 10 del análisis (pytest, coverage, Ruff, Radon y el score) y mostrar el score ponderado por categoría en Repositorios y en un tablero con su tendencia.
 
-**Demo:** Analizar demo_repo con SANDBOX=wsl → terminal en vivo con los 5 pasos (clonar, entorno, dependencias, Bandit, pip-audit) → el análisis queda en Repositorios con sus hallazgos por severidad.
+**Demo:** Analizar demo_repo con los 10 pasos → el score aparece en su tarjeta de Repositorios → el tablero muestra score global, categorías, tendencia y hallazgos prioritarios → cambiar pesos en Configuración y ver el score recalculado sin re-analizar.
 
-**Criterio de aceptación:** Pruebas de backend, unitarias y e2e en verde; Bandit y pip-audit corren de verdad y sus hallazgos quedan guardados en cada análisis.
+**Criterio de aceptación:** Pruebas de backend, unitarias y e2e en verde; el score del frontend coincide con el de la API.
 
 ## Lo que hace la app
 
@@ -22,11 +22,12 @@ Llevar el análisis hasta el paso 5: instalar las dependencias del repo en el sa
 - Repositorios con sus análisis guardados, archivos del clon, configuración del proyecto (`.ia_voy.toml`) y equipo
 - Dependencias del repo instaladas en el sandbox; Bandit revisa el código y pip-audit las dependencias
 - Cada análisis guarda sus hallazgos de Seguridad y Repositorios los muestra por severidad
+- Análisis completo en 10 pasos: pytest y coverage en el sandbox (simulados sin él), Ruff y Radon en el backend; se eligen los analizadores
+- Score ponderado por categoría (pesos de Configuración / `.ia_voy.toml`) en Repositorios y en el tablero, con tendencia y hallazgos prioritarios
 
 Llega en los siguientes sprints:
 
-- pytest, coverage, Ruff, Radon y el score ponderado; tablero (S6)
-- Reporte de hallazgos, asistente IA y editor (S7)
+- Reporte de hallazgos, asistente IA (paso 11) y editor (S7)
 - Compartir y exportar (S8)
 - Comparativa (S9)
 
@@ -34,17 +35,17 @@ Llega en los siguientes sprints:
 
 | # | Responsable | Equipo | Tarea | Archivos |
 |---|---|---|---|---|
-| 1 | Carlos Jara | Backend & Plataforma | Sandbox: instalar dependencias y correr pip-audit | sandbox.py |
-| 2 | Uriel Castorela | IA & Analizadores | Orquestación de los pasos 2 a 5 | jobs.py, steps.py |
-| 3 | Marco Espino | IA & Analizadores | Bandit sobre el clon | analyzers.py, models.py |
-| 4 | Diego Salinas | IA & Analizadores | Hallazgos de pip-audit e instalación fallida | pipeline.py |
-| 5 | Ana Cristina Luciano | Backend & Plataforma | Guardar los hallazgos y contarlos por severidad | store.py, schemas.py, views.py, repos/router.py |
-| 6 | Dylan Martínez | Backend & Plataforma | Dependencias del backend y datos de demostración con hallazgos | pyproject.toml, seed.py |
-| 7 | Evelyn Martínez | QA | Pruebas del sandbox y CI | test_sandbox.py, ci.yml |
-| 8 | Luis Gabriel Manzano | QA | Pruebas de Bandit, pip-audit y del análisis | test_seguridad.py, test_analysis.py, test_jobs.py |
-| 9 | Karen Peña | Front-End & UX | Análisis en vivo con los 5 pasos | jobSteps.ts, JobView, AnalyzeForm, steps.test.ts |
-| 10 | Emiliano Sánchez | Front-End & UX | Hallazgos en Repositorios | SavedReports, RepoCard, FindingCounts, types |
-| 11 | Andrea Nallely Peña Osorio | Front-End & UX | Backend simulado, e2e y coordinación del sprint | mocks/db.ts, flujos.e2e.ts, README.md |
+| 1 | Uriel Castorela | IA & Analizadores | Pipeline completo: pasos 6 a 10 y analizadores elegibles | pipeline.py, fake.py, jobs.py, analysis/router.py |
+| 2 | Marco Espino | IA & Analizadores | Ruff y Radon, y catálogo de reglas | analyzers.py, docs/ia/catalogo-reglas.md |
+| 3 | Diego Salinas | IA & Analizadores | Score ponderado por categoría y su documento | scoring.py, docs/ia/score.md |
+| 4 | Carlos Jara | Backend & Plataforma | Sandbox: pytest y coverage | sandbox.py, config.py |
+| 5 | Ana Cristina Luciano | Backend & Plataforma | Reportes con métricas y API del reporte | store.py, models.py, workspace.py, reports/router.py, db.py |
+| 6 | Dylan Martínez | Backend & Plataforma | Tablero, lista de repos con score e historial | dashboard/router.py, views.py, schemas.py, main.py, repos/router.py |
+| 7 | Evelyn Martínez | QA | Pruebas del análisis completo y datos de demostración | test_analysis.py, test_jobs.py, test_sandbox.py, seed.py |
+| 8 | Luis Gabriel Manzano | QA | Pruebas del score, del tablero y de la configuración | test_scoring.py, test_modules.py, test_config_proyecto.py, test_seguridad.py |
+| 9 | Karen Peña | Front-End & UX | Análisis en vivo con 10 pasos y analizadores elegibles | jobSteps.ts, JobView, AnalyzeForm, job.store, types |
+| 10 | Emiliano Sánchez | Front-End & UX | Score en Repositorios | RepoCard, ReposPage, repos/api, repos/types |
+| 11 | Andrea Nallely Peña Osorio | Front-End & UX | Tablero y coordinación del sprint | DashboardPage, ScoreCards, TrendChart, RecentAnalyses, routes, navigation, mocks |
 
 ## Comandos
 
@@ -54,7 +55,7 @@ cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
 uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 109 pruebas
+uv run pytest              # 123 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)

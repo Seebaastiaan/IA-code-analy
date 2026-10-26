@@ -23,6 +23,10 @@ def url(repo_id: str) -> str:
     return f"/api/projects/{repo_id}/config"
 
 
+def report(client, repo_id: str) -> dict:
+    return client.get("/api/report/latest", params={"repo": repo_id}).json()
+
+
 def test_valores_por_defecto(client, repo_id):
     assert client.get(url(repo_id)).json() == {
         "weights": {"seg": 50, "test": 30, "prac": 20},
@@ -66,8 +70,31 @@ def test_body_incompleto(client, repo_id):
     assert client.put(url(repo_id), json={"weights": CONFIG["weights"]}).status_code == 422
 
 
-def test_rutas_excluidas_salen_del_arbol(client, repo_id):
+def test_ignorar_regla_se_aplica_al_instante(client, repo_id):
+    before = report(client, repo_id)
+    assert any(f["rule"] == "B602" for f in before["findings"])
+    cfg = client.get(url(repo_id)).json()
+    client.put(url(repo_id), json={**cfg, "ignored": [*cfg["ignored"], "B602"]})
+    after = report(client, repo_id)
+    assert not any(f["rule"] == "B602" for f in after["findings"])
+    # B602 es de severidad alta en seguridad: el score sube
+    assert after["scores"]["seg"] > before["scores"]["seg"]
+    assert after["scores"]["global"] > before["scores"]["global"]
+
+
+def test_pesos_y_umbrales_en_reporte_y_tablero(client, repo_id):
+    client.put(url(repo_id), json=CONFIG)
+    rep = report(client, repo_id)
+    assert rep["weights"] == CONFIG["weights"] and rep["thresholds"] == CONFIG["thresholds"]
+    s = rep["scores"]
+    assert s["global"] == round((40 * s["seg"] + 40 * s["test"] + 20 * s["prac"]) / 100, 1)
+    assert client.get("/api/dashboard").json()["thresholds"] == CONFIG["thresholds"]
+
+
+def test_rutas_excluidas_salen_del_reporte_y_del_arbol(client, repo_id):
     client.put(url(repo_id), json={**CONFIG, "excluded": ["api.py", "pagos/"]})
+    files = {f["file"] for f in report(client, repo_id)["findings"]}
+    assert "api.py" not in files and not any(f.startswith("pagos/") for f in files)
     tree = {e["path"] for e in client.get(f"/api/repos/{repo_id}/tree").json()}
     assert "api.py" not in tree and "pagos/procesador.py" not in tree and "auth.py" in tree
 

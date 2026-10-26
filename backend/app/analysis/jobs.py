@@ -1,17 +1,9 @@
 """
-Jobs de análisis (Sprint 5: hasta pip-audit).
-
-1. Clonar: REAL. Descarga el repo con git, usando el token de GitHub del usuario si lo tiene, y detecta
-   sus lenguajes (IA voy solo analiza Python).
-2. Crear entorno aislado: REAL. `uv venv` en el sandbox (SANDBOX=wsl|docker) o `python -m venv` en el
-   backend (SANDBOX=off).
-3. Instalar dependencias: REAL, solo en el sandbox (instalar ejecuta código del repo).
-4. Bandit: REAL. Lee el código en el backend mientras el sandbox avanza.
-5. pip-audit: REAL, en el sandbox, sobre las dependencias instaladas.
-
-Al terminar se guarda el análisis en `reports` con sus hallazgos de Seguridad (tabla `findings`). pytest,
-coverage, Ruff, Radon y el score llegan en el Sprint 6. La terminal del usuario avanza por WebSocket con
-cada paso.
+Jobs de análisis. El paso 1 (clonar) es REAL: descarga el repo con git, usando el token de GitHub del
+usuario si lo tiene. Después corren Ruff, Bandit y Radon sobre el clon (app.analysis.pipeline) y, en el
+sandbox (app.analysis.sandbox, SANDBOX=wsl|docker), el entorno, las dependencias, pip-audit, pytest y
+coverage; sin sandbox esos pasos se simulan. Los analizadores que el usuario no eligió no corren. La
+terminal del usuario avanza por WebSocket con cada paso y al final se guarda el reporte con sus hallazgos.
 
 Persistencia (tabla `jobs`): el proceso que corre un job guarda su estado con cada evento y renueva un
 latido (`heartbeat`). Así:
@@ -24,6 +16,7 @@ latido (`heartbeat`). Así:
 import asyncio
 import json
 import logging
+import random
 import secrets
 import sqlite3
 import time
@@ -34,13 +27,11 @@ from datetime import UTC, datetime
 from cryptography.fernet import Fernet
 
 from app.analyses.analyzers import AnalyzerError
-from app.analyses.config_file import import_repo_config
-from app.analyses.models import FindingInput
 from app.analyses.store import AnalysisStore
+from app.analyses.views import report_scores
 from app.analyses.workspace import Workspace
-from app.analysis import languages, pipeline, sandbox
+from app.analysis import fake, languages, pipeline, sandbox
 from app.analysis.clone import CloneError, Cloner, clone_dir
-from app.analysis.steps import AUDIT_STEP, CLONE_STEP, JOB_STEPS, VENV_STEP
 from app.config import Settings
 from app.db import connect, session
 from app.github.store import GithubAccountStore
@@ -73,32 +64,34 @@ class Job:
     url: str
     name: str
     branch: str
+    seed: int
+    cat: dict
     db_path: str
-    # Crear el entorno, instalar dependencias y correr pip-audit en el sandbox (si SANDBOX lo permite);
-    # False = el entorno se crea en el backend y pip-audit no corre
+    # Correr pytest, coverage y pip-audit en el sandbox (si SANDBOX lo permite); False = simularlos
     sandbox: bool = True
-    # Inicio del análisis (time.monotonic) para la duración que se guarda
+    analyzers: list[str] = field(default_factory=lambda: list(pipeline.ALL_ANALYZERS))
+    # Inicio del análisis (time.monotonic) para la duración que muestra el reporte
     started: float = field(default_factory=time.monotonic)
     step: int = 0
-    total: int = len(JOB_STEPS)
+    total: int = len(fake.JOB_STEPS)
     status: str = "running"
     logs: list[str] = field(default_factory=list)
     error: dict | None = None
     commit: str | None = None
     report_id: str | None = None
-    # Evento "done" ({num}) para quien siga el job desde otro worker
+    # Evento "done" ({num, score}) para quien siga el job desde otro worker
     done: dict | None = None
-    # Lenguajes del repo (al clonar); se guardan con el análisis
+    # Lenguajes del repo (al clonar); el reporte los muestra
     repo_languages: list[languages.Language] = field(default_factory=list)
-    # Hallazgos de Bandit y pip-audit; no se guardan en la tabla `jobs` (un reintento vuelve a analizar)
-    findings: list[FindingInput] = field(default_factory=list)
+    # Resultado de los analizadores; se calcula una vez (un reintento lo reutiliza). No se guarda en la tabla.
+    result: pipeline.PipelineResult | None = None
     listeners: set[asyncio.Queue] = field(default_factory=set)
     task: asyncio.Task | None = None
     heartbeat: asyncio.Task | None = None
 
     @property
     def options(self) -> dict:
-        return {"sandbox": self.sandbox}
+        return {"sandbox": self.sandbox, "analyzers": self.analyzers}
 
     def public(self) -> dict:
         return {
@@ -111,7 +104,8 @@ def _from_row(row: sqlite3.Row, db_path: str) -> Job:
     opts = json.loads(row["options"])
     return Job(
         id=row["id"], user_id=row["user_id"], team_id=row["team_id"], repo_id=row["repo_id"], url=row["url"], name=row["name"],
-        branch=row["branch"], db_path=db_path, sandbox=opts.get("sandbox", True),
+        branch=row["branch"], seed=row["seed"], cat=json.loads(row["cat"]), db_path=db_path,
+        sandbox=opts.get("sandbox", True), analyzers=opts.get("analyzers") or list(pipeline.ALL_ANALYZERS),
         step=row["step"], total=row["total"], status=row["status"], logs=json.loads(row["logs"]),
         error=json.loads(row["error"]) if row["error"] else None, commit=row["commit_sha"], report_id=row["report_id"],
         done=json.loads(row["done"]) if row["done"] else None,
@@ -203,7 +197,7 @@ class JobManager:
                 for i in range(job.step, new.step):
                     yield {"type": "step_done", "index": i}
                     if i + 1 < new.total and (new.status == "running" or i + 1 < new.step):
-                        name, command = JOB_STEPS[i + 1]
+                        name, command = fake.JOB_STEPS[i + 1]
                         yield {"type": "step", "index": i + 1, "total": new.total, "name": name, "command": command.format(branch=new.branch, url=new.url)}
                 if new.status == "done" and new.done:
                     yield {"type": "done", "repo_id": new.repo_id, "report_id": new.report_id, **new.done}
@@ -215,16 +209,20 @@ class JobManager:
 
     # ─── Ciclo de vida ───
 
-    def start(self, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, sandbox: bool = True) -> Job:
+    def start(
+        self, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, prev_cat: dict | None,
+        sandbox: bool = True, analyzers: list[str] | None = None,
+    ) -> Job:
+        seed = random.randrange(2**31)
         job = Job(
             id=f"job-{secrets.token_hex(8)}", user_id=user_id, team_id=team_id, repo_id=repo_id, url=url, name=name, branch=branch,
-            db_path=settings.database_path, sandbox=sandbox, logs=[f"$ ia-voy analyze {url} --branch {branch}"],
+            seed=seed, cat=fake.next_categories(prev_cat, random.Random(seed)), db_path=settings.database_path,
+            sandbox=sandbox, analyzers=list(analyzers or pipeline.ALL_ANALYZERS), logs=[f"$ ia-voy analyze {url} --branch {branch}"],
         )
-        # seed y cat: columnas de la tabla que usarán los analizadores (Sprint 5)
         self._conn(job.db_path).execute(
             """INSERT INTO jobs (id, user_id, team_id, repo_id, url, name, branch, seed, cat, options, step, total, status, logs, heartbeat, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0, '{}', ?, 0, ?, 'running', ?, ?, ?)""",
-            (job.id, user_id, team_id, repo_id, url, name, branch, json.dumps(job.options), job.total,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'running', ?, ?, ?)""",
+            (job.id, user_id, team_id, repo_id, url, name, branch, seed, json.dumps(job.cat), json.dumps(job.options), job.total,
              json.dumps(job.logs, ensure_ascii=False), time.time(), now_iso()),
         )
         self._conn(job.db_path).commit()
@@ -277,7 +275,7 @@ class JobManager:
             conn.commit()
 
     def _start_step(self, job: Job) -> None:
-        name, command = JOB_STEPS[job.step]
+        name, command = fake.JOB_STEPS[job.step]
         command = command.format(branch=job.branch, url=job.url)
         self._emit(job, {"type": "step", "index": job.step, "total": job.total, "name": name, "command": command})
         self._emit(job, {"type": "log", "line": f"[{job.step + 1:02d}/{job.total}] {name} → {command}"})
@@ -297,7 +295,7 @@ class JobManager:
         _set_repo(settings, job.repo_id, "error", err.title)
 
     async def _clone(self, settings: Settings, job: Job) -> bool:
-        """Paso 1. Devuelve False si falló (el job queda en error)."""
+        """Paso 1 real. Devuelve False si falló (el job queda en error)."""
         attempt = secrets.token_hex(4)
         token = _github_token(settings, job.user_id)
         try:
@@ -314,7 +312,6 @@ class JobManager:
         py = languages.python_files(job.repo_languages)
         with session(settings.database_path) as conn:
             conn.execute("UPDATE repos SET files = ? WHERE id = ?", (py, job.repo_id))
-            import_repo_config(AnalysisStore(conn), clone_dir(settings, job.repo_id), job.repo_id)
         found = f"  lenguajes: {languages.summary(job.repo_languages)}"
         if py == 0:
             self._emit(job, {"type": "log", "line": found})
@@ -332,91 +329,77 @@ class JobManager:
 
     async def _analyze(self, settings: Settings, job: Job) -> bool:
         """
-        Pasos 2-5. Bandit corre en un hilo mientras el sandbox crea el entorno, instala las dependencias y
-        corre pip-audit; la terminal avanza al terminar cada fase. Sin sandbox el entorno se crea en el
-        backend y las dependencias no se instalan, así que pip-audit no corre. Devuelve False si el job
-        quedó en error.
+        Pasos 2-7. Ruff, Bandit y Radon corren en un hilo mientras el sandbox crea el entorno, instala las
+        dependencias y corre pip-audit, pytest y coverage; la terminal avanza al terminar cada fase. Sin
+        sandbox esos pasos se simulan. Deja `job.result` listo; devuelve False si el job quedó en error.
         """
-        job.step = VENV_STEP
-        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id) if job.sandbox else (None, None)
+        chosen = set(job.analyzers)
+        needs_sandbox = bool(chosen & pipeline.SANDBOX_ANALYZERS)
+        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id) if job.sandbox and needs_sandbox else (None, None)
         if reason:
-            self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); el entorno se crea en el backend y pip-audit no corre"})
-        static_task = asyncio.create_task(asyncio.to_thread(pipeline.analyze_static, settings, job.repo_id))
+            self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); pytest, coverage y pip-audit se simulan"})
+        static_task = asyncio.create_task(asyncio.to_thread(pipeline.analyze_static, settings, job.repo_id, job.analyzers))
+        static: pipeline.StaticResult | None = None
         try:
-            # Paso 2: entorno aislado
-            self._start_step(job)
-            if runner:
-                phase, where = await runner.wait("venv"), f"el sandbox {settings.sandbox.upper()}"
-            else:
-                await asyncio.sleep(settings.job_step_seconds)
-                phase, where = await asyncio.to_thread(sandbox.local_venv, settings, job.repo_id), "el backend"
-            if not phase.ok:
-                self._fail(settings, job, CloneError(
-                    "No se pudo crear el entorno aislado",
-                    sandbox.summary(phase, where).strip(),
-                    "Revisa que el sandbox tenga uv y Python 3.12 (o usa SANDBOX=off) y vuelve a intentarlo.",
-                ))
-                return False
-            self._finish_step(job, sandbox.summary(phase, where))
-
-            # Paso 3: dependencias (una instalación fallida no detiene el análisis: queda como hallazgo)
-            self._start_step(job)
-            install = None
-            if runner:
-                install = await runner.wait("install")
-                summary = sandbox.install_summary(install)
-            else:
-                await asyncio.sleep(settings.job_step_seconds)
-                summary = "  omitido: sin sandbox las dependencias del repo no se instalan en el backend"
-            self._finish_step(job, summary)
-
-            # Paso 4: Bandit
-            self._start_step(job)
-            static = await static_task
-            self._finish_step(job, pipeline.bandit_summary(static.findings))
-
-            # Paso 5: pip-audit
-            self._start_step(job)
-            findings = list(static.findings)
-            if runner:
-                audit = await runner.wait("audit")
-                out = runner.output()
-                summary = sandbox.audit_summary(audit, out)
-                findings += pipeline.audit_findings(Workspace(settings, job.repo_id), static.files, out)
-                if install is not None and not install.ok:
-                    findings.append(pipeline.install_finding(static.files, install.log_tail))
-            else:
-                await asyncio.sleep(settings.job_step_seconds)
-                summary = "  omitido: sin sandbox no hay dependencias instaladas que revisar"
-            self._finish_step(job, summary)
-            job.findings = findings
+            while job.step <= pipeline.COVERAGE_STEP:
+                self._start_step(job)
+                phase = pipeline.SANDBOX_PHASE.get(job.step) if runner else None
+                if runner and phase:
+                    done = await runner.wait(phase)
+                    summary = pipeline.phase_summary(job.step, done, runner.output()) if pipeline.chosen(job.step, chosen) else pipeline.OMITTED
+                    if job.step == pipeline.VENV_STEP and not done.ok:
+                        # Falló el sandbox mismo (no el repo): se sigue con las pruebas simuladas
+                        runner.close()
+                        runner = None
+                        summary += "\n  aviso: pytest, coverage y pip-audit se simulan"
+                else:
+                    if job.step >= pipeline.BANDIT_STEP and static is None:
+                        static = await static_task
+                        if runner is None:
+                            job.result = await asyncio.to_thread(pipeline.build, settings, job.repo_id, static, None, job.branch, job.commit, job.seed, job.cat, job.analyzers)
+                    await asyncio.sleep(settings.job_step_seconds)
+                    if job.step in (pipeline.VENV_STEP, pipeline.INSTALL_STEP) and not needs_sandbox:
+                        summary = "  omitido: no hace falta (no se eligió pip-audit, pytest ni coverage)"
+                    elif not pipeline.chosen(job.step, chosen):
+                        summary = pipeline.OMITTED
+                    else:
+                        summary = pipeline.step_summary(job.step, job.result) if job.result else pipeline.bandit_summary(static.findings) if static else None
+                self._finish_step(job, summary)
+            if job.result is None:
+                static = static or await static_task
+                out = runner.output() if runner else None
+                job.result = await asyncio.to_thread(pipeline.build, settings, job.repo_id, static, out, job.branch, job.commit, job.seed, job.cat, job.analyzers)
         except AnalyzerError as exc:
-            self._fail(settings, job, CloneError("Bandit falló", str(exc), "Vuelve a intentarlo; si se repite, revisa el log del backend."))
+            self._fail(settings, job, CloneError("Los analizadores fallaron", str(exc), "Vuelve a intentarlo; si se repite, revisa el log del backend."))
             return False
         finally:
             if runner:
                 runner.close()
-            if not static_task.done():
-                static_task.cancel()
-            elif not static_task.cancelled():
-                static_task.exception()  # ya se informó (o no hacía falta): que asyncio no la reporte como perdida
         return True
 
     async def _run(self, settings: Settings, job: Job) -> None:
         try:
             # Un reintento retoma el paso donde falló; si fue el clonado, se vuelve a clonar
-            if job.step == CLONE_STEP:
+            if job.step == 0:
                 self._start_step(job)
                 if not await self._clone(settings, job):
                     return
-            # Un reintento a partir del entorno vuelve a correr los pasos 2-5 (el sandbox es uno solo)
-            if job.step <= AUDIT_STEP and not await self._analyze(settings, job):
+            if job.result is None and not await self._analyze(settings, job):
                 return
-            num = _save_report(settings, job)
+            while job.step < job.total:
+                self._start_step(job)
+                if not pipeline.chosen(job.step, set(job.analyzers)):
+                    await asyncio.sleep(settings.job_step_seconds)
+                    summary = pipeline.OMITTED
+                else:
+                    await asyncio.sleep(settings.job_step_seconds)
+                    summary = pipeline.step_summary(job.step, job.result)
+                self._finish_step(job, summary)
+            num, score = _save_report(settings, job)
             job.status = "done"
-            job.done = {"num": num}
-            self._emit(job, {"type": "log", "line": f"Análisis #{num} guardado en el repositorio con {len(job.findings)} hallazgo(s) de seguridad."})
-            self._emit(job, {"type": "done", "repo_id": job.repo_id, "report_id": job.report_id, "num": num})
+            job.done = {"num": num, "score": score}
+            self._emit(job, {"type": "log", "line": f"Análisis #{num} completado."})
+            self._emit(job, {"type": "done", "repo_id": job.repo_id, "report_id": job.report_id, "num": num, "score": score})
         except asyncio.CancelledError:
             pass
         except Exception as exc:
@@ -436,17 +419,16 @@ def _set_repo(settings: Settings, repo_id: str, status: str, error: str | None) 
         conn.execute("UPDATE repos SET status = ?, error = ? WHERE id = ?", (status, error, repo_id))
 
 
-def _save_report(settings: Settings, job: Job) -> int:
-    """Guarda el análisis en el repositorio (app.analyses.store) y devuelve su número."""
+def _save_report(settings: Settings, job: Job) -> tuple[int, float]:
+    """Guarda el reporte con sus hallazgos (app.analyses) y devuelve (número, score global)."""
     with session(settings.database_path) as conn:
         store = AnalysisStore(conn)
-        job.report_id, num = store.save_report(
-            job.repo_id, branch=job.branch, commit=job.commit or "0000000", duration_s=time.monotonic() - job.started,
-            languages=[{"name": lang.name, "files": lang.files} for lang in job.repo_languages],
-            findings=job.findings, workspace=Workspace(settings, job.repo_id),
-        )
+        job.result.report.duration_s = round(time.monotonic() - job.started)
+        job.result.report.languages = [{"name": lang.name, "files": lang.files} for lang in job.repo_languages]
+        job.report_id, num = store.save_report(job.repo_id, job.result.report, Workspace(settings, job.repo_id))
         conn.execute("UPDATE repos SET status = 'listo', error = NULL, branch = ? WHERE id = ?", (job.branch, job.repo_id))
-    return num
+        score = report_scores(store, store.report(job.report_id), store.config(job.repo_id)).global_
+    return num, score
 
 
 jobs = JobManager()

@@ -19,7 +19,7 @@ export interface Job {
   logs: string[]
   error?: JobError
   repo_id?: string
-  /** Análisis guardado en el repositorio; disponible al terminar */
+  /** Disponible al terminar */
   report_id?: string
 }
 
@@ -30,12 +30,14 @@ export type JobMessage =
   | { type: 'log'; line: string }
   | { type: 'step_done'; index: number }
   | ({ type: 'error'; step: number } & JobError)
-  | { type: 'done'; repo_id: string; report_id: string; num: number }
+  | { type: 'done'; repo_id: string; report_id: string; num: number; score: number }
+
+export type AnalyzerId = 'bandit' | 'pip-audit' | 'pytest' | 'coverage' | 'ruff' | 'radon'
 
 export interface AnalyzeRequest {
   url: string
   branch: string
-  /** Crear el entorno aislado en el sandbox (WSL2/Docker); false = en el backend */
+  analyzers: AnalyzerId[]
   sandbox: boolean
 }
 

@@ -1,8 +1,11 @@
-"""Modelos compartidos del contrato (frontend/src/shared/types/common.ts, features/repos/types.ts)."""
+"""Modelos compartidos del contrato (frontend/src/shared/types/common.ts, features/{repos,findings}/types.ts)."""
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+Severity = Literal["alta", "media", "baja"]
+Category = Literal["seg", "test", "prac"]
 
 
 class Weights(BaseModel):
@@ -11,9 +14,37 @@ class Weights(BaseModel):
     prac: float
 
 
+class Scores(Weights):
+    # "global" es palabra reservada en Python: se expone con alias
+    global_: float = Field(alias="global")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
 class Thresholds(BaseModel):
     score: float
     cov: float
+
+
+class SnippetLine(BaseModel):
+    line: int
+    text: str
+
+
+class Finding(BaseModel):
+    id: int
+    sev: Severity
+    cat: Category
+    tool: str
+    rule: str
+    file: str
+    line: int
+    msg: str
+    why: str
+    rec: str
+    fix: bool
+    status: Literal["open", "resolved"]
+    snippet: list[SnippetLine] | None = None
 
 
 class Progress(BaseModel):
@@ -21,12 +52,6 @@ class Progress(BaseModel):
     step: int
     total: int
     name: str
-
-
-class FindingCounts(BaseModel):
-    alta: int
-    media: int
-    baja: int
 
 
 class Repo(BaseModel):
@@ -40,28 +65,6 @@ class Repo(BaseModel):
     files: int
     last_report_id: str | None
     last_report_num: int | None
-    # Análisis guardados del repo
-    reports: int = 0
-    # Hallazgos abiertos del último análisis por severidad
-    findings: FindingCounts | None = None
+    scores: Scores | None
     error: str | None
     progress: Progress | None = None
-
-
-class Language(BaseModel):
-    name: str
-    files: int
-
-
-class SavedReport(BaseModel):
-    """Un análisis guardado en el repositorio (Sprint 5: con sus hallazgos de Seguridad, todavía sin score)."""
-
-    id: str
-    num: int
-    branch: str
-    commit: str
-    created_at: str
-    duration_s: int
-    languages: list[Language]
-    # Hallazgos abiertos de Bandit y pip-audit por severidad (sin las reglas ignoradas)
-    findings: FindingCounts

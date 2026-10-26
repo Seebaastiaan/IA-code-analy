@@ -13,6 +13,6 @@ export function RequireAuth() {
 /** Login: si ya hay sesión, va directo al tablero. */
 export function RedirectIfAuth() {
   const token = useSession((s) => s.token)
-  if (token) return <Navigate to={paths.repos()} replace />
+  if (token) return <Navigate to={paths.dashboard()} replace />
   return <Outlet />
 }

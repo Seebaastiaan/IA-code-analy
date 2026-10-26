@@ -6,6 +6,7 @@ export const EP = {
     logout: '/api/auth/logout',
     me: '/api/auth/me',
   },
+  dashboard: '/api/dashboard',
   repos: {
     list: '/api/repos',
     history: (id: string) => `/api/repos/${id}/history`,

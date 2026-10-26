@@ -4,13 +4,9 @@ El formato es el mismo de la vista previa del frontend (frontend/src/features/se
 """
 
 import json
-import logging
 import tomllib
-from pathlib import Path
 
-from app.analyses.store import AnalysisStore, ProjectConfig
-
-log = logging.getLogger(__name__)
+from app.analyses.store import ProjectConfig
 
 FILENAME = ".ia_voy.toml"
 MAX_RULES = 200
@@ -104,14 +100,3 @@ def from_toml(text: str, base: ProjectConfig) -> ProjectConfig:
     if not isinstance(ignored, list) or not isinstance(excluded, list):
         raise ConfigError(f"{FILENAME}: [reglas] ignorar y [rutas] excluir deben ser listas")
     return normalize(ProjectConfig(weights=weights, thresholds=thresholds, ignored=ignored, excluded=excluded))
-
-
-def import_repo_config(store: AnalysisStore, root: Path, repo_id: str) -> None:
-    """Primer análisis de un repo que trae su propio `.ia_voy.toml`: se adopta. Después manda la pantalla Configuración."""
-    path = root / FILENAME
-    if store.has_config(repo_id) or not path.is_file():
-        return
-    try:
-        store.save_config(repo_id, from_toml(path.read_text(encoding="utf-8", errors="replace"), store.config(repo_id)))
-    except ConfigError as exc:
-        log.warning("Se ignora %s de %s: %s", FILENAME, repo_id, exc)

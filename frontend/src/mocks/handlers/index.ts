@@ -45,9 +45,9 @@ export const handlers = [
   http.get(EP.auth.me, () => json(demoUser)),
   http.get(EP.health, () => json(health)),
 
-  // ─── Repositorios ───
+  // ─── Tablero y repositorios ───
+  http.get(EP.dashboard, route(({ request }) => json(db.dashboard(param(request, 'repo'))))),
   http.get(EP.repos.list, route(() => json(db.listRepos()))),
-  http.get(EP.repos.history(':repoId'), route(({ params }) => json(db.history(params.repoId as string)))),
   http.post(EP.repos.analyze(':repoId'), route(({ params }) => json({ job_id: db.reanalyze(params.repoId as string) }))),
   http.get(EP.repos.tree(':repoId'), route(({ params }) => json(db.tree(params.repoId as string)))),
   http.get(EP.file, route(({ request }) => {

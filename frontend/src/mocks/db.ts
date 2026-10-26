@@ -1,14 +1,17 @@
 /**
- * "Backend" en memoria para desarrollar el front sin servidor. Imita al backend del Sprint 5 (clonar →
- * entorno → dependencias → Bandit → pip-audit → guardar el análisis con sus hallazgos de Seguridad) lo justo
- * para que la UI sea creíble.
+ * "Backend" en memoria para desarrollar el front sin servidor. Imita al backend del Sprint 6 (los 10 pasos
+ * del análisis, el score ponderado por categoría y el tablero) lo justo para que la UI sea creíble.
  * El estado se reinicia al recargar la página.
  */
 import type { Job, JobMessage } from '@/features/analysis/types'
-import type { FindingCounts, Repo, SavedReport, TreeEntry } from '@/features/repos/types'
+import type { Finding } from '@/features/findings/types'
+import type { Repo, TreeEntry } from '@/features/repos/types'
 import type { ProjectConfig } from '@/features/settings/types'
 import { JOB_STEPS } from '@/features/analysis/constants/jobSteps'
+import type { Scores, Severity, Weights } from '@/shared/types/common'
+import { calcScore } from '@/shared/utils/score'
 import { FILES } from './fixtures/code'
+import { FINDINGS } from './fixtures/findings'
 
 // ───────────────────────── Modelo interno ─────────────────────────
 
@@ -20,10 +23,25 @@ interface RepoRecord {
   files: number
   status: Repo['status']
   error: string | null
-  reports: SavedReport[]
+  reports: ReportRecord[]
+  /** Puntos de historia anteriores a los análisis guardados (para la tendencia del tablero) */
+  history: { date: string; cat: Weights }[]
   /** Contenido de cada archivo del último clon */
   content: Record<string, string>
   jobId: string | null
+}
+
+interface ReportRecord {
+  id: string
+  num: number
+  branch: string
+  commit: string
+  created_at: string
+  duration_s: number
+  /** Score por categoría (el global se calcula con los pesos de la configuración) */
+  cat: Weights
+  /** Ids de los hallazgos de fixtures/findings.ts */
+  findings: number[]
 }
 
 interface JobRecord extends Job {
@@ -39,10 +57,12 @@ const DAY = 86_400_000
 const now = Date.now()
 const iso = (msAgo: number) => new Date(now - msAgo).toISOString()
 const PY = (r: Record<string, string>) => Object.keys(r).filter((p) => p.endsWith('.py')).length
+const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)))
+const SEV_ORDER: Record<Severity, number> = { alta: 0, media: 1, baja: 2 }
 
 // ───────────────────────── Datos iniciales ─────────────────────────
 
-function seedRepo(id: string, name: string, branch: string, history: { commit: string; agoMs: number; s: number; findings: FindingCounts }[]): RepoRecord {
+function seedRepo(id: string, name: string, branch: string, history: { commit: string; agoMs: number; s: number; cat: Weights; findings: number[] }[]): RepoRecord {
   const files = PY(FILES)
   return {
     id,
@@ -59,12 +79,13 @@ function seedRepo(id: string, name: string, branch: string, history: { commit: s
       commit: h.commit,
       created_at: iso(h.agoMs),
       duration_s: h.s,
+      cat: h.cat,
       findings: h.findings,
-      languages: [
-        { name: 'Python', files },
-        { name: 'Markdown', files: 1 },
-      ],
     })),
+    history: [5, 4, 3].map((w, i) => {
+      const first = history[0].cat
+      return { date: iso((w + 2) * 7 * DAY), cat: { seg: clamp(first.seg - 9 + i * 2), test: clamp(first.test - 5 + i), prac: clamp(first.prac - 6 + i * 2) } }
+    }),
     content: { ...FILES },
     jobId: null,
   }
@@ -72,16 +93,16 @@ function seedRepo(id: string, name: string, branch: string, history: { commit: s
 
 const repos: RepoRecord[] = [
   seedRepo('r1', 'equipo/api-pagos', 'main', [
-    { commit: 'f04b2d9', agoMs: 14 * DAY, s: 48, findings: { alta: 4, media: 3, baja: 2 } },
-    { commit: '91ce07b', agoMs: 7 * DAY, s: 45, findings: { alta: 3, media: 3, baja: 2 } },
-    { commit: 'a3f9c1e', agoMs: 2 * 3_600_000, s: 41, findings: { alta: 2, media: 3, baja: 1 } },
+    { commit: 'f04b2d9', agoMs: 14 * DAY, s: 168, cat: { seg: 63, test: 81, prac: 69 }, findings: [1, 3, 4, 5, 6, 8, 9, 10, 11, 12] },
+    { commit: '91ce07b', agoMs: 7 * DAY, s: 172, cat: { seg: 60, test: 84, prac: 66 }, findings: [1, 3, 4, 5, 6, 8, 9, 10, 11, 12] },
+    { commit: 'a3f9c1e', agoMs: 2 * 3_600_000, s: 176, cat: { seg: 68, test: 85, prac: 73 }, findings: FINDINGS.map((f) => f.id) },
   ]),
   seedRepo('r2', 'equipo/etl-ventas', 'develop', [
-    { commit: '5c1e8aa', agoMs: 3 * DAY, s: 52, findings: { alta: 1, media: 2, baja: 4 } },
-    { commit: '7bd21aa', agoMs: DAY, s: 50, findings: { alta: 0, media: 1, baja: 3 } },
+    { commit: '5c1e8aa', agoMs: 3 * DAY, s: 151, cat: { seg: 88, test: 82, prac: 83 }, findings: [4, 9, 10, 11, 12] },
+    { commit: '7bd21aa', agoMs: DAY, s: 149, cat: { seg: 92, test: 84, prac: 86 }, findings: [4, 9, 10, 12] },
   ]),
-  { id: 'r3', name: 'equipo/bot-soporte', url: 'https://github.com/equipo/bot-soporte', branch: 'main', files: 0, status: 'analizando', error: null, reports: [], content: {}, jobId: null },
-  { id: 'r4', name: 'equipo/landing-web', url: 'https://github.com/equipo/landing-web', branch: 'main', files: 0, status: 'error', error: 'El repositorio no tiene código Python', reports: [], content: {}, jobId: null },
+  { id: 'r3', name: 'equipo/bot-soporte', url: 'https://github.com/equipo/bot-soporte', branch: 'main', files: 0, status: 'analizando', error: null, reports: [], history: [], content: {}, jobId: null },
+  { id: 'r4', name: 'equipo/landing-web', url: 'https://github.com/equipo/landing-web', branch: 'main', files: 0, status: 'error', error: 'El repositorio no tiene código Python', reports: [], history: [], content: {}, jobId: null },
 ]
 
 const configs: Record<string, ProjectConfig> = Object.fromEntries(
@@ -115,8 +136,7 @@ export function repoView(r: RepoRecord): Repo {
     files: r.files,
     last_report_id: last?.id ?? null,
     last_report_num: last?.num ?? null,
-    reports: r.reports.length,
-    findings: last?.findings ?? null,
+    scores: last ? scoresOf(r.id, last.cat) : null,
     error: r.error,
     progress: job && job.status === 'running' ? { job_id: job.id, step: job.step, total: job.total, name: JOB_STEPS[job.step]?.name ?? '' } : null,
   }
@@ -124,7 +144,41 @@ export function repoView(r: RepoRecord): Repo {
 
 export const listRepos = () => repos.map(repoView)
 
-export const history = (repoId: string) => [...getRepo(repoId).reports].reverse()
+const scoresOf = (repoId: string, cat: Weights): Scores => ({ ...cat, global: Math.round(calcScore(configs[repoId].weights, cat) * 10) / 10 })
+
+/** Hallazgos abiertos del análisis, sin las reglas ignoradas en la configuración, ordenados por severidad. */
+function visibleFindings(repoId: string, report: ReportRecord): Finding[] {
+  return FINDINGS.filter((f) => report.findings.includes(f.id) && !configs[repoId].ignored.includes(f.rule))
+    .map((f) => ({ ...f, status: 'open' as const }))
+    .sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev])
+}
+
+export function dashboard(repoId: string | null) {
+  const ready = repos.filter((r) => r.reports.length)
+  const repo = ready.find((r) => r.id === repoId) ?? ready[0]
+  const base = { active_repos: ready.length, repos: listRepos(), thresholds: repo ? configs[repo.id].thresholds : { score: 70, cov: 60 } }
+  if (!repo) return { ...base, selected: null }
+  const rep = repo.reports.at(-1)!
+  const prev = repo.reports.at(-2) ?? null
+  const open = visibleFindings(repo.id, rep)
+  const history = [
+    ...repo.history.map((h) => ({ date: h.date, ...scoresOf(repo.id, h.cat) })),
+    ...repo.reports.slice(-4).map((x) => ({ date: x.created_at, ...scoresOf(repo.id, x.cat) })),
+  ]
+  return {
+    ...base,
+    selected: {
+      repo: repoView(repo),
+      report_id: rep.id,
+      num: rep.num,
+      scores: scoresOf(repo.id, rep.cat),
+      prev_scores: prev ? scoresOf(repo.id, prev.cat) : null,
+      history,
+      top_findings: open.slice(0, 4),
+      open_findings: open.length,
+    },
+  }
+}
 
 export function tree(repoId: string): TreeEntry[] {
   const repo = getRepo(repoId)
@@ -173,7 +227,7 @@ function startStep(job: JobRecord) {
 function repoOf(job: JobRecord) {
   let repo = repos.find((r) => r.name === job.name)
   if (!repo) {
-    repo = { id: `r${repos.length + 1}`, name: job.name, url: job.url, branch: job.branch, files: 0, status: 'analizando', error: null, reports: [], content: {}, jobId: job.id }
+    repo = { id: `r${repos.length + 1}`, name: job.name, url: job.url, branch: job.branch, files: 0, status: 'analizando', error: null, reports: [], history: [], content: {}, jobId: job.id }
     repos.push(repo)
     configs[repo.id] = structuredClone(configs.r1)
   }
@@ -197,10 +251,11 @@ function finishJob(job: JobRecord) {
   const repo = repoOf(job)
   const num = (repo.reports.at(-1)?.num ?? 0) + 1
   const files = PY(FILES)
-  const report: SavedReport = {
-    id: `${repo.id}-${num}`, num, branch: job.branch, commit: job.commit, created_at: new Date().toISOString(), duration_s: 43,
-    findings: { alta: 2, media: 3, baja: 1 },
-    languages: [{ name: 'Python', files }, { name: 'Markdown', files: 1 }],
+  const prev = repo.reports.at(-1)?.cat ?? { seg: 66, test: 78, prac: 70 }
+  const report: ReportRecord = {
+    id: `${repo.id}-${num}`, num, branch: job.branch, commit: job.commit, created_at: new Date().toISOString(), duration_s: 174,
+    cat: { seg: clamp(prev.seg + 3), test: clamp(prev.test + 1), prac: clamp(prev.prac + 2) },
+    findings: FINDINGS.filter((f) => f.id !== 1).map((f) => f.id),
   }
   repo.reports.push(report)
   repo.content = { ...FILES }
@@ -211,8 +266,9 @@ function finishJob(job: JobRecord) {
   repo.jobId = null
   job.status = 'done'
   job.report_id = report.id
-  emit(job, { type: 'log', line: `Análisis #${num} guardado en el repositorio con 6 hallazgo(s) de seguridad.` })
-  emit(job, { type: 'done', repo_id: repo.id, report_id: report.id, num })
+  const score = scoresOf(repo.id, report.cat).global
+  emit(job, { type: 'log', line: `Análisis #${num} completado.` })
+  emit(job, { type: 'done', repo_id: repo.id, report_id: report.id, num, score })
 }
 
 const SUMMARY: Record<number, (j: JobRecord) => string[]> = {
@@ -221,6 +277,11 @@ const SUMMARY: Record<number, (j: JobRecord) => string[]> = {
   2: () => ['  Installed 14 packages in 1.2s'],
   3: () => ['  1 alta · 3 media · 1 baja'],
   4: () => ['  1 paquete(s) vulnerable(s)'],
+  5: () => ['  139 passed, 1 failed, 3 skipped'],
+  6: () => ['  cobertura total: 78 %'],
+  7: () => ['  4 problemas (3 corregibles)'],
+  8: () => ['  complejidad media: 6.2'],
+  9: () => ['  score 74.1 (seg 68 · test 85 · prac 73)'],
 }
 
 function tick(job: JobRecord) {
