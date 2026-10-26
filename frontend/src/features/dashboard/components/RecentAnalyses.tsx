@@ -9,8 +9,8 @@ import { navigateTo } from '@/shared/utils/navigation'
 function Action({ repo }: { repo: Repo }) {
   if (repo.status === 'listo' && repo.last_report_id)
     return (
-      <Link to={paths.files(repo.id)} className={buttonClass('ghost')}>
-        Ver archivos
+      <Link to={paths.report(repo.id, repo.last_report_id)} className={buttonClass('ghost')}>
+        Ver reporte
       </Link>
     )
   if (repo.status === 'error')

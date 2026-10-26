@@ -12,6 +12,8 @@ export const EP = {
     history: (id: string) => `/api/repos/${id}/history`,
     analyze: (id: string) => `/api/repos/${id}/analyze`,
     tree: (id: string) => `/api/repos/${id}/tree`,
+    index: (id: string) => `/api/repos/${id}/index`,
+    analyses: (id: string) => `/api/repos/${id}/analyses`,
   },
   analyze: '/api/analyze',
   jobs: {
@@ -19,7 +21,16 @@ export const EP = {
     retry: (id: string) => `/api/jobs/${id}/retry`,
     socket: (id: string) => `/ws/jobs/${id}`,
   },
+  report: {
+    get: (id: string) => `/api/report/${id}`,
+    share: (id: string) => `/api/report/${id}/share`,
+    export: (id: string) => `/api/report/${id}/export`,
+  },
   file: '/api/file',
+  fix: '/api/fix',
+  chat: '/api/chat',
+  chatStream: '/api/chat/stream',
+  diff: '/api/diff',
   config: (projectId: string) => `/api/projects/${projectId}/config`,
   github: {
     status: '/api/github/status',
@@ -35,5 +46,9 @@ export const EP = {
     join: '/api/team/join',
     member: (userId: string) => `/api/team/members/${userId}`,
     owner: (userId: string) => `/api/team/members/${userId}/owner`,
+  },
+  public: {
+    get: (shareId: string) => `/api/public/r/${shareId}`,
+    unlock: (shareId: string) => `/api/public/r/${shareId}/unlock`,
   },
 } as const

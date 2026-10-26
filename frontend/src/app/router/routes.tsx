@@ -36,7 +36,10 @@ export const router = createBrowserRouter([
           {
             path: '/repos/:repoId',
             children: [
+              { path: 'reports/:reportId', handle: { title: 'Reporte' }, lazy: page(() => import('@/features/report/pages/ReportPage')) },
               { path: 'files', handle: { title: 'Archivos' }, lazy: page(() => import('@/features/repos/pages/RepoFilesPage')) },
+              { path: 'editor', handle: { title: 'Editor de código' }, lazy: page(() => import('@/features/editor/pages/EditorPage')) },
+              { path: 'assistant', handle: { title: 'Asistente IA' }, lazy: page(() => import('@/features/assistant/pages/AssistantPage')) },
               { path: 'settings', handle: { title: 'Configuración' }, lazy: page(() => import('@/features/settings/pages/SettingsPage')) },
             ],
           },

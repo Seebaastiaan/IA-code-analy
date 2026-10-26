@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.analysis.jobs import Job, JobManager, jobs, now_iso
 from app.analysis.pipeline import ALL_ANALYZERS, CATEGORY_ANALYZERS
+from app.assistant.llm import model_label
 from app.auth import current_user_id
 from app.config import Settings, get_settings
 from app.db import connect, get_db
@@ -41,6 +42,7 @@ class AnalyzeRequest(BaseModel):
     # Vacío = todos. Si se eligen, al menos uno de cada categoría (si no, esa categoría no tendría score)
     analyzers: list[Literal["bandit", "pip-audit", "pytest", "coverage", "ruff", "radon"]] = []
     sandbox: bool = True
+    index: bool = True
 
 
 class JobStarted(BaseModel):
@@ -67,7 +69,7 @@ def _analyzers(chosen: list[str]) -> list[str]:
 
 def _start(
     conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_id: str, url: str, branch: str,
-    sandbox: bool = True, analyzers: list[str] | None = None,
+    sandbox: bool = True, analyzers: list[str] | None = None, index: bool = True,
 ) -> Job:
     chosen = _analyzers(analyzers or [])
     m = REPO_URL.match(url.strip())
@@ -93,7 +95,7 @@ def _start(
     conn.commit()
     return jobs.start(
         settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, _latest_cat(conn, repo_id),
-        sandbox=sandbox, analyzers=chosen,
+        sandbox=sandbox, analyzers=chosen, index=index,
     )
 
 
@@ -110,7 +112,7 @@ def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: s
 
 @router.post("/api/analyze", response_model=JobStarted)
 async def analyze(body: AnalyzeRequest, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> JobStarted:
-    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers))
+    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers), index=body.index)
     return JobStarted(job_id=job.id)
 
 
@@ -203,12 +205,14 @@ def sandbox_service(settings: Settings) -> dict:
 
 @router.get("/api/health")
 def health(settings: Config) -> dict:
-    github = {"status": "ok", "label": "Configurado"} if settings.github_client_id else {"status": "standby", "label": "Sin configurar"}
+    def configured(key: str) -> dict:
+        return {"status": "ok", "label": "Configurado"} if key else {"status": "standby", "label": "Sin configurar"}
+
     return {
         "tunnel_host": None,
         "services": [
-            {"id": "github", "name": "GitHub OAuth", "role": "Inicio de sesión y repos privados", **github},
-            sandbox_service(settings),
+            {"id": "llm", "name": model_label(settings.gemini_model), "role": "Modelo principal", **configured(settings.gemini_api_key)},
             {"id": "tunnel", "name": "Cloudflare Tunnel", "role": "Acceso público", "status": "down", "label": "Inactivo"},
+            sandbox_service(settings),
         ],
     }

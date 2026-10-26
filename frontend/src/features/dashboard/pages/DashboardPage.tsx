@@ -82,7 +82,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <GlobalScoreCard name={sel.repo.name} scores={sel.scores} prev={sel.prev_scores} threshold={data.thresholds.score} />
             {CATEGORIES.map((k) => (
-              <CategoryKpiCard key={k} cat={k} value={sel.scores[k]} prev={sel.prev_scores?.[k] ?? null} />
+              <CategoryKpiCard key={k} cat={k} repoId={sel.repo.id} reportId={sel.report_id} value={sel.scores[k]} prev={sel.prev_scores?.[k] ?? null} />
             ))}
           </div>
 
@@ -105,7 +105,11 @@ export default function DashboardPage() {
               <div className="space-y-2 flex-1">
                 {sel.top_findings.length ? (
                   sel.top_findings.map((f) => (
-                    <div key={f.id} className="w-full text-left flex gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <Link
+                      key={f.id}
+                      to={paths.report(sel.repo.id, sel.report_id, { finding: f.id })}
+                      className="w-full text-left flex gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition"
+                    >
                       <span className={cn('mt-1.5 w-2 h-2 shrink-0 rounded-full', SEV[f.sev].dot)} />
                       <div className="min-w-0">
                         <p className="text-sm font-medium leading-snug">{f.msg}</p>
@@ -113,16 +117,15 @@ export default function DashboardPage() {
                           {f.file}:{f.line} · {f.rule}
                         </p>
                       </div>
-                    </div>
+                    </Link>
                   ))
                 ) : (
                   <p className="text-sm text-slate-500">Sin hallazgos abiertos</p>
                 )}
               </div>
-              <Link to={paths.files(sel.repo.id)} className={buttonClass('secondary', 'mt-3 w-full')}>
-                Ver archivos del repo <Icon name="arrow" className="w-4 h-4" />
+              <Link to={paths.report(sel.repo.id, sel.report_id)} className={buttonClass('secondary', 'mt-3 w-full')}>
+                Ver todos los hallazgos <Icon name="arrow" className="w-4 h-4" />
               </Link>
-              <p className="mt-2 text-xs text-slate-400 text-center">El reporte completo de hallazgos llega en el Sprint 7</p>
             </Card>
           </div>
         </>

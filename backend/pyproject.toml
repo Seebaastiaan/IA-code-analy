@@ -1,6 +1,6 @@
 [project]
 name = "ia-voy-backend"
-version = "0.6.0"
+version = "0.7.0"
 description = "API de IA voy: análisis de repositorios Python"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,6 +13,8 @@ dependencies = [
     "ruff>=0.15",
     "bandit>=1.8",
     "radon>=6.0",
+    # Similitud de embeddings del asistente
+    "numpy>=2.0",
 ]
 
 [project.optional-dependencies]

@@ -1,75 +1,95 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 /**
- * Flujos del Sprint 6 de punta a punta en el navegador: analizar con los 10 pasos, ver el score en
- * Repositorios y en el tablero, los archivos del clon, la configuración y el equipo.
+ * Los 5 flujos de usuario de docs/FRONTEND_SPEC.md §9, de punta a punta en el navegador.
  * Backend simulado con MSW (`.env.e2e`): su estado vive en memoria de la pestaña, así que cada flujo
  * navega dentro de la app (sin recargar) y empieza con datos limpios.
  */
 
-test.beforeEach(async ({ page }) => {
-  // Pasos rápidos del job simulado
-  await page.addInitScript(() => localStorage.setItem('iavoy-mock-speed', '500'))
-})
+const REPO = 'r1'
 
-test('1 · analizar un repositorio y ver su score en Repositorios', async ({ page }) => {
-  await page.goto('/repos')
-  await expect(page.getByRole('heading', { name: 'Repositorios', level: 1 })).toBeVisible()
-  await page.getByRole('navigation').getByRole('link', { name: 'Nuevo análisis' }).click()
+/** Monaco tarda en compilarse la primera vez que Vite lo sirve. */
+const EDITOR_TIMEOUT = 45_000
 
-  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/servicio-facturas')
+async function openReport(page: Page) {
+  await page.goto(`/repos/${REPO}/reports/latest`)
+  await expect(page.getByRole('heading', { name: 'equipo/api-pagos', level: 1 })).toBeVisible()
+}
+
+test('1 · analizar un repositorio y abrir su reporte', async ({ page }) => {
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: 'Resumen del equipo' })).toBeVisible()
+  await page.getByRole('main').getByRole('link', { name: 'Nuevo análisis' }).click()
+
+  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/api-pagos')
   await page.getByLabel('Rama').fill('main')
   await page.getByRole('button', { name: 'Iniciar análisis' }).click()
 
-  // Progreso en vivo por WebSocket: 10 pasos en el Sprint 6
+  // Progreso en vivo por WebSocket
   await expect(page).toHaveURL(/\/analyze\/jobs\//)
-  await expect(page.getByText('[01/10] Clonando repositorio')).toBeVisible()
-  await expect(page.getByText('[06/10] pytest')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('[10/10] Calculando score')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByRole('main').getByText('Análisis completado · score en el tablero')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('Análisis #1 completado.')).toBeVisible()
+  await expect(page.getByText('[01/11] Clonando repositorio')).toBeVisible()
+  await expect(page.getByRole('main').getByText('Análisis completado')).toBeVisible({ timeout: 20_000 })
 
-  await page.getByRole('link', { name: 'Ver en Repositorios' }).click()
-  await expect(page).toHaveURL(/\/repos$/)
-  await expect(page.getByText('equipo/servicio-facturas')).toBeVisible()
-  await expect(page.getByLabel('Re-analizar equipo/servicio-facturas')).toBeVisible()
+  await page.getByRole('link', { name: 'Ver reporte' }).click()
+  await expect(page).toHaveURL(/\/repos\/r1\/reports\/r1-\d+/)
+  await expect(page.getByRole('tab', { name: 'Hallazgos' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: /^Seguridad \d+/ })).toBeVisible()
 })
 
-test('1b · una rama que no existe detiene el análisis y se puede reintentar', async ({ page }) => {
+test('1b · un análisis con error se puede reintentar', async ({ page }) => {
   await page.goto('/analyze')
-  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/api-pagos')
-  await page.getByLabel('Rama').fill('no-existe')
+  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/cli-utilidades')
   await page.getByRole('button', { name: 'Iniciar análisis' }).click()
-  await expect(page.getByText('La rama no existe').first()).toBeVisible({ timeout: 10_000 })
-  await page.getByRole('button', { name: /Reintentar/ }).click()
-  await expect(page.getByRole('main').getByText('Análisis completado · score en el tablero')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('pytest no pudo importar un módulo').first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('button', { name: /Reintentar/ })).toBeVisible()
 })
 
-test('1c · un repositorio sin Python se detiene con un mensaje claro', async ({ page }) => {
-  await page.goto('/analyze')
-  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/landing-web')
-  await page.getByRole('button', { name: 'Iniciar análisis' }).click()
-  await expect(page.getByText('El repositorio no tiene código Python').first()).toBeVisible({ timeout: 10_000 })
+test('2 · corregir un hallazgo desde el reporte', async ({ page }) => {
+  test.setTimeout(90_000)
+  await openReport(page)
+  await page.getByRole('button', { name: /F401 Import sin usar/ }).click()
+
+  const drawer = page.getByRole('dialog')
+  await expect(drawer.getByRole('heading', { name: 'Import sin usar: os' })).toBeVisible()
+  await drawer.getByRole('button', { name: 'Aplicar corrección automática' }).click()
+
+  // El editor abre el archivo en modo diff con la propuesta
+  // React Router cambia la URL cuando termina de cargar la página del editor (Monaco)
+  await expect(page).toHaveURL(/\/repos\/r1\/editor\?file=api\.py&diff=1/, { timeout: EDITOR_TIMEOUT })
+  const save = page.getByRole('button', { name: 'Guardar', exact: true })
+  await expect(save).toBeEnabled({ timeout: EDITOR_TIMEOUT })
+  await save.click()
+
+  // Re-análisis del archivo: el hallazgo corregido desaparece y el toast lleva al tablero
+  const toast = page.getByRole('status').filter({ hasText: 'Guardado y re-analizado.' })
+  await expect(toast).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('button', { name: 'Línea 3' })).toHaveCount(0)
+  await toast.getByRole('button', { name: 'Ver tablero' }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
 })
 
-test('2 · tablero: score, tendencia y hallazgos prioritarios; archivos del clon', async ({ page }) => {
-  await page.goto('/repos')
-  await page.getByRole('navigation').getByRole('link', { name: 'Tablero' }).click()
-  await expect(page.getByRole('heading', { name: 'Resumen del equipo', level: 1 })).toBeVisible()
-  await expect(page.getByText('Score global')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Tendencia' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Atención prioritaria' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Análisis recientes' })).toBeVisible()
+test('4 · preguntar a la IA y abrir la fuente en el editor', async ({ page }) => {
+  test.setTimeout(90_000)
+  await openReport(page)
+  await page.getByRole('button', { name: /B105 Clave secreta/ }).click()
+  await page.getByRole('dialog').getByRole('link', { name: 'Preguntar a la IA' }).click()
 
-  await page.getByRole('navigation').getByRole('link', { name: 'Repositorios' }).click()
-  await page.getByRole('link', { name: 'Ver archivos de equipo/api-pagos' }).click()
-  await expect(page).toHaveURL(/\/repos\/r1\/files/)
-  await page.getByRole('button', { name: 'utils.py' }).click()
-  await expect(page.getByText('import hashlib').first()).toBeVisible()
+  await expect(page).toHaveURL(/\/repos\/r1\/assistant/)
+  // La pregunta llega prellenada y se envía sola
+  await expect(page.getByText('Explícame el hallazgo B105 en auth.py:15').first()).toBeVisible()
+  const source = page.getByRole('link', { name: /auth\.py:\d+/ }).first()
+  await expect(source).toBeVisible({ timeout: 10_000 })
+  await source.click()
+
+  await expect(page).toHaveURL(/\/repos\/r1\/editor\?file=auth\.py&line=\d+/, { timeout: EDITOR_TIMEOUT })
+  await expect(page.getByRole('heading', { name: 'Hallazgos en este archivo' })).toBeVisible({ timeout: EDITOR_TIMEOUT })
 })
 
-test('3 · configuración del proyecto y .ia_voy.toml', async ({ page }) => {
-  await page.goto('/repos/r1/settings')
+test('5 · seguir la evolución: tablero y configuración', async ({ page }) => {
+  await page.goto('/dashboard')
+  await expect(page.getByRole('img', { name: 'Tendencia de puntuación' })).toBeVisible()
+
+  await page.getByRole('navigation').getByRole('link', { name: 'Configuración' }).click()
   await expect(page.getByRole('heading', { name: 'Configuración', level: 1 })).toBeVisible()
   const save = page.getByRole('button', { name: 'Guardar configuración' })
   await expect(save).toBeDisabled()
@@ -77,7 +97,7 @@ test('3 · configuración del proyecto y .ia_voy.toml', async ({ page }) => {
   await page.getByPlaceholder('p. ej. E501').fill('E501')
   await page.getByPlaceholder('p. ej. E501').press('Enter')
   await expect(page.getByRole('button', { name: 'Quitar E501' })).toBeVisible()
-  await expect(page.getByText('ignorar = ["B101", "E501"]')).toBeVisible()
+  await expect(page.getByText('ignorar = ["S101", "D100", "E501"]')).toBeVisible()
   await save.click()
   await expect(page.getByText('Configuración guardada')).toBeVisible()
 })
@@ -100,12 +120,12 @@ test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await expect(page.getByText('5 miembro(s)')).toBeVisible()
 })
 
-test('fuera del Sprint 6: reporte, editor, asistente y comparativa no existen todavía', async ({ page }) => {
-  await page.goto('/repos')
-  const nav = page.getByRole('navigation')
-  for (const name of ['Reporte', 'Editor', 'Asistente IA', 'Comparativa']) {
-    await expect(nav.getByRole('link', { name })).toHaveCount(0)
-  }
-  await page.goto('/repos/r1/reports/latest')
-  await expect(page.getByText(/no existe|no encontrada|404/i).first()).toBeVisible()
+test('nuevo análisis exige un analizador por categoría', async ({ page }) => {
+  await page.goto('/analyze')
+  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/api-pagos')
+  await page.getByRole('checkbox', { name: 'pytest', exact: true }).uncheck()
+  await page.getByRole('checkbox', { name: 'coverage', exact: true }).uncheck()
+  await page.getByRole('button', { name: 'Iniciar análisis' }).click()
+  await expect(page.getByText('Elige al menos un analizador de: Pruebas')).toBeVisible()
+  await expect(page).toHaveURL(/\/analyze$/)
 })

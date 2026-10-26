@@ -1,7 +1,7 @@
-import { queryOptions, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { http } from '@/shared/api/http'
-import type { FileResponse, ReanalyzeResponse, Repo, TreeEntry } from '../types'
+import type { ReanalyzeResponse, Repo, TreeEntry } from '../types'
 
 export const reposApi = {
   list: () => http.get<Repo[]>(EP.repos.list),
@@ -18,16 +18,6 @@ export const useRepos = () =>
   })
 
 export const useRepoTree = (repoId: string) => useQuery({ queryKey: ['tree', repoId], queryFn: () => reposApi.tree(repoId) })
-
-export const fileQuery = (repoId: string, path: string) =>
-  queryOptions({
-    queryKey: ['file', repoId, path],
-    queryFn: () => http.get<FileResponse>(EP.file, { repo: repoId, path }),
-    staleTime: Infinity,
-  })
-
-/** Archivo del último clon, en solo lectura. */
-export const useFile = (repoId: string, path: string | null) => useQuery({ ...fileQuery(repoId, path ?? ''), enabled: Boolean(path) })
 
 /** Un repo de la lista (comparte caché con la pantalla de repositorios). */
 export function useRepo(repoId: string | null | undefined) {

@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
 import { NavLink, useLocation } from 'react-router'
+import { reportQuery } from '@/features/report'
 import { useSelectedRepo } from '@/features/repos/store/selectedRepo.store'
 import { useHealth } from '@/features/settings'
 import { Icon } from '@/shared/ui'
@@ -7,7 +9,8 @@ import { NAV } from './navigation'
 
 function ServiceStatus() {
   const { data } = useHealth()
-  const sandbox = data?.services.find((s) => s.id === 'sandbox')
+  const llm = data?.services.find((s) => s.id === 'llm')
+  const fallback = data?.services.find((s) => s.id === 'llm_fallback')
   const tunnelUp = data?.services.find((s) => s.id === 'tunnel')?.status === 'ok'
 
   return (
@@ -21,9 +24,9 @@ function ServiceStatus() {
         <span className="ml-auto font-mono text-slate-400 truncate">{data?.tunnel_host ?? '—'}</span>
       </div>
       <div className="flex items-center gap-2">
-        <span className={cn('w-2 h-2 rounded-full', sandbox?.status === 'ok' ? 'bg-emerald-500' : 'bg-slate-400')} />
-        <span className="text-slate-600 dark:text-slate-300 truncate">{sandbox?.name ?? 'Sandbox'}</span>
-        {sandbox && <span className="ml-auto text-slate-400">{sandbox.label}</span>}
+        <span className={cn('w-2 h-2 rounded-full', llm?.status === 'ok' ? 'bg-emerald-500' : 'bg-slate-400')} />
+        <span className="text-slate-600 dark:text-slate-300">{llm?.name ?? 'Modelo IA'}</span>
+        {fallback && <span className="ml-auto text-slate-400">{fallback.label}</span>}
       </div>
     </div>
   )
@@ -32,6 +35,9 @@ function ServiceStatus() {
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const repoId = useSelectedRepo((s) => s.repoId)
   const { pathname } = useLocation()
+  // Badge del reporte: hallazgos de severidad alta abiertos en el repo activo
+  const { data: report } = useQuery({ ...reportQuery(repoId ?? ''), enabled: Boolean(repoId) })
+  const altas = report?.findings.filter((f) => f.sev === 'alta' && f.status === 'open').length ?? 0
 
   return (
     <>
@@ -61,7 +67,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <NavLink
                   key={item.id}
                   to={item.to(repoId)}
-                  // Sin `end`, "Repositorios" (/repos) quedaría activo también en /repos/:id/files, etc.
+                  // Sin `end`, "Repositorios" (/repos) quedaría activo también en /repos/:id/editor, etc.
                   end
                   onClick={onClose}
                   className={({ isActive }) =>
@@ -75,6 +81,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 >
                   <Icon name={item.icon} className="w-[18px] h-[18px]" />
                   <span>{item.label}</span>
+                  {item.id === 'report' && altas > 0 && (
+                    <span className="ml-auto text-[10px] font-bold rounded-full px-1.5 py-0.5 bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">{altas}</span>
+                  )}
                 </NavLink>
               ))}
             </div>

@@ -41,6 +41,7 @@ export function AnalyzeForm() {
   const [branch, setBranch] = useState(params.get('branch') ?? 'main')
   const [analyzers, setAnalyzers] = useState<AnalyzerId[]>(ALL)
   const [sandbox, setSandbox] = useState(true)
+  const [index, setIndex] = useState(true)
   // Repo elegido de la cuenta de GitHub ("owner/repo"); escribir la URL a mano lo descarta
   const [ghRepo, setGhRepo] = useState<string | null>(null)
   const branches = useGithubBranches(ghRepo)
@@ -67,7 +68,7 @@ export function AnalyzeForm() {
     // Una categoría sin analizadores no tendría score (el backend responde 422)
     const missing = CATEGORIES.filter((k) => !ANALYZERS[k].some((a) => analyzers.includes(a.id))).map((k) => CAT[k].label)
     if (missing.length) return toast(`Elige al menos un analizador de: ${missing.join(', ')}`, { tone: 'err' })
-    start.mutate({ url: url.trim(), branch: branch.trim() || 'main', analyzers, sandbox })
+    start.mutate({ url: url.trim(), branch: branch.trim() || 'main', analyzers, sandbox, index })
   }
 
   const sum = weights.seg + weights.test + weights.prac || 1
@@ -133,7 +134,10 @@ export function AnalyzeForm() {
             </div>
           </fieldset>
 
-          <Option checked={sandbox} onChange={setSandbox} title="Ejecutar en sandbox" desc="Corre pip-audit, pytest y coverage aislados (sin sandbox se simulan)" />
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Option checked={sandbox} onChange={setSandbox} title="Ejecutar en sandbox" desc="Corre pip-audit, pytest y coverage aislados (sin sandbox se simulan)" />
+            <Option checked={index} onChange={setIndex} title="Indexar para el asistente" desc="Permite preguntar sobre el código" />
+          </div>
 
           <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
             <Link to={paths.dashboard()} className={buttonClass('secondary')}>

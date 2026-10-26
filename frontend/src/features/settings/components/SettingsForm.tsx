@@ -3,17 +3,20 @@ import { useState } from 'react'
 import { invalidateAnalysis } from '@/shared/api/invalidate'
 import { CAT } from '@/shared/constants/categories'
 import { toast } from '@/shared/hooks/useToast'
-import { CATEGORIES, type Category } from '@/shared/types/common'
+import { CATEGORIES, type Category, type Weights } from '@/shared/types/common'
 import { Button, Card, ChipList, Icon, Input, Label, Spinner } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
-import { weightSum } from '@/shared/utils/score'
+import { calcScore, f1, weightSum } from '@/shared/utils/score'
 import { configApi, configQuery, useHealth } from '../api/config.api'
 import type { ProjectConfig } from '../types'
 import { toToml } from '../utils/toToml'
 
 interface SettingsFormProps {
   repoId: string
+  repoName: string
   initial: ProjectConfig
+  /** Puntuaciones por categoría del último reporte, para previsualizar el score con los nuevos pesos */
+  categoryScores: Weights | null
 }
 
 function Services() {
@@ -37,7 +40,7 @@ function Services() {
   )
 }
 
-export function SettingsForm({ repoId, initial }: SettingsFormProps) {
+export function SettingsForm({ repoId, repoName, initial, categoryScores }: SettingsFormProps) {
   const queryClient = useQueryClient()
   const [config, setConfig] = useState(initial)
   const sum = weightSum(config.weights)
@@ -87,6 +90,12 @@ export function SettingsForm({ repoId, initial }: SettingsFormProps) {
             sum !== 100 && (
               <p className="mt-4 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 rounded-lg p-3">Los pesos no suman 100 %; se normalizarán automáticamente al calcular.</p>
             )
+          )}
+          {categoryScores && (
+            <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-950 p-3 text-sm flex items-center justify-between">
+              <span className="text-slate-500">Score de {repoName.split('/').pop()} con estos pesos</span>
+              <b className="tabular-nums">{f1(calcScore(config.weights, categoryScores))}</b>
+            </div>
           )}
         </Card>
 

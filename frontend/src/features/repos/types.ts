@@ -1,4 +1,4 @@
-import type { RepoStatus, Scores } from '@/shared/types/common'
+import type { RepoStatus, Scores, Severity } from '@/shared/types/common'
 
 export interface Repo {
   id: string
@@ -12,7 +12,6 @@ export interface Repo {
   files: number
   last_report_id: string | null
   last_report_num: number | null
-  /** Score del último análisis (con la configuración actual del proyecto) */
   scores: Scores | null
   /** Mensaje del último error, si status = error */
   error: string | null
@@ -24,12 +23,8 @@ export interface TreeEntry {
   path: string
   /** Carpeta contenedora ('' = raíz) */
   dir: string
-}
-
-export interface FileResponse {
-  path: string
-  language: string
-  content: string
+  open_findings: number
+  worst: Severity | null
 }
 
 export interface ReanalyzeResponse {

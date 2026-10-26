@@ -7,7 +7,7 @@ export interface NavItem {
   icon: IconName
   /** Recibe el repo activo; devuelve null si el enlace necesita repo y no hay ninguno */
   to: (repoId: string | null) => string
-  /** Activo también en otras URLs (p. ej. /analyze/jobs/:id cuenta como "Nuevo análisis") */
+  /** Activo también en otras URLs (p. ej. el enlace va a /reports/latest pero se ve /reports/r1-128) */
   match?: (pathname: string) => boolean
 }
 
@@ -16,21 +16,24 @@ export interface NavGroup {
   items: NavItem[]
 }
 
-// Sin repo seleccionado, los enlaces del repo activo llevan a la lista de repositorios
+// Sin repo seleccionado, los enlaces de análisis llevan a la lista de repositorios
 const scoped = (fn: (repoId: string) => string) => (repoId: string | null) => (repoId ? fn(repoId) : paths.repos())
 
-/**
- * Sprint 6: tablero con el score, análisis completo (10 pasos), repositorios y configuración. Reporte,
- * editor, asistente IA y comparativa se agregan en los siguientes sprints.
- */
 export const NAV: NavGroup[] = [
   {
     group: 'Principal',
     items: [
       { id: 'dashboard', label: 'Tablero', icon: 'home', to: paths.dashboard },
-      { id: 'analyze', label: 'Nuevo análisis', icon: 'plus', to: () => paths.analyze(), match: (p) => p.startsWith('/analyze/') },
+      { id: 'analyze', label: 'Nuevo análisis', icon: 'plus', to: () => paths.analyze() },
       { id: 'repos', label: 'Repositorios', icon: 'folder', to: paths.repos },
-      { id: 'files', label: 'Archivos', icon: 'file', to: scoped((id) => paths.files(id)) },
+    ],
+  },
+  {
+    group: 'Análisis',
+    items: [
+      { id: 'report', label: 'Reporte', icon: 'doc', to: scoped((id) => paths.report(id)), match: (p) => /^\/repos\/[^/]+\/reports\//.test(p) },
+      { id: 'editor', label: 'Editor', icon: 'code', to: scoped((id) => paths.editor(id)) },
+      { id: 'assistant', label: 'Asistente IA', icon: 'chat', to: scoped(paths.assistant) },
     ],
   },
   {

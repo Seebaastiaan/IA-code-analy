@@ -5,7 +5,7 @@ Todo se deriva de una semilla guardada con el reporte, así que un mismo reporte
 
 import random
 
-# Los 10 pasos del análisis del Sprint 6 (el índice del asistente llega en el Sprint 7) (mismo orden que frontend/src/features/analysis/constants/jobSteps.ts)
+# Los 11 pasos del análisis (mismo orden que frontend/src/features/analysis/constants/jobSteps.ts)
 JOB_STEPS: list[tuple[str, str]] = [
     ("Clonando repositorio", "git clone --depth 1 --branch {branch} {url}"),
     ("Creando entorno aislado", "uv venv .venv  (sandbox)"),
@@ -17,6 +17,7 @@ JOB_STEPS: list[tuple[str, str]] = [
     ("Ruff", "ruff check . --output-format json"),
     ("Radon", "radon cc . -j && radon mi . -j"),
     ("Calculando score", "agregación ponderada (.ia_voy.toml)"),
+    ("Indexando para el asistente", "ast → embeddings (Gemini) → SQLite"),
 ]
 
 DEFAULT_WEIGHTS = {"seg": 50, "test": 30, "prac": 20}

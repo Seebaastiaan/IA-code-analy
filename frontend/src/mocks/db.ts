@@ -1,19 +1,36 @@
 /**
- * "Backend" en memoria para desarrollar el front sin servidor. Imita al backend del Sprint 6 (los 10 pasos
- * del análisis, el score ponderado por categoría y el tablero) lo justo para que la UI sea creíble.
+ * "Backend" en memoria para desarrollar el front sin servidor. Imita las reglas del backend real
+ * (score ponderado, reglas ignoradas, re-análisis al guardar) lo justo para que la UI sea creíble.
  * El estado se reinicia al recargar la página.
  */
 import type { Job, JobMessage } from '@/features/analysis/types'
-import type { Finding } from '@/features/findings/types'
+import type { Finding, Patch } from '@/features/findings/types'
 import type { Repo, TreeEntry } from '@/features/repos/types'
+import type { Report } from '@/features/report/types'
 import type { ProjectConfig } from '@/features/settings/types'
 import { JOB_STEPS } from '@/features/analysis/constants/jobSteps'
-import type { Scores, Severity, Weights } from '@/shared/types/common'
+import type { Category, Scores, Severity, Weights } from '@/shared/types/common'
 import { calcScore } from '@/shared/utils/score'
-import { FILES } from './fixtures/code'
-import { FINDINGS } from './fixtures/findings'
+import { FILES, lineAt } from './fixtures/code'
+import { COMPLEXITY, COVERAGE, FINDINGS, FIXES, RESOLVED_BEFORE, type FindingTemplate } from './fixtures/findings'
 
 // ───────────────────────── Modelo interno ─────────────────────────
+
+interface ReportRecord {
+  id: string
+  num: number
+  repo_id: string
+  branch: string
+  commit: string
+  created_at: string
+  duration_s: number
+  cat: Weights
+  findings: FindingTemplate[]
+  resolved: Set<number>
+  coverage: typeof COVERAGE
+  complexity: typeof COMPLEXITY
+  summary: Report['summary']
+}
 
 interface RepoRecord {
   id: string
@@ -23,47 +40,62 @@ interface RepoRecord {
   files: number
   status: Repo['status']
   error: string | null
-  reports: ReportRecord[]
-  /** Puntos de historia anteriores a los análisis guardados (para la tendencia del tablero) */
+  /** Puntos de historia anteriores a los reportes guardados (para la tendencia) */
   history: { date: string; cat: Weights }[]
-  /** Contenido de cada archivo del último clon */
+  reports: ReportRecord[]
+  /** Contenido actual de cada archivo (el editor lo modifica) */
   content: Record<string, string>
   jobId: string | null
 }
 
-interface ReportRecord {
-  id: string
-  num: number
-  branch: string
-  commit: string
-  created_at: string
-  duration_s: number
-  /** Score por categoría (el global se calcula con los pesos de la configuración) */
-  cat: Weights
-  /** Ids de los hallazgos de fixtures/findings.ts */
-  findings: number[]
-}
-
 interface JobRecord extends Job {
-  commit: string
-  fail: 'clone' | 'python' | null
-  timer: ReturnType<typeof setTimeout> | null
+  fail: boolean
+  timer: ReturnType<typeof setInterval> | null
   listeners: Set<(m: JobMessage) => void>
-  /** ms que tarda cada paso */
-  speed: number[]
+  speed: number
 }
 
 const DAY = 86_400_000
 const now = Date.now()
 const iso = (msAgo: number) => new Date(now - msAgo).toISOString()
-const PY = (r: Record<string, string>) => Object.keys(r).filter((p) => p.endsWith('.py')).length
 const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)))
 const SEV_ORDER: Record<Severity, number> = { alta: 0, media: 1, baja: 2 }
 
 // ───────────────────────── Datos iniciales ─────────────────────────
 
-function seedRepo(id: string, name: string, branch: string, history: { commit: string; agoMs: number; s: number; cat: Weights; findings: number[] }[]): RepoRecord {
-  const files = PY(FILES)
+const OFFSETS: Record<Category, number[]> = { seg: [-8, -5, -1, 3, 6], test: [-5, -4, -2, -1, 0], prac: [-7, -4, -1, 3, 6] }
+
+function seedRepo(
+  id: string,
+  name: string,
+  branch: string,
+  files: number,
+  latest: { num: number; commit: string; agoMs: number; cat: Weights; ids: number[]; cov: number; failed: number; cc: number },
+): RepoRecord {
+  const findings = FINDINGS.filter((f) => latest.ids.includes(f.id))
+  const mk = (num: number, agoMs: number, cat: Weights, list: FindingTemplate[], commit: string): ReportRecord => ({
+    id: `${id}-${num}`,
+    num,
+    repo_id: id,
+    branch,
+    commit,
+    created_at: iso(agoMs),
+    duration_s: 120 + ((num * 37) % 90),
+    cat,
+    findings: list,
+    resolved: new Set(),
+    coverage: COVERAGE,
+    complexity: COMPLEXITY,
+    summary: { coverage_total: latest.cov, tests_failed: latest.failed, avg_complexity: latest.cc },
+  })
+  const prevCat: Weights = { seg: clamp(latest.cat.seg - 8), test: clamp(latest.cat.test - 1), prac: clamp(latest.cat.prac - 7) }
+  // Reporte anterior: sin los hallazgos 2, 3 y 7 y con dos que luego se resolvieron
+  const prevFindings = [...findings.filter((f) => ![2, 3, 7].includes(f.id)), ...RESOLVED_BEFORE]
+  const reports = [
+    mk(latest.num - 8, latest.agoMs + 14 * DAY, { seg: clamp(latest.cat.seg - 5), test: clamp(latest.cat.test - 4), prac: clamp(latest.cat.prac - 4) }, prevFindings, 'f04b2d9'),
+    mk(latest.num - 1, latest.agoMs + 7 * DAY, prevCat, prevFindings, '91ce07b'),
+    mk(latest.num, latest.agoMs, latest.cat, findings, latest.commit),
+  ]
   return {
     id,
     name,
@@ -72,41 +104,26 @@ function seedRepo(id: string, name: string, branch: string, history: { commit: s
     files,
     status: 'listo',
     error: null,
-    reports: history.map((h, i) => ({
-      id: `${id}-${i + 1}`,
-      num: i + 1,
-      branch,
-      commit: h.commit,
-      created_at: iso(h.agoMs),
-      duration_s: h.s,
-      cat: h.cat,
-      findings: h.findings,
+    history: [4, 3, 2, 1].map((w, i) => ({
+      date: iso(latest.agoMs + (w + 2) * 7 * DAY),
+      cat: { seg: clamp(latest.cat.seg + OFFSETS.seg[i]), test: clamp(latest.cat.test + OFFSETS.test[i]), prac: clamp(latest.cat.prac + OFFSETS.prac[i]) },
     })),
-    history: [5, 4, 3].map((w, i) => {
-      const first = history[0].cat
-      return { date: iso((w + 2) * 7 * DAY), cat: { seg: clamp(first.seg - 9 + i * 2), test: clamp(first.test - 5 + i), prac: clamp(first.prac - 6 + i * 2) } }
-    }),
+    reports,
     content: { ...FILES },
     jobId: null,
   }
 }
 
 const repos: RepoRecord[] = [
-  seedRepo('r1', 'equipo/api-pagos', 'main', [
-    { commit: 'f04b2d9', agoMs: 14 * DAY, s: 168, cat: { seg: 63, test: 81, prac: 69 }, findings: [1, 3, 4, 5, 6, 8, 9, 10, 11, 12] },
-    { commit: '91ce07b', agoMs: 7 * DAY, s: 172, cat: { seg: 60, test: 84, prac: 66 }, findings: [1, 3, 4, 5, 6, 8, 9, 10, 11, 12] },
-    { commit: 'a3f9c1e', agoMs: 2 * 3_600_000, s: 176, cat: { seg: 68, test: 85, prac: 73 }, findings: FINDINGS.map((f) => f.id) },
-  ]),
-  seedRepo('r2', 'equipo/etl-ventas', 'develop', [
-    { commit: '5c1e8aa', agoMs: 3 * DAY, s: 151, cat: { seg: 88, test: 82, prac: 83 }, findings: [4, 9, 10, 11, 12] },
-    { commit: '7bd21aa', agoMs: DAY, s: 149, cat: { seg: 92, test: 84, prac: 86 }, findings: [4, 9, 10, 12] },
-  ]),
-  { id: 'r3', name: 'equipo/bot-soporte', url: 'https://github.com/equipo/bot-soporte', branch: 'main', files: 0, status: 'analizando', error: null, reports: [], history: [], content: {}, jobId: null },
-  { id: 'r4', name: 'equipo/landing-web', url: 'https://github.com/equipo/landing-web', branch: 'main', files: 0, status: 'error', error: 'El repositorio no tiene código Python', reports: [], history: [], content: {}, jobId: null },
+  seedRepo('r1', 'equipo/api-pagos', 'main', 48, { num: 128, commit: 'a3f9c1e', agoMs: 2 * 3_600_000, cat: { seg: 68, test: 85, prac: 73 }, ids: FINDINGS.map((f) => f.id), cov: 78, failed: 1, cc: 6.2 }),
+  seedRepo('r2', 'equipo/etl-ventas', 'develop', 31, { num: 97, commit: '7bd21aa', agoMs: DAY, cat: { seg: 92, test: 84, prac: 86 }, ids: [4, 9, 10, 12], cov: 81, failed: 0, cc: 4.1 }),
+  seedRepo('r3', 'equipo/bot-soporte', 'main', 22, { num: 64, commit: 'e01c4f2', agoMs: 3 * DAY, cat: { seg: 48, test: 61, prac: 66 }, ids: [1, 2, 5, 6, 7, 8, 11], cov: 52, failed: 3, cc: 8.7 }),
+  { id: 'r4', name: 'equipo/notebooks-ml', url: 'https://github.com/equipo/notebooks-ml', branch: 'feature/limpieza', files: 17, status: 'analizando', error: null, history: [], reports: [], content: { ...FILES }, jobId: null },
+  { id: 'r5', name: 'equipo/cli-utilidades', url: 'https://github.com/equipo/cli-utilidades', branch: 'main', files: 12, status: 'error', error: 'pytest no pudo importar el módulo "click"', history: [], reports: [], content: { ...FILES }, jobId: null },
 ]
 
 const configs: Record<string, ProjectConfig> = Object.fromEntries(
-  repos.map((r) => [r.id, { weights: { seg: 50, test: 30, prac: 20 }, thresholds: { score: 70, cov: 60 }, ignored: ['B101'], excluded: ['migrations/', 'tests/fixtures/'] }]),
+  repos.map((r) => [r.id, { weights: { seg: 50, test: 30, prac: 20 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }]),
 )
 
 const jobs = new Map<string, JobRecord>()
@@ -122,21 +139,51 @@ export const getRepo = (id: string) => {
   return r
 }
 
+const config = (repoId: string) => configs[repoId]
+const latestReport = (r: RepoRecord) => r.reports.at(-1) ?? null
+const scoresOf = (repoId: string, cat: Weights): Scores => ({ ...cat, global: Math.round(calcScore(config(repoId).weights, cat) * 10) / 10 })
+
+function findReport(repoId: string, reportId: string) {
+  const r = getRepo(repoId)
+  const rep = reportId === 'latest' ? latestReport(r) : r.reports.find((x) => x.id === reportId)
+  if (!rep) throw new NotFound('Reporte no encontrado')
+  return { repo: r, report: rep }
+}
+
+function findingView(report: ReportRecord, f: FindingTemplate, withCode = true): Finding {
+  const content = FILES[f.file]
+  const snippet =
+    withCode && content
+      ? content
+          .split('\n')
+          .map((text, i) => ({ line: i + 1, text }))
+          .filter((l) => Math.abs(l.line - f.line) <= 2)
+      : undefined
+  return { ...f, status: report.resolved.has(f.id) ? 'resolved' : 'open', snippet }
+}
+
+/** Hallazgos visibles: sin las reglas ignoradas en la configuración, ordenados por severidad. */
+const visibleFindings = (repo: RepoRecord, report: ReportRecord, withCode = true) =>
+  report.findings
+    .filter((f) => !config(repo.id).ignored.includes(f.rule))
+    .map((f) => findingView(report, f, withCode))
+    .sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev])
+
 export function repoView(r: RepoRecord): Repo {
-  const last = r.reports.at(-1) ?? null
+  const rep = latestReport(r)
   const job = r.jobId ? jobs.get(r.jobId) : null
   return {
     id: r.id,
     name: r.name,
     url: r.url,
     branch: r.branch,
-    commit: last?.commit ?? null,
+    commit: rep?.commit ?? null,
     status: r.status,
-    last_analyzed_at: last?.created_at ?? (r.status === 'error' ? iso(5 * DAY) : null),
+    last_analyzed_at: rep?.created_at ?? (r.status === 'error' ? iso(5 * DAY) : null),
     files: r.files,
-    last_report_id: last?.id ?? null,
-    last_report_num: last?.num ?? null,
-    scores: last ? scoresOf(r.id, last.cat) : null,
+    last_report_id: rep?.id ?? null,
+    last_report_num: rep?.num ?? null,
+    scores: rep ? scoresOf(r.id, rep.cat) : null,
     error: r.error,
     progress: job && job.status === 'running' ? { job_id: job.id, step: job.step, total: job.total, name: JOB_STEPS[job.step]?.name ?? '' } : null,
   }
@@ -144,26 +191,44 @@ export function repoView(r: RepoRecord): Repo {
 
 export const listRepos = () => repos.map(repoView)
 
-const scoresOf = (repoId: string, cat: Weights): Scores => ({ ...cat, global: Math.round(calcScore(configs[repoId].weights, cat) * 10) / 10 })
-
-/** Hallazgos abiertos del análisis, sin las reglas ignoradas en la configuración, ordenados por severidad. */
-function visibleFindings(repoId: string, report: ReportRecord): Finding[] {
-  return FINDINGS.filter((f) => report.findings.includes(f.id) && !configs[repoId].ignored.includes(f.rule))
-    .map((f) => ({ ...f, status: 'open' as const }))
-    .sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev])
+export function reportView(repoId: string, reportId: string): Report {
+  const { repo, report } = findReport(repoId, reportId)
+  const idx = repo.reports.indexOf(report)
+  const prev = idx > 0 ? repo.reports[idx - 1] : null
+  const cfg = config(repoId)
+  return {
+    id: report.id,
+    num: report.num,
+    repo_id: repo.id,
+    repo_name: repo.name,
+    branch: report.branch,
+    commit: report.commit,
+    created_at: report.created_at,
+    duration_s: report.duration_s,
+    scores: scoresOf(repoId, report.cat),
+    prev: prev ? { num: prev.num, scores: scoresOf(repoId, prev.cat) } : null,
+    weights: cfg.weights,
+    thresholds: cfg.thresholds,
+    findings: visibleFindings(repo, report),
+    coverage: report.coverage,
+    complexity: report.complexity,
+    summary: report.summary,
+    analyzers: ['bandit', 'pip-audit', 'pytest', 'coverage', 'ruff', 'radon'],
+    languages: [{ name: 'Python', files: repo.files }],
+  }
 }
 
 export function dashboard(repoId: string | null) {
   const ready = repos.filter((r) => r.reports.length)
   const repo = ready.find((r) => r.id === repoId) ?? ready[0]
-  const base = { active_repos: ready.length, repos: listRepos(), thresholds: repo ? configs[repo.id].thresholds : { score: 70, cov: 60 } }
+  const base = { active_repos: ready.length, repos: listRepos(), thresholds: repo ? config(repo.id).thresholds : { score: 70, cov: 60 } }
   if (!repo) return { ...base, selected: null }
-  const rep = repo.reports.at(-1)!
+  const rep = latestReport(repo)!
   const prev = repo.reports.at(-2) ?? null
-  const open = visibleFindings(repo.id, rep)
+  const open = visibleFindings(repo, rep).filter((f) => f.status === 'open')
   const history = [
     ...repo.history.map((h) => ({ date: h.date, ...scoresOf(repo.id, h.cat) })),
-    ...repo.reports.slice(-4).map((x) => ({ date: x.created_at, ...scoresOf(repo.id, x.cat) })),
+    ...repo.reports.slice(-3).map((x) => ({ date: x.created_at, ...scoresOf(repo.id, x.cat) })),
   ]
   return {
     ...base,
@@ -182,10 +247,23 @@ export function dashboard(repoId: string | null) {
 
 export function tree(repoId: string): TreeEntry[] {
   const repo = getRepo(repoId)
+  const rep = latestReport(repo)
+  const open = rep ? visibleFindings(repo, rep).filter((f) => f.status === 'open') : []
   return Object.keys(repo.content)
-    .map((path) => ({ path, dir: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '' }))
+    .filter((p) => p !== 'README.md')
+    .map((path) => {
+      const mine = open.filter((f) => f.file === path)
+      return {
+        path,
+        dir: path.includes('/') ? path.split('/')[0] : '',
+        open_findings: mine.length,
+        worst: mine.length ? mine.reduce((w, f) => (SEV_ORDER[f.sev] < SEV_ORDER[w] ? f.sev : w), 'baja' as Severity) : null,
+      }
+    })
     .sort((a, b) => a.dir.localeCompare(b.dir) || a.path.localeCompare(b.path))
 }
+
+// ───────────────────────── Editor y correcciones ─────────────────────────
 
 export function getFile(repoId: string, path: string) {
   const content = getRepo(repoId).content[path]
@@ -193,11 +271,38 @@ export function getFile(repoId: string, path: string) {
   return content
 }
 
+export function fixPatches(findingIds: number[]): Patch[] {
+  return findingIds.flatMap((id) => (FIXES[id] ?? []).map(([file, line, text]) => ({ file, line, original: lineAt(FILES[file], line), text })))
+}
+
+/** Guarda y "re-analiza": un hallazgo queda resuelto si su línea original ya no está en el archivo. */
+export function saveFile(repoId: string, path: string, content: string) {
+  const repo = getRepo(repoId)
+  const rep = latestReport(repo)
+  repo.content[path] = content
+  if (!rep) return { resolved_ids: [], score_before: 0, score_after: 0 }
+
+  const before = scoresOf(repoId, rep.cat).global
+  const lines = new Set(content.split('\n'))
+  const resolved: number[] = []
+  for (const f of rep.findings) {
+    if (f.file !== path || rep.resolved.has(f.id) || !FIXES[f.id]) continue
+    const evidence = lineAt(FILES[path], f.line)
+    if (lines.has(evidence)) continue
+    rep.resolved.add(f.id)
+    resolved.push(f.id)
+    if (f.cat === 'seg') rep.cat.seg = clamp(rep.cat.seg + (f.sev === 'alta' ? 7 : 4))
+    else if (f.cat === 'prac') rep.cat.prac = clamp(rep.cat.prac + 3)
+    else rep.cat.test = clamp(rep.cat.test + 2)
+  }
+  return { resolved_ids: resolved, score_before: before, score_after: scoresOf(repoId, rep.cat).global }
+}
+
 // ───────────────────────── Configuración ─────────────────────────
 
 export function getConfig(repoId: string) {
   getRepo(repoId)
-  return configs[repoId]
+  return config(repoId)
 }
 export function saveConfig(repoId: string, cfg: ProjectConfig) {
   getRepo(repoId)
@@ -206,6 +311,15 @@ export function saveConfig(repoId: string, cfg: ProjectConfig) {
 }
 
 // ───────────────────────── Jobs de análisis ─────────────────────────
+
+const STEP_SUMMARY: Record<number, (j: JobRecord) => string> = {
+  3: () => '  3 alta · 4 media · 0 baja',
+  4: () => '  1 paquete vulnerable',
+  5: () => '  139 passed, 1 failed, 3 skipped',
+  6: () => '  cobertura total: 78 %',
+  7: () => '  4 problemas (3 corregibles)',
+  8: () => '  complejidad media: 6.2',
+}
 
 function emit(job: JobRecord, m: JobMessage) {
   if (m.type === 'log') job.logs.push(m.line)
@@ -224,107 +338,63 @@ function startStep(job: JobRecord) {
   emit(job, { type: 'log', line: `[${String(job.step + 1).padStart(2, '0')}/${job.total}] ${s.name} → ${command}` })
 }
 
-function repoOf(job: JobRecord) {
+function finishJob(job: JobRecord) {
   let repo = repos.find((r) => r.name === job.name)
   if (!repo) {
-    repo = { id: `r${repos.length + 1}`, name: job.name, url: job.url, branch: job.branch, files: 0, status: 'analizando', error: null, reports: [], history: [], content: {}, jobId: job.id }
+    repo = { id: `r${repos.length + 1}`, name: job.name, url: job.url, branch: job.branch, files: 20, status: 'listo', error: null, history: [], reports: [], content: { ...FILES }, jobId: null }
     repos.push(repo)
     configs[repo.id] = structuredClone(configs.r1)
   }
-  job.repo_id = repo.id
-  return repo
-}
-
-function fail(job: JobRecord, error: NonNullable<Job['error']>, lines: string[]) {
-  stop(job)
-  job.status = 'error'
-  job.error = error
-  lines.forEach((line) => emit(job, { type: 'log', line }))
-  emit(job, { type: 'error', step: job.step, ...error })
-  const repo = repoOf(job)
-  repo.status = 'error'
-  repo.error = error.title
-  repo.jobId = null
-}
-
-function finishJob(job: JobRecord) {
-  const repo = repoOf(job)
-  const num = (repo.reports.at(-1)?.num ?? 0) + 1
-  const files = PY(FILES)
-  const prev = repo.reports.at(-1)?.cat ?? { seg: 66, test: 78, prac: 70 }
+  const last = latestReport(repo)
+  const num = (last?.num ?? 0) + 1
   const report: ReportRecord = {
-    id: `${repo.id}-${num}`, num, branch: job.branch, commit: job.commit, created_at: new Date().toISOString(), duration_s: 174,
-    cat: { seg: clamp(prev.seg + 3), test: clamp(prev.test + 1), prac: clamp(prev.prac + 2) },
-    findings: FINDINGS.filter((f) => f.id !== 1).map((f) => f.id),
+    id: `${repo.id}-${num}`, num, repo_id: repo.id, branch: job.branch, commit: Math.random().toString(16).slice(2, 9),
+    created_at: new Date().toISOString(), duration_s: 168,
+    cat: last ? { ...last.cat } : { seg: 71, test: 77, prac: 80 },
+    findings: last ? last.findings.filter((f) => !last.resolved.has(f.id)) : FINDINGS.filter((f) => f.sev !== 'baja'),
+    resolved: new Set(), coverage: COVERAGE, complexity: COMPLEXITY,
+    summary: last?.summary ?? { coverage_total: 74, tests_failed: 1, avg_complexity: 5.4 },
   }
   repo.reports.push(report)
-  repo.content = { ...FILES }
-  repo.files = files
   repo.status = 'listo'
   repo.error = null
   repo.branch = job.branch
   repo.jobId = null
   job.status = 'done'
+  job.repo_id = repo.id
   job.report_id = report.id
-  const score = scoresOf(repo.id, report.cat).global
   emit(job, { type: 'log', line: `Análisis #${num} completado.` })
-  emit(job, { type: 'done', repo_id: repo.id, report_id: report.id, num, score })
-}
-
-const SUMMARY: Record<number, (j: JobRecord) => string[]> = {
-  0: (j) => [`  commit ${j.commit} · ${PY(FILES)} archivos .py · 1.8 s`, `  lenguajes: Python ${PY(FILES)} · Markdown 1`],
-  1: () => ['  entorno listo en el sandbox WSL · Python 3.12.7 · copiados 11 archivos'],
-  2: () => ['  Installed 14 packages in 1.2s'],
-  3: () => ['  1 alta · 3 media · 1 baja'],
-  4: () => ['  1 paquete(s) vulnerable(s)'],
-  5: () => ['  139 passed, 1 failed, 3 skipped'],
-  6: () => ['  cobertura total: 78 %'],
-  7: () => ['  4 problemas (3 corregibles)'],
-  8: () => ['  complejidad media: 6.2'],
-  9: () => ['  score 74.1 (seg 68 · test 85 · prac 73)'],
+  emit(job, { type: 'done', repo_id: repo.id, report_id: report.id, num, score: scoresOf(repo.id, report.cat).global })
 }
 
 function tick(job: JobRecord) {
-  if (job.step === 0 && job.fail === 'clone') {
-    return fail(job, { title: 'La rama no existe', detail: `fatal: Remote branch ${job.branch} not found in upstream origin`, hint: 'Revisa el nombre de la rama en GitHub y vuelve a intentarlo.' }, [
-      `  ERROR: fatal: Remote branch ${job.branch} not found in upstream origin`,
-    ])
+  if (job.fail && job.step === 5) {
+    stop(job)
+    job.status = 'error'
+    job.error = { title: 'pytest no pudo importar un módulo', detail: "ModuleNotFoundError: No module named 'stripe'", hint: 'Falta stripe en requirements.txt. Agrégalo y vuelve a intentar.' }
+    emit(job, { type: 'log', line: "  ERROR: ModuleNotFoundError: No module named 'stripe'" })
+    emit(job, { type: 'log', line: '  El análisis se detuvo. Revisa requirements.txt.' })
+    emit(job, { type: 'error', step: job.step, ...job.error })
+    const repo = repos.find((r) => r.name === job.name)
+    if (repo) {
+      repo.status = 'error'
+      repo.error = 'pytest no pudo importar el módulo "stripe"'
+    }
+    return
   }
-  if (job.step === 0 && job.fail === 'python') {
-    return fail(
-      job,
-      { title: 'El repositorio no tiene código Python', detail: 'IA voy analiza proyectos Python y en este repositorio hay: JavaScript 14 · HTML 3 · CSS 2.', hint: 'Elige un repositorio con archivos .py (los notebooks .ipynb todavía no se analizan).' },
-      ['  lenguajes: JavaScript 14 · HTML 3 · CSS 2', '  ERROR: IA voy analiza proyectos Python y en este repositorio hay: JavaScript 14 · HTML 3 · CSS 2.'],
-    )
-  }
-  SUMMARY[job.step]?.(job).forEach((line) => emit(job, { type: 'log', line }))
+  const summary = STEP_SUMMARY[job.step]
+  if (summary) emit(job, { type: 'log', line: summary(job) })
   emit(job, { type: 'log', line: '  ✓ ok' })
   emit(job, { type: 'step_done', index: job.step })
   job.step++
   if (job.step >= job.total) {
     stop(job)
     finishJob(job)
-  } else {
-    startStep(job)
-    job.timer = setTimeout(() => tick(job), stepMs(job))
-  }
-}
-
-const stepMs = (job: JobRecord) => job.speed[Math.min(job.step, job.speed.length - 1)]
-
-/** Velocidad de los pasos: `localStorage['iavoy-mock-speed'] = "800,60000"` (ms por paso) detiene el job en un paso para verlo. */
-function defaultSpeed(): number[] {
-  try {
-    const custom = localStorage.getItem('iavoy-mock-speed')
-    if (custom) return custom.split(',').map(Number)
-  } catch {
-    /* sin almacenamiento: velocidad normal */
-  }
-  return [1400]
+  } else startStep(job)
 }
 
 function stop(job: JobRecord) {
-  if (job.timer) clearTimeout(job.timer)
+  if (job.timer) clearInterval(job.timer)
   job.timer = null
 }
 
@@ -332,28 +402,24 @@ function run(job: JobRecord) {
   job.status = 'running'
   job.error = undefined
   startStep(job)
-  job.timer = setTimeout(() => tick(job), stepMs(job))
+  job.timer = setInterval(() => tick(job), job.speed)
 }
 
-interface JobOptions {
-  fail?: JobRecord['fail']
-  /** ms por paso (uno por paso; el último se repite) */
-  speed?: number[]
-}
-
-export function startJob(url: string, branch: string, opts: JobOptions = {}) {
-  const name = url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/\/$/, '')
+export function startJob(url: string, branch: string, opts: { fail?: boolean; speed?: number } = {}) {
+  const name = url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '')
   const job: JobRecord = {
     id: `job-${++jobSeq}`, url, name, branch, step: 0, total: JOB_STEPS.length, status: 'running',
-    logs: [`$ ia-voy analyze ${url} --branch ${branch}`],
-    fail: opts.fail ?? (branch === 'no-existe' ? 'clone' : /landing|web|js/.test(name) ? 'python' : null),
-    timer: null, listeners: new Set(), speed: opts.speed ?? defaultSpeed(), commit: Math.random().toString(16).slice(2, 9),
+    logs: [`$ ia-voy analyze ${url} --branch ${branch}`], fail: opts.fail ?? /error|cli-utilidades/.test(url),
+    timer: null, listeners: new Set(), speed: opts.speed ?? 750,
   }
   jobs.set(job.id, job)
-  const repo = repoOf(job)
-  repo.status = 'analizando'
-  repo.error = null
-  repo.jobId = job.id
+  const repo = repos.find((r) => r.name === name)
+  if (repo) {
+    repo.status = 'analizando'
+    repo.error = null
+    repo.jobId = job.id
+    job.repo_id = repo.id
+  }
   run(job)
   return job.id
 }
@@ -373,12 +439,14 @@ export const jobSnapshot = (jobId: string) => publicJob(getJob(jobId))
 
 export function retryJob(jobId: string) {
   const job = getJob(jobId)
-  job.fail = null
+  job.fail = false
   emit(job, { type: 'log', line: '— Reintentando —' })
-  const repo = repoOf(job)
-  repo.status = 'analizando'
-  repo.error = null
-  repo.jobId = job.id
+  const repo = repos.find((r) => r.name === job.name)
+  if (repo) {
+    repo.status = 'analizando'
+    repo.error = null
+    repo.jobId = job.id
+  }
   run(job)
 }
 
@@ -386,10 +454,12 @@ export function cancelJob(jobId: string) {
   const job = getJob(jobId)
   stop(job)
   job.status = 'cancelled'
-  const repo = repoOf(job)
-  repo.status = repo.reports.length ? 'listo' : 'error'
-  repo.error = repo.reports.length ? null : 'Análisis cancelado'
-  repo.jobId = null
+  const repo = repos.find((r) => r.name === job.name)
+  if (repo) {
+    repo.status = repo.reports.length ? 'listo' : 'error'
+    repo.error = repo.reports.length ? null : 'Análisis cancelado'
+    repo.jobId = null
+  }
 }
 
 export function subscribe(jobId: string, listener: (m: JobMessage) => void) {
@@ -399,5 +469,5 @@ export function subscribe(jobId: string, listener: (m: JobMessage) => void) {
   return () => job.listeners.delete(listener)
 }
 
-// El repo "bot-soporte" arranca con un análisis lento en curso
-getRepo('r3').jobId = startJob('https://github.com/equipo/bot-soporte', 'main', { speed: [60_000] })
+// El repo "notebooks-ml" arranca con un análisis lento en curso
+getRepo('r4').jobId = startJob('https://github.com/equipo/notebooks-ml', 'feature/limpieza', { speed: 4000 })

@@ -32,11 +32,14 @@ from app.analyses.views import report_scores
 from app.analyses.workspace import Workspace
 from app.analysis import fake, languages, pipeline, sandbox
 from app.analysis.clone import CloneError, Cloner, clone_dir
+from app.assistant.index import index_for_job
 from app.config import Settings
 from app.db import connect, session
 from app.github.store import GithubAccountStore
 
 log = logging.getLogger(__name__)
+# "Indexando para el asistente" en fake.JOB_STEPS
+INDEX_STEP = 10
 # Cada cuánto el proceso que corre un job renueva su latido y revisa si lo cancelaron desde otro worker
 HEARTBEAT_S = 5.0
 # Sin latido por más de esto, el job se considera interrumpido
@@ -70,6 +73,7 @@ class Job:
     # Correr pytest, coverage y pip-audit en el sandbox (si SANDBOX lo permite); False = simularlos
     sandbox: bool = True
     analyzers: list[str] = field(default_factory=lambda: list(pipeline.ALL_ANALYZERS))
+    index: bool = True
     # Inicio del análisis (time.monotonic) para la duración que muestra el reporte
     started: float = field(default_factory=time.monotonic)
     step: int = 0
@@ -91,7 +95,7 @@ class Job:
 
     @property
     def options(self) -> dict:
-        return {"sandbox": self.sandbox, "analyzers": self.analyzers}
+        return {"sandbox": self.sandbox, "analyzers": self.analyzers, "index": self.index}
 
     def public(self) -> dict:
         return {
@@ -105,7 +109,7 @@ def _from_row(row: sqlite3.Row, db_path: str) -> Job:
     return Job(
         id=row["id"], user_id=row["user_id"], team_id=row["team_id"], repo_id=row["repo_id"], url=row["url"], name=row["name"],
         branch=row["branch"], seed=row["seed"], cat=json.loads(row["cat"]), db_path=db_path,
-        sandbox=opts.get("sandbox", True), analyzers=opts.get("analyzers") or list(pipeline.ALL_ANALYZERS),
+        sandbox=opts.get("sandbox", True), analyzers=opts.get("analyzers") or list(pipeline.ALL_ANALYZERS), index=opts.get("index", True),
         step=row["step"], total=row["total"], status=row["status"], logs=json.loads(row["logs"]),
         error=json.loads(row["error"]) if row["error"] else None, commit=row["commit_sha"], report_id=row["report_id"],
         done=json.loads(row["done"]) if row["done"] else None,
@@ -211,13 +215,13 @@ class JobManager:
 
     def start(
         self, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, prev_cat: dict | None,
-        sandbox: bool = True, analyzers: list[str] | None = None,
+        sandbox: bool = True, analyzers: list[str] | None = None, index: bool = True,
     ) -> Job:
         seed = random.randrange(2**31)
         job = Job(
             id=f"job-{secrets.token_hex(8)}", user_id=user_id, team_id=team_id, repo_id=repo_id, url=url, name=name, branch=branch,
             seed=seed, cat=fake.next_categories(prev_cat, random.Random(seed)), db_path=settings.database_path,
-            sandbox=sandbox, analyzers=list(analyzers or pipeline.ALL_ANALYZERS), logs=[f"$ ia-voy analyze {url} --branch {branch}"],
+            sandbox=sandbox, analyzers=list(analyzers or pipeline.ALL_ANALYZERS), index=index, logs=[f"$ ia-voy analyze {url} --branch {branch}"],
         )
         self._conn(job.db_path).execute(
             """INSERT INTO jobs (id, user_id, team_id, repo_id, url, name, branch, seed, cat, options, step, total, status, logs, heartbeat, created_at)
@@ -388,7 +392,10 @@ class JobManager:
                 return
             while job.step < job.total:
                 self._start_step(job)
-                if not pipeline.chosen(job.step, set(job.analyzers)):
+                if job.step == INDEX_STEP:
+                    # Paso 10, real: índice del asistente (no detiene el análisis si falla)
+                    summary = await asyncio.to_thread(index_for_job, settings, job.repo_id) if job.index else pipeline.OMITTED
+                elif not pipeline.chosen(job.step, set(job.analyzers)):
                     await asyncio.sleep(settings.job_step_seconds)
                     summary = pipeline.OMITTED
                 else:

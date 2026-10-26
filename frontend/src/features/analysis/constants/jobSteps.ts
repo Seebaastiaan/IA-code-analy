@@ -1,7 +1,7 @@
 import type { Category } from '@/shared/types/common'
 import type { AnalyzerId } from '../types'
 
-/** Los 10 pasos del análisis en el Sprint 6 (mismo orden que backend/app/analysis/fake.py). El backend envía el nombre y el comando real por WebSocket. */
+/** Los 11 pasos del análisis. El backend envía el nombre y el comando real por WebSocket. */
 export const JOB_STEPS: { name: string; command: string }[] = [
   { name: 'Clonando repositorio', command: 'git clone --depth 1 --branch {branch} {url}' },
   { name: 'Creando entorno aislado', command: 'uv venv .venv  (sandbox)' },
@@ -13,10 +13,8 @@ export const JOB_STEPS: { name: string; command: string }[] = [
   { name: 'Ruff', command: 'ruff check . --output-format json' },
   { name: 'Radon', command: 'radon cc . -j && radon mi . -j' },
   { name: 'Calculando score', command: 'agregación ponderada (.ia_voy.toml)' },
+  { name: 'Indexando para el asistente', command: 'ast → embeddings (Gemini) → SQLite' },
 ]
-
-/** Lo que llega en los siguientes sprints (se muestra deshabilitado en la lista de pasos). */
-export const NEXT_STEPS: { name: string; sprint: number }[] = [{ name: 'Indexando para el asistente', sprint: 7 }]
 
 export const ANALYZERS: Record<Category, { id: AnalyzerId; label: string }[]> = {
   seg: [
@@ -39,5 +37,5 @@ export const WHAT_HAPPENS: [string, string][] = [
   ['Entorno', 'Se instalan dependencias aisladas'],
   ['Análisis', 'Seis herramientas en paralelo'],
   ['Score', 'Promedio ponderado por categoría'],
-  ['Tablero', 'El score y su tendencia quedan en el tablero'],
+  ['Reporte', 'Listo para revisar y compartir'],
 ]

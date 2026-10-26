@@ -1,11 +1,15 @@
 import { delay, http, HttpResponse, ws, type HttpResponseResolver, type PathParams } from 'msw'
 import type { AnalyzeRequest } from '@/features/analysis/types'
+import type { ChatRequest } from '@/features/assistant/types'
 import type { GithubCallbackRequest } from '@/features/auth/types'
+import type { SaveFileRequest } from '@/features/editor/types'
+import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
 import * as team from '../team'
+import { answer } from '../fixtures/chat'
 import { languageOf } from '../fixtures/code'
 import { health } from '../fixtures/health'
 import { demoUser } from '../fixtures/user'
@@ -45,14 +49,14 @@ export const handlers = [
   http.get(EP.auth.me, () => json(demoUser)),
   http.get(EP.health, () => json(health)),
 
-  // ─── Tablero y repositorios ───
+  // ─── Tablero y repos ───
   http.get(EP.dashboard, route(({ request }) => json(db.dashboard(param(request, 'repo'))))),
   http.get(EP.repos.list, route(() => json(db.listRepos()))),
   http.post(EP.repos.analyze(':repoId'), route(({ params }) => json({ job_id: db.reanalyze(params.repoId as string) }))),
   http.get(EP.repos.tree(':repoId'), route(({ params }) => json(db.tree(params.repoId as string)))),
-  http.get(EP.file, route(({ request }) => {
-    const path = param(request, 'path') ?? ''
-    return json({ path, language: languageOf(path), content: db.getFile(param(request, 'repo') ?? '', path) })
+  http.get(EP.repos.index(':repoId'), route(({ params }) => {
+    const repo = db.getRepo(params.repoId as string)
+    return json({ status: 'ready', py_files: repo.files, chunks: repo.files * 13, readme: true, report_num: repo.reports.at(-1)?.num ?? null, model: 'Gemini 2.5 Flash', fallback: 'Sin respaldo' })
   })),
 
   // ─── GitHub ───
@@ -66,7 +70,7 @@ export const handlers = [
   // ─── Análisis ───
   http.post(EP.analyze, route(async ({ request }) => {
     const body = (await request.json()) as AnalyzeRequest
-    if (!/^https:\/\/(www\.)?github\.com\/[^/]+\/[^/]+/.test(body.url)) return fail(422, 'invalid_url', 'Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)')
+    if (!/^https?:\/\/.+\/.+/.test(body.url)) return fail(422, 'invalid_url', 'La URL del repositorio no es válida')
     return json({ job_id: db.startJob(body.url, body.branch || 'main') })
   }, 400)),
   http.get(EP.jobs.get(':jobId'), route(({ params }) => json(db.jobSnapshot(params.jobId as string)))),
@@ -86,6 +90,50 @@ export const handlers = [
       client.close(4404, 'Job no encontrado')
     }
   }),
+
+  // ─── Reporte ───
+  http.get(EP.report.get(':reportId'), route(({ request, params }) => {
+    const repo = param(request, 'repo') ?? (params.reportId as string).split('-')[0]
+    return json(db.reportView(repo, params.reportId as string))
+  })),
+  // ─── Editor ───
+  http.get(EP.file, route(({ request }) => {
+    const path = param(request, 'path') ?? ''
+    return json({ path, language: languageOf(path), content: db.getFile(param(request, 'repo') ?? '', path) })
+  })),
+  http.put(EP.file, route(async ({ request }) => {
+    const body = (await request.json()) as SaveFileRequest
+    return json(db.saveFile(body.repo_id, body.path, body.content))
+  }, 1200)),
+  http.post(EP.fix, route(async ({ request }) => {
+    const body = (await request.json()) as FixRequest
+    return json({ patches: db.fixPatches(body.finding_ids) })
+  })),
+
+  // ─── Asistente ───
+  http.post(EP.chat, route(async ({ request }) => {
+    const body = (await request.json()) as ChatRequest
+    return json(answer(body.message))
+  }, 1100)),
+  // Igual que el backend: Server-Sent Events con trozos de la respuesta y al final la respuesta completa
+  http.post(EP.chatStream, route(async ({ request }) => {
+    const body = (await request.json()) as ChatRequest
+    const res = answer(body.message)
+    const words = res.content.split(/(?<= )/)
+    const encoder = new TextEncoder()
+    const sse = (event: string, data: unknown) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    const stream = new ReadableStream({
+      async start(controller) {
+        for (let i = 0; i < words.length; i += 4) {
+          controller.enqueue(sse('delta', { text: words.slice(i, i + 4).join('') }))
+          await delay(60)
+        }
+        controller.enqueue(sse('done', res))
+        controller.close()
+      },
+    })
+    return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream' } })
+  }, 700)),
 
   // ─── Configuración ───
   http.get(EP.config(':projectId'), route(({ params }) => json(db.getConfig(params.projectId as string)))),

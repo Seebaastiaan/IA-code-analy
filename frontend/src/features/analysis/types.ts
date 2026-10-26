@@ -39,6 +39,7 @@ export interface AnalyzeRequest {
   branch: string
   analyzers: AnalyzerId[]
   sandbox: boolean
+  index: boolean
 }
 
 export interface AnalyzeResponse {

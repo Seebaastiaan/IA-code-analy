@@ -1,10 +1,9 @@
-import { useEffect } from 'react'
 import { useParams, useSearchParams } from 'react-router'
+import { useFile } from '@/features/editor/api/file.api'
 import { ApiError } from '@/shared/api/errors'
 import { Card, CodeSnippet, EmptyState, ErrorState, Icon, PageHeader, PageLoader } from '@/shared/ui'
-import { useFile, useRepo, useRepoTree } from '../api/repos.api'
+import { useRepo, useRepoTree } from '../api/repos.api'
 import { FolderTree } from '../components/FolderTree'
-import { useSelectedRepo } from '../store/selectedRepo.store'
 
 // Más líneas que esto vuelven lenta la página sin aportar al recorrido del código
 const MAX_LINES = 3000
@@ -16,13 +15,7 @@ export default function RepoFilesPage() {
   const { data: repo } = useRepo(repoId)
   const tree = useRepoTree(repoId)
 
-  const selectRepo = useSelectedRepo((s) => s.select)
-  // Abrir los archivos de un repo lo vuelve el repo activo (Configuración del sidebar)
-  useEffect(() => {
-    if (repoId) selectRepo(repoId)
-  }, [repoId, selectRepo])
-
-  const path = params.get('file') ?? tree.data?.find((e) => e.path.endsWith('.py'))?.path ?? tree.data?.[0]?.path ?? null
+  const path = params.get('file') ?? tree.data?.[0]?.path ?? null
   const file = useFile(repoId, path)
   const select = (p: string) => setParams({ file: p })
 

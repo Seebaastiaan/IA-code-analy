@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Carpeta de los repos clonados. Vacía = fuera del proyecto (ver app.analysis.clone.clones_root):
     # dentro de OneDrive/Dropbox la sincronización bloquea los archivos recién clonados.
     clones_path: str = ""
-    # Segundos de la animación por paso del análisis simulado (10 pasos)
+    # Pausa visual entre los pasos del análisis (11 pasos) para seguirlos en la terminal en vivo
     job_step_seconds: float = 0.9
     # Dónde corren pytest, coverage y pip-audit (app.analysis.sandbox): off = simulados, wsl o docker
     sandbox: Literal["off", "wsl", "docker"] = "off"
@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     sandbox_docker_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
     # Límite de todo el sandbox (instalar dependencias + pruebas) por análisis
     sandbox_timeout_s: int = 1200
+    # Asistente IA: Gemini (respuestas y embeddings). El análisis no lo usa (docs/adr/ADR-001)
+    gemini_api_key: str = ""
+    # gemini-2.5-flash ya no está disponible para claves nuevas
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_embedding_model: str = "gemini-embedding-001"
 
     @property
     def github_redirect_uri(self) -> str:

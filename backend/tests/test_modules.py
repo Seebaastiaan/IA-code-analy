@@ -1,8 +1,10 @@
-"""Tablero, reporte y archivos del clon sobre el repo de demostración (Ruff, Bandit y Radon reales, sin red)."""
+"""Tablero, reporte y editor sobre el repo de demostración (Ruff, Bandit y Radon reales, sin red)."""
 
+from pathlib import Path
 
 import pytest
 
+from app.analyses.analyzers import diff_patches
 from app.seed import seed
 from tests.conftest import login
 
@@ -92,7 +94,16 @@ def test_reporte_inexistente(client, repo_id):
     assert client.get("/api/report/latest").status_code == 422
 
 
-# ─── Archivos del clon ───
+# ─── Editor ───
+
+
+def test_arbol(client, repo_id):
+    tree = client.get(f"/api/repos/{repo_id}/tree").json()
+    by_path = {e["path"]: e for e in tree}
+    assert by_path["api.py"]["worst"] == "alta" and by_path["api.py"]["dir"] == ""
+    assert by_path["pagos/procesador.py"]["dir"] == "pagos"
+    assert by_path["tests/test_procesador.py"]["open_findings"] >= 1
+    assert [e["dir"] for e in tree] == sorted(e["dir"] for e in tree)
 
 
 def test_leer_archivo(client, repo_id):
@@ -109,3 +120,79 @@ def test_rutas_no_validas(client, repo_id, path):
 
 def test_archivo_inexistente(client, repo_id):
     assert client.get("/api/file", params={"repo": repo_id, "path": "nada.py"}).status_code == 404
+
+
+def apply_patches(content: str, patches: list[dict]) -> str:
+    """Igual que frontend/src/features/editor/utils/patches.ts (sin la búsqueda aproximada)."""
+    lines = content.split("\n")
+    for p in sorted(patches, key=lambda p: -p["line"]):
+        i = p["line"] - 1
+        assert lines[i] == p["original"]
+        lines[i : i + 1] = [] if p["text"] is None else p["text"].split("\n")
+    return "\n".join(lines)
+
+
+def test_correccion_automatica(client, repo_id):
+    f = finding(client, repo_id, rule="F401", file="api.py")
+    assert f["fix"] is True
+    patches = client.post("/api/fix", json={"repo_id": repo_id, "finding_ids": [f["id"]]}).json()["patches"]
+    original = client.get("/api/file", params={"repo": repo_id, "path": "api.py"}).json()["content"]
+    fixed = apply_patches(original, patches)
+    assert "import json" not in fixed and "import sqlite3" in fixed
+
+
+def test_correccion_no_disponible(client, repo_id):
+    f = finding(client, repo_id, rule="B602")
+    res = client.post("/api/fix", json={"repo_id": repo_id, "finding_ids": [f["id"]]})
+    assert res.status_code == 422 and res.json()["error"]["code"] == "fix_unavailable"
+
+
+def test_guardar_resuelve_y_respalda(client, repo_id, settings):
+    f = finding(client, repo_id, rule="B602")
+    original = client.get("/api/file", params={"repo": repo_id, "path": "api.py"}).json()["content"]
+    content = original.replace('subprocess.call("cp pagos.db " + destino, shell=True)', 'subprocess.call(["cp", "pagos.db", destino])')
+    res = client.put("/api/file", json={"repo_id": repo_id, "path": "api.py", "content": content})
+    assert res.status_code == 200
+    body = res.json()
+    assert f["id"] in body["resolved_ids"]
+    assert body["score_after"] > body["score_before"]
+    assert finding(client, repo_id, id=f["id"])["status"] == "resolved"
+    assert client.get("/api/file", params={"repo": repo_id, "path": "api.py"}).json()["content"] == content
+    backups = list((Path(settings.database_path).parent / "backups" / repo_id).rglob("api.py"))
+    assert len(backups) == 1 and backups[0].read_bytes().decode("utf-8") == original
+
+
+def test_guardar_mueve_hallazgos_y_detecta_nuevos(client, repo_id):
+    f = finding(client, repo_id, rule="B602")
+    original = client.get("/api/file", params={"repo": repo_id, "path": "api.py"}).json()["content"]
+    content = "# comentario nuevo\n" + original + "\nresultado = eval(input())\n"
+    body = client.put("/api/file", json={"repo_id": repo_id, "path": "api.py", "content": content}).json()
+    assert f["id"] not in body["resolved_ids"]
+    assert body["new_ids"] and body["score_after"] < body["score_before"]
+    moved = finding(client, repo_id, id=f["id"])
+    assert moved["line"] == f["line"] + 1 and moved["status"] == "open"
+    assert "B307" in {x["rule"] for x in client.get("/api/report/latest", params={"repo": repo_id}).json()["findings"]}
+
+
+def test_guardar_ruta_no_valida(client, repo_id):
+    res = client.put("/api/file", json={"repo_id": repo_id, "path": "../fuera.py", "content": "x"})
+    assert res.status_code == 400
+
+
+# ─── Parches ───
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("a\nb\nc", "a\nc"),
+        ("a\nb\nc", "a\nB\nc"),
+        ("a\nb\nc", "a\nb1\nb2\nc"),
+        ("a\nb\nc", "x\na\nb\nc"),
+        ("a\nb\nc", "a\nb\nc\nd"),
+        ("a\nb\nc\nd", "a\nX\nY\nd\ne"),
+        ("import os\nimport sys\n\nx = 1\n", "import sys\n\nx = 1\n"),
+    ],
+)
+def test_diff_patches_reconstruye(old, new):
+    assert apply_patches(old, diff_patches("f.py", old, new)) == new

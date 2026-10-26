@@ -1,4 +1,6 @@
+import { Link } from 'react-router'
 import { CAT } from '@/shared/constants/categories'
+import { paths } from '@/shared/constants/paths'
 import { TONE, tone } from '@/shared/constants/tones'
 import type { Category, Scores } from '@/shared/types/common'
 import { Card, Chip, DeltaBadge, Icon, ProgressBar, ScoreRing, cardClass } from '@/shared/ui'
@@ -28,10 +30,10 @@ export function GlobalScoreCard({ name, scores, prev, threshold }: { name: strin
   )
 }
 
-/** KPI por categoría (el reporte filtrado por categoría llega en el Sprint 7). */
-export function CategoryKpiCard({ cat, value, prev }: { cat: Category; value: number; prev: number | null }) {
+/** KPI por categoría; clic → reporte filtrado por esa categoría. */
+export function CategoryKpiCard({ cat, repoId, reportId, value, prev }: { cat: Category; repoId: string; reportId: string; value: number; prev: number | null }) {
   return (
-    <div className={cn(cardClass, 'p-5 text-left')}>
+    <Link to={paths.report(repoId, reportId, { cat })} className={cn(cardClass, 'p-5 text-left hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md transition block')}>
       <div className="flex items-center gap-3">
         <span className={cn('w-10 h-10 rounded-xl grid place-items-center', CAT[cat].soft)}>
           <Icon name={CAT[cat].icon} />
@@ -51,6 +53,6 @@ export function CategoryKpiCard({ cat, value, prev }: { cat: Category; value: nu
       <div className="mt-3">
         <ProgressBar value={value} className={CAT[cat].bar} />
       </div>
-    </div>
+    </Link>
   )
 }

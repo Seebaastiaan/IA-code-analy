@@ -31,7 +31,7 @@ export function reduceJob(job: Job | null, m: JobMessage): Job | null {
 function notify(job: Job, m: JobMessage) {
   if (m.type === 'done') {
     void invalidateAnalysis(queryClient)
-    toast(`Análisis #${m.num} completado · score ${Math.round(m.score)}`, { action: { label: 'Ver tablero', onClick: () => navigateTo(paths.dashboard()) } })
+    toast('Análisis completado', { action: { label: 'Ver reporte', onClick: () => navigateTo(paths.report(m.repo_id, m.report_id)) } })
   } else if (m.type === 'error') {
     void invalidateAnalysis(queryClient)
     toast(`El análisis falló en ${JOB_STEPS[m.step]?.name ?? 'un paso'}`, { tone: 'err', action: { label: 'Ver detalle', onClick: () => navigateTo(paths.job(job.id)) } })

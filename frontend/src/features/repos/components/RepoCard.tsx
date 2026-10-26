@@ -72,6 +72,11 @@ export function RepoCard({ repo }: { repo: Repo }) {
               <span className="hidden sm:inline">Archivos</span>
             </Link>
           )}
+          {repo.last_report_id && (
+            <Link to={paths.report(repo.id, repo.last_report_id)} className={buttonClass('ghost', 'text-brand-600 dark:text-brand-300')}>
+              Reporte <Icon name="chevron" className="w-4 h-4" />
+            </Link>
+          )}
         </div>
       </div>
     </Card>

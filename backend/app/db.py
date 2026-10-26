@@ -143,10 +143,32 @@ CREATE TABLE IF NOT EXISTS findings (
 );
 CREATE INDEX IF NOT EXISTS findings_report ON findings (report_id, file);
 
+-- Índice del asistente (app.assistant): fragmentos del código con su embedding (float32, normalizado)
+CREATE TABLE IF NOT EXISTS code_chunks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id     TEXT NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    file        TEXT NOT NULL,
+    start_line  INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    hash        TEXT NOT NULL,
+    embedding   BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS code_chunks_repo ON code_chunks (repo_id, hash);
+
 -- `state` de OAuth pendientes (app.github.states): un solo uso, vencen en 10 minutos
 CREATE TABLE IF NOT EXISTS oauth_states (
     state       TEXT PRIMARY KEY,
     expires_at  REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS repo_index (
+    repo_id     TEXT PRIMARY KEY REFERENCES repos (id) ON DELETE CASCADE,
+    files       INTEGER NOT NULL,
+    py_files    INTEGER NOT NULL,
+    readme      INTEGER NOT NULL,
+    chunks      INTEGER NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 """
 
