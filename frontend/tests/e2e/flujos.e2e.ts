@@ -114,9 +114,20 @@ test('4 · preguntar a la IA y abrir la fuente en el editor', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'Hallazgos en este archivo' })).toBeVisible({ timeout: EDITOR_TIMEOUT })
 })
 
-test('5 · seguir la evolución: tablero y configuración', async ({ page }) => {
+test('5 · seguir la evolución: tablero, comparativa y configuración', async ({ page }) => {
   await page.goto('/dashboard')
   await expect(page.getByRole('img', { name: 'Tendencia de puntuación' })).toBeVisible()
+  await page.getByRole('link', { name: 'Comparar' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Comparativa' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Nuevos en B' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Resueltos en B' })).toBeVisible()
+  // La fecha de la etiqueta depende del día en que corre la prueba: se elige por el número del análisis
+  const base = page.getByLabel('Base (A)')
+  const option = base.locator('option', { hasText: /^#120 · / })
+  await base.selectOption((await option.getAttribute('value'))!)
+  await expect(base).toHaveValue(/-120$/)
+  await expect(page.getByRole('heading', { name: 'Nuevos en B' })).toBeVisible()
 
   await page.getByRole('navigation').getByRole('link', { name: 'Configuración' }).click()
   await expect(page.getByRole('heading', { name: 'Configuración', level: 1 })).toBeVisible()

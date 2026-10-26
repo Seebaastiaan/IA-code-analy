@@ -2,6 +2,7 @@ import { delay, http, HttpResponse, ws, type HttpResponseResolver, type PathPara
 import type { AnalyzeRequest } from '@/features/analysis/types'
 import type { ChatRequest } from '@/features/assistant/types'
 import type { GithubCallbackRequest } from '@/features/auth/types'
+import type { DiffRequest } from '@/features/compare/types'
 import type { SaveFileRequest } from '@/features/editor/types'
 import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
@@ -55,9 +56,10 @@ export const handlers = [
   http.get(EP.repos.list, route(() => json(db.listRepos()))),
   http.post(EP.repos.analyze(':repoId'), route(({ params }) => json({ job_id: db.reanalyze(params.repoId as string) }))),
   http.get(EP.repos.tree(':repoId'), route(({ params }) => json(db.tree(params.repoId as string)))),
+  http.get(EP.repos.analyses(':repoId'), route(({ params }) => json(db.analyses(params.repoId as string)))),
   http.get(EP.repos.index(':repoId'), route(({ params }) => {
     const repo = db.getRepo(params.repoId as string)
-    return json({ status: 'ready', py_files: repo.files, chunks: repo.files * 13, readme: true, report_num: repo.reports.at(-1)?.num ?? null, model: 'Gemini 2.5 Flash', fallback: 'Sin respaldo' })
+    return json({ status: 'ready', py_files: repo.files, chunks: repo.files * 13, readme: true, report_num: repo.reports.at(-1)?.num ?? null, model: 'Gemini 2.5 Flash', fallback: 'Groq · Llama 3.3' })
   })),
 
   // ─── GitHub ───
@@ -153,6 +155,12 @@ export const handlers = [
     })
     return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream' } })
   }, 700)),
+
+  // ─── Comparativa ───
+  http.post(EP.diff, route(async ({ request }) => {
+    const body = (await request.json()) as DiffRequest
+    return json(db.diff(body.base, body.target))
+  })),
 
   // ─── Configuración ───
   http.get(EP.config(':projectId'), route(({ params }) => json(db.getConfig(params.projectId as string)))),

@@ -321,6 +321,29 @@ export function saveConfig(repoId: string, cfg: ProjectConfig) {
   return cfg
 }
 
+// ───────────────────────── Comparativa ─────────────────────────
+
+export function analyses(repoId: string) {
+  const repo = getRepo(repoId)
+  const fmt = (d: string) => new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short' }).format(new Date(d))
+  return [...repo.reports].reverse().map((r) => ({ id: r.id, label: `#${r.num} · ${fmt(r.created_at)} · ${r.branch}` }))
+}
+
+export function diff(base: string, target: string) {
+  const repoId = base.split('-')[0]
+  const a = findReport(repoId, base)
+  const b = findReport(repoId, target)
+  const open = (rep: ReportRecord) => rep.findings.filter((f) => !rep.resolved.has(f.id))
+  const aIds = new Set(open(a.report).map((f) => f.id))
+  const bIds = new Set(open(b.report).map((f) => f.id))
+  return {
+    a: scoresOf(repoId, a.report.cat),
+    b: scoresOf(repoId, b.report.cat),
+    new: open(b.report).filter((f) => !aIds.has(f.id)).map((f) => findingView(b.report, f, false)),
+    resolved: open(a.report).filter((f) => !bIds.has(f.id)).map((f) => ({ ...findingView(a.report, f, false), status: 'resolved' as const })),
+  }
+}
+
 // ───────────────────────── Compartir ─────────────────────────
 
 export function createShare(reportId: string, password: string | null, days: number, include_code: boolean) {

@@ -34,6 +34,7 @@ export const NAV: NavGroup[] = [
       { id: 'report', label: 'Reporte', icon: 'doc', to: scoped((id) => paths.report(id)), match: (p) => /^\/repos\/[^/]+\/reports\//.test(p) },
       { id: 'editor', label: 'Editor', icon: 'code', to: scoped((id) => paths.editor(id)) },
       { id: 'assistant', label: 'Asistente IA', icon: 'chat', to: scoped(paths.assistant) },
+      { id: 'compare', label: 'Comparativa', icon: 'compare', to: scoped(paths.compare) },
     ],
   },
   {

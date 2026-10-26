@@ -181,6 +181,7 @@ export default function AssistantPage() {
               </div>
             ))}
           </dl>
+          {index && <p className="text-xs text-slate-400 mt-3">Respaldo: {index.fallback} si {index.model} no está disponible.</p>}
         </Card>
         <Card className="p-5">
           <h2 className="font-semibold text-sm mb-3">Prueba preguntar</h2>

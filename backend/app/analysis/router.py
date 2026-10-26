@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.analysis.jobs import Job, JobManager, jobs, now_iso
 from app.analysis.pipeline import ALL_ANALYZERS, CATEGORY_ANALYZERS
-from app.assistant.llm import model_label
+from app.assistant.llm import GROQ_LABEL, model_label
 from app.auth import current_user_id
 from app.config import Settings, get_settings
 from app.db import connect, get_db
@@ -203,6 +203,17 @@ def sandbox_service(settings: Settings) -> dict:
     return {"id": "sandbox", "name": name, "role": "Ejecuta pytest, coverage y pip-audit", "status": "ok", "label": "Activo"}
 
 
+def fallback_service(settings: Settings) -> dict:
+    """Primer respaldo real del asistente: Groq si hay clave; si no, el siguiente modelo de Gemini."""
+    if settings.groq_api_key:
+        return {"id": "llm_fallback", "name": GROQ_LABEL, "role": "Respaldo ante 429/503", "status": "ok", "label": "Groq en espera"}
+    model = next((m.strip() for m in settings.gemini_fallback_models.split(",") if m.strip()), "")
+    if settings.gemini_api_key and model:
+        short = model_label(model).removeprefix("Gemini ")
+        return {"id": "llm_fallback", "name": model_label(model), "role": "Respaldo ante 429/503", "status": "ok", "label": f"{short} en espera"}
+    return {"id": "llm_fallback", "name": GROQ_LABEL, "role": "Respaldo ante 429/503", "status": "standby", "label": "Sin respaldo"}
+
+
 @router.get("/api/health")
 def health(settings: Config) -> dict:
     def configured(key: str) -> dict:
@@ -212,6 +223,7 @@ def health(settings: Config) -> dict:
         "tunnel_host": None,
         "services": [
             {"id": "llm", "name": model_label(settings.gemini_model), "role": "Modelo principal", **configured(settings.gemini_api_key)},
+            fallback_service(settings),
             {"id": "tunnel", "name": "Cloudflare Tunnel", "role": "Acceso público", "status": "down", "label": "Inactivo"},
             sandbox_service(settings),
         ],

@@ -1,12 +1,15 @@
 """
-Cliente de Gemini por REST (httpx, sin SDK): respuestas en JSON con esquema y embeddings
-(`gemini-embedding-001`). Con `on_delta`, la respuesta llega por streaming (`streamGenerateContent`, SSE) y se
-va entregando el texto del campo `answer`.
+Clientes de los modelos por REST (httpx, sin SDK):
+- Gemini: respuestas en JSON con esquema y embeddings (`gemini-embedding-001`). Con `on_delta`, la respuesta
+  llega por streaming (`streamGenerateContent`, SSE) y se va entregando el texto del campo `answer`.
+- Respaldo cuando Gemini responde 429 o 503 (alta demanda): los modelos de GEMINI_FALLBACK_MODELS y
+  después Groq (Llama 3.3), si hay GROQ_API_KEY. Groq no tiene embeddings.
 
-La clave viaja en la cabecera `x-goog-api-key`, nunca en la URL.
+Las claves viajan en cabeceras (`x-goog-api-key`, `Authorization`), nunca en la URL.
 """
 
 import json
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -17,12 +20,17 @@ import numpy as np
 
 from app.config import Settings
 
+log = logging.getLogger(__name__)
+
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 EMBED_DIM = 768
 EMBED_BATCH = 100
 TIMEOUT_S = 60
 # Un 503 (alta demanda) suele pasar en segundos: se reintenta una vez el mismo modelo
 BUSY_RETRY_WAIT_S = 1.5
+
+GROQ_LABEL = "Groq · Llama 3.3"
 
 
 def model_label(model: str) -> str:
@@ -31,7 +39,7 @@ def model_label(model: str) -> str:
 
 
 class LlmError(Exception):
-    """Fallo del proveedor. `kind`: "quota" (429) o "busy" (503)."""
+    """Fallo del proveedor. `kind`: "quota" (429) o "busy" (503); en ambos vale la pena usar el respaldo."""
 
     def __init__(self, message: str, kind: str | None = None):
         super().__init__(message)
@@ -115,6 +123,15 @@ class LLM:
         self.settings = settings
         self.http = http or httpx.Client(timeout=TIMEOUT_S)
 
+    def chain(self) -> list[tuple[str, str]]:
+        """Modelos en orden de preferencia: (proveedor, modelo)."""
+        s = self.settings
+        gemini = [s.gemini_model] + [m.strip() for m in s.gemini_fallback_models.split(",") if m.strip()]
+        models = [("gemini", m) for m in dict.fromkeys(gemini)]
+        if s.groq_api_key:
+            models.append(("groq", s.groq_model))
+        return models
+
     def _post(self, url: str, headers: dict, body: dict, provider: str) -> httpx.Response:
         """POST con un reintento si el modelo está saturado (503)."""
         for attempt in (1, 2):
@@ -150,10 +167,11 @@ class LLM:
 
     def answer(self, system: str, turns: list[Turn], schema: dict, on_delta: Callable[[str], None] | None = None) -> Answer:
         """
-        Respuesta JSON de GEMINI_MODEL. Con `on_delta`, Gemini responde por streaming y cada trozo nuevo del campo
-        "answer" se entrega al llegar.
+        Respuesta JSON del primer modelo de `chain()` que responda; solo se pasa al siguiente ante 429/503.
+        Con `on_delta`, Gemini responde por streaming y cada trozo nuevo del campo "answer" se entrega al llegar
+        (Groq no: entrega la respuesta completa de una vez).
         """
-        model = self.settings.gemini_model
+        chain = self.chain()
         sent = [0]  # caracteres de "answer" ya entregados
 
         def emit(answer: str) -> None:
@@ -161,9 +179,21 @@ class LLM:
                 on_delta(answer[sent[0] :])
                 sent[0] = len(answer)
 
-        if on_delta:
-            return Answer(self._gemini_stream(model, system, turns, schema, emit), model_label(model))
-        return Answer(self._gemini(model, system, turns, schema), model_label(model))
+        for i, (provider, model) in enumerate(chain):
+            try:
+                if provider == "groq":
+                    data = self._groq(system, turns, schema)
+                    emit(str(data.get("answer") or ""))
+                    return Answer(data, GROQ_LABEL)
+                if on_delta:
+                    return Answer(self._gemini_stream(model, system, turns, schema, emit), model_label(model))
+                return Answer(self._gemini(model, system, turns, schema), model_label(model))
+            except LlmError as exc:
+                # Si ya se mostró parte de una respuesta, cambiar de modelo la mezclaría con otra
+                if not exc.rate_limited or i == len(chain) - 1 or sent[0]:
+                    raise
+                log.warning("%s no disponible (%s); se usa el respaldo", model, exc)
+        raise LlmError("No hay modelos configurados")
 
     def _gemini_body(self, system: str, turns: list[Turn], schema: dict) -> dict:
         return {
@@ -219,6 +249,14 @@ class LLM:
                 raise LlmError(f"Gemini no respondió ({blocked or 'sin respuesta'})")
             return _parse(text, "Gemini")
         raise AssertionError("inalcanzable")
+
+    def _groq(self, system: str, turns: list[Turn], schema: dict) -> dict:
+        # Groq no acepta esquema: el modo JSON + la descripción del esquema en el sistema
+        messages = [{"role": "system", "content": f"{system}\n\nResponde SOLO con un objeto JSON con este esquema:\n{json.dumps(schema)}"}]
+        messages += [{"role": "assistant" if t.role == "model" else "user", "content": t.text} for t in turns]
+        body = {"model": self.settings.groq_model, "messages": messages, "temperature": 0.2, "response_format": {"type": "json_object"}}
+        res = self._post(GROQ_URL, {"Authorization": f"Bearer {self.settings.groq_api_key}"}, body, "Groq")
+        return _parse(res.json()["choices"][0]["message"]["content"], "Groq")
 
 
 def _parse(text: str, provider: str) -> dict:

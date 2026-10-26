@@ -77,13 +77,17 @@ export function ReportHeader({ report: r, cat, onCat, onShare }: ReportHeaderPro
           </div>
         </div>
         <div className="grid grid-cols-2 sm:flex gap-2">
-          <Button onClick={onShare}>
+          <Button className="col-span-2 sm:col-span-1" onClick={onShare}>
             <Icon name="share" className="w-4 h-4" />
             Compartir
           </Button>
           <Link to={paths.assistant(r.repo_id)} className={buttonClass('secondary')}>
             <Icon name="chat" className="w-4 h-4" />
             Preguntar
+          </Link>
+          <Link to={paths.compare(r.repo_id)} className={buttonClass('secondary')}>
+            <Icon name="compare" className="w-4 h-4" />
+            Comparar
           </Link>
         </div>
       </div>

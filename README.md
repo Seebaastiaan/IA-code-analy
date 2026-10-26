@@ -3,15 +3,15 @@
 Analizador de calidad de código **Python** para equipos. El usuario indica un repositorio de GitHub (URL +
 rama); el backend lo clona, lo analiza y guarda el resultado en el historial del repositorio.
 
-> Estado: **Sprint 8 (17 nov)** — Compartir y exportar el reporte. Pruebas: 179 de backend · 22 unitarias del frontend · 8 e2e.
+> Estado: **Sprint 9 (24 nov)** — Comparativa, respaldo del modelo y code freeze (v1.0). Pruebas: 195 de backend · 22 unitarias del frontend · 8 e2e.
 
 ## Objetivo del sprint
 
-Compartir el reporte con personas fuera del equipo (enlace con contraseña y expiración) y exportarlo a JSON, HTML, Markdown y SARIF; medir la calidad del asistente con un set de evaluación.
+Demostrar la mejora real entre dos análisis (hallazgos nuevos y resueltos), que el asistente siga respondiendo si Gemini se satura y congelar el código en la versión 1.0.
 
-**Demo:** Compartir el reporte con contraseña → abrir el enlace sin sesión → contraseña incorrecta y luego correcta → exportar a SARIF y HTML.
+**Demo:** Analizar → corregir desde el editor → re-analizar → comparativa con nuevos y resueltos → el asistente responde con el modelo de respaldo cuando Gemini da 429.
 
-**Criterio de aceptación:** Pruebas de backend, unitarias y e2e en verde; la vista pública no muestra el código si no se permitió.
+**Criterio de aceptación:** Pruebas de backend, unitarias y e2e en verde; cero errores críticos abiertos; etiqueta v1.0.
 
 ## Lo que hace la app
 
@@ -27,27 +27,27 @@ Compartir el reporte con personas fuera del equipo (enlace con contraseña y exp
 - Reporte navegable: hallazgos con su código, cobertura y complejidad; ignorar una regla recalcula el score
 - Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones automáticas
 - Compartir el reporte con un enlace público (contraseña y expiración opcionales) y exportarlo a JSON, HTML, Markdown o SARIF
+- Comparativa entre dos análisis (nuevos y resueltos) y respaldo del asistente (modelos de Gemini y Groq)
 
 Llega en los siguientes sprints:
 
-- Comparativa entre análisis y respaldo del modelo del asistente (S9)
-- Documentación y entrega (S10)
+- Documentación, despliegue y entrega (S10)
 
 ## Tareas del sprint
 
 | # | Responsable | Equipo | Tarea | Archivos |
 |---|---|---|---|---|
-| 1 | Carlos Jara | Backend & Plataforma | Enlaces públicos del reporte | share/router.py |
-| 2 | Ana Cristina Luciano | Backend & Plataforma | Tablas de enlaces y freno a la fuerza bruta | db.py |
-| 3 | Diego Salinas | IA & Analizadores | Exportación del reporte (JSON, HTML, MD, SARIF) | reports/router.py |
-| 4 | Uriel Castorela | IA & Analizadores | Set de evaluación del asistente | docs/ia/evaluacion.md |
-| 5 | Marco Espino | IA & Analizadores | Ajustes del prompt con el set de evaluación | docs/ia/ajustes-prompt.md |
-| 6 | Dylan Martínez | Backend & Plataforma | Integración y versión del backend | main.py, pyproject.toml |
-| 7 | Luis Gabriel Manzano | QA | Pruebas de compartir y exportar | test_share.py, test_modules.py |
-| 8 | Evelyn Martínez | QA | Flujo e2e de compartir | flujos.e2e.ts |
-| 9 | Karen Peña | Front-End & UX | Modal Compartir | ShareModal, ReportHeader, ReportPage |
-| 10 | Emiliano Sánchez | Front-End & UX | Vista pública del reporte | PublicReportPage, routes |
-| 11 | Andrea Nallely Peña Osorio | Front-End & UX | Backend simulado de compartir y exportar; coordinación | mocks/db.ts, mocks/handlers |
+| 1 | Uriel Castorela | IA & Analizadores | Respaldo Gemini → Groq | llm.py, assistant/router.py, config.py, .env.example |
+| 2 | Dylan Martínez | Backend & Plataforma | Comparativa entre análisis | compare/router.py, main.py |
+| 3 | Carlos Jara | Backend & Plataforma | Estado de servicios con el respaldo del modelo | analysis/router.py |
+| 4 | Ana Cristina Luciano | Backend & Plataforma | Release v1.0 y CHANGELOG | CHANGELOG.md, pyproject.toml |
+| 5 | Marco Espino | IA & Analizadores | QA manual con backend real | docs/qa/qa-manual.md |
+| 6 | Diego Salinas | IA & Analizadores | Prueba del sandbox con Docker | docs/qa/sandbox-docker.md |
+| 7 | Luis Gabriel Manzano | QA | Pruebas de comparativa y del respaldo | test_compare.py, test_assistant.py |
+| 8 | Evelyn Martínez | QA | Batería e2e completa | flujos.e2e.ts |
+| 9 | Karen Peña | Front-End & UX | Comparar desde el reporte y respaldo en el asistente | ReportHeader, AssistantPage |
+| 10 | Emiliano Sánchez | Front-End & UX | Comparar desde el tablero y estado de servicios | DashboardPage, mocks/fixtures/health.ts |
+| 11 | Andrea Nallely Peña Osorio | Front-End & UX | Pantalla de comparativa y coordinación del sprint | ComparePage, routes, navigation, mocks |
 
 ## Comandos
 
@@ -57,7 +57,7 @@ cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
 uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 179 pruebas
+uv run pytest              # 195 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)

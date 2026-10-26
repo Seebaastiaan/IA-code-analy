@@ -17,7 +17,7 @@ from app.analyses.store import AnalysisStore
 from app.analyses.views import report_scores, visible
 from app.analyses.workspace import Workspace
 from app.assistant import index
-from app.assistant.llm import LLM, LlmError, Turn, model_label
+from app.assistant.llm import GROQ_LABEL, LLM, LlmError, Turn, model_label
 from app.config import Settings, get_settings
 from app.db import connect, get_db
 from app.errors import ApiError
@@ -315,7 +315,7 @@ def index_info(repo_id: str, store: Analyses, user_id: UserId, conn: Db, setting
         readme=bool(row["readme"]) if row else False,
         report_num=latest["num"] if latest else None,
         model=model_label(settings.gemini_model),
-        fallback="Sin respaldo",
+        fallback=GROQ_LABEL if settings.groq_api_key else model_label(settings.gemini_fallback_models.split(",")[0].strip() or settings.gemini_model),
         status=status,
         error=error,
     )

@@ -93,6 +93,10 @@ export default function DashboardPage() {
                   <h2 className="font-semibold">Tendencia</h2>
                   <p className="text-sm text-slate-500 dark:text-slate-400">Últimos {sel.history.length} análisis · toca la leyenda para ocultar series</p>
                 </div>
+                <Link to={paths.compare(sel.repo.id)} className={buttonClass('ghost')}>
+                  <Icon name="compare" className="w-4 h-4" />
+                  Comparar
+                </Link>
               </div>
               <TrendChart history={sel.history} />
             </Card>

@@ -198,7 +198,7 @@ def test_mensaje_demasiado_largo(client, repo_id, llm):
     assert ask(client, repo_id, "x" * 2001).status_code == 422
 
 
-# ─── Cliente HTTP ───
+# ─── Cliente HTTP (respaldo entre modelos) ───
 
 
 def transport(responses: dict[str, list[int]], seen: list[str]):
@@ -215,8 +215,8 @@ def transport(responses: dict[str, list[int]], seen: list[str]):
     return httpx.MockTransport(handler)
 
 
-def make_llm(settings, responses, seen):
-    s = settings.model_copy(update={"gemini_api_key": "k", "gemini_model": "m1"})
+def make_llm(settings, responses, seen, groq=""):
+    s = settings.model_copy(update={"gemini_api_key": "k", "groq_api_key": groq, "gemini_model": "m1", "gemini_fallback_models": "m2"})
     return LLM(s, httpx.Client(transport=transport(responses, seen)))
 
 
@@ -227,10 +227,17 @@ def test_503_reintenta_el_mismo_modelo(settings, monkeypatch):
     assert seen == ["m1", "m1"] and result.model == "M1"
 
 
-def test_error_no_recuperable_no_se_reintenta(settings):
+def test_respaldo_entre_modelos_y_groq(settings, monkeypatch):
+    monkeypatch.setattr(llm_mod, "BUSY_RETRY_WAIT_S", 0)
+    seen: list[str] = []
+    result = make_llm(settings, {"m1": [429], "m2": [503, 503]}, seen, groq="g").answer("s", [], {})
+    assert seen == ["m1", "m2", "m2", "groq"] and result.model == "Groq · Llama 3.3" and result.data["answer"] == "de groq"
+
+
+def test_error_no_recuperable_no_usa_respaldo(settings):
     seen: list[str] = []
     with pytest.raises(LlmError):
-        make_llm(settings, {"m1": [400]}, seen).answer("s", [], {})
+        make_llm(settings, {"m1": [400]}, seen, groq="g").answer("s", [], {})
     assert seen == ["m1"]
 
 
@@ -327,9 +334,25 @@ def test_gemini_stream_extrae_el_campo_answer(settings):
         seen.append(str(request.url))
         return httpx.Response(200, content=gemini_sse('{"answer": "Ho', 'la\\n\\"mundo\\"','", "sources": [{"file": "a.py", "line": 3}]}'))
 
-    s = settings.model_copy(update={"gemini_api_key": "k", "gemini_model": "m1"})
+    s = settings.model_copy(update={"gemini_api_key": "k", "gemini_model": "m1", "gemini_fallback_models": ""})
     deltas: list[str] = []
     result = LLM(s, httpx.Client(transport=httpx.MockTransport(handler))).answer("s", [], {}, on_delta=deltas.append)
     assert seen[0].endswith("/models/m1:streamGenerateContent?alt=sse")
     assert deltas == ["Ho", 'la\n"mundo"']
     assert result.data == {"answer": 'Hola\n"mundo"', "sources": [{"file": "a.py", "line": 3}]}
+
+
+def test_gemini_stream_429_usa_respaldo_antes_de_mostrar_texto(settings, monkeypatch):
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = request.url.path.rsplit("/", 1)[-1].split(":")[0]
+        calls.append(model)
+        if model == "m1":
+            return httpx.Response(429, json={"error": {"message": "cuota"}})
+        return httpx.Response(200, content=gemini_sse('{"answer": "del respaldo", "sources": []}'))
+
+    s = settings.model_copy(update={"gemini_api_key": "k", "gemini_model": "m1", "gemini_fallback_models": "m2"})
+    deltas: list[str] = []
+    result = LLM(s, httpx.Client(transport=httpx.MockTransport(handler))).answer("s", [], {}, on_delta=deltas.append)
+    assert calls == ["m1", "m2"] and "".join(deltas) == "del respaldo" and result.model == "M2"
