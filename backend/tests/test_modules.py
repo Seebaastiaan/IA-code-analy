@@ -1,5 +1,6 @@
-"""Tablero, reporte y editor sobre el repo de demostración (Ruff, Bandit y Radon reales, sin red)."""
+"""Tablero, reportes y editor sobre el repo de demostración (Ruff, Bandit y Radon reales, sin red)."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,22 @@ def test_reporte(client, repo_id):
 def test_reporte_inexistente(client, repo_id):
     assert client.get(f"/api/report/{repo_id}-99").status_code == 404
     assert client.get("/api/report/latest").status_code == 422
+
+
+@pytest.mark.parametrize(("fmt", "ext", "needle"), [("json", "json", '"findings"'), ("md", "md", "# equipo/api-pagos"), ("html", "html", "<table>"), ("sarif", "sarif.json", '"version": "2.1.0"')])
+def test_exportar(client, repo_id, fmt, ext, needle):
+    res = client.get(f"/api/report/{repo_id}-4/export", params={"format": fmt})
+    assert res.status_code == 200
+    assert res.headers["content-disposition"] == f'attachment; filename="reporte-{repo_id}-4.{ext}"'
+    assert needle in res.text
+
+
+def test_exportar_html_escapa(client, repo_id, settings):
+    conn = sqlite3.connect(settings.database_path)
+    conn.execute("UPDATE repos SET name = '<script>alert(1)</script>'")
+    conn.commit()
+    html = client.get(f"/api/report/{repo_id}-4/export", params={"format": "html"}).text
+    assert "<script>" not in html and "&lt;script&gt;" in html
 
 
 # ─── Editor ───

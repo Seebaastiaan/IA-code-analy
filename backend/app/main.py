@@ -11,11 +11,12 @@ from app.errors import register_error_handlers
 from app.github import router as github
 from app.projects import router as projects
 from app.reports import router as reports
+from app.share import router as share
 from app.teams import router as teams
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="IA voy API", version="0.7.0")
+    app = FastAPI(title="IA voy API", version="0.8.0")
     # En desarrollo el proxy de Vite sirve /api desde el mismo origen; CORS cubre el acceso directo
     app.add_middleware(CORSMiddleware, allow_origins=[get_settings().frontend_url], allow_methods=["*"], allow_headers=["*"])
     register_error_handlers(app)
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(editor.router)
     app.include_router(assistant.router)
     app.include_router(projects.router)
+    app.include_router(share.router)
     app.include_router(teams.router)
     return app
 

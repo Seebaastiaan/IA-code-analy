@@ -1,6 +1,6 @@
 [project]
 name = "ia-voy-backend"
-version = "0.7.0"
+version = "0.8.0"
 description = "API de IA voy: análisis de repositorios Python"
 requires-python = ">=3.12"
 dependencies = [

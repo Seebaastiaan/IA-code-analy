@@ -68,6 +68,35 @@ test('2 · corregir un hallazgo desde el reporte', async ({ page }) => {
   await expect(page).toHaveURL(/\/dashboard$/)
 })
 
+test('3 · compartir el reporte y verlo como invitado', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('button', { name: 'Compartir' }).click()
+
+  const modal = page.getByRole('dialog')
+  await expect(modal.getByRole('heading', { name: 'Compartir reporte' })).toBeVisible()
+  await modal.getByRole('switch', { name: 'Proteger con contraseña' }).click()
+  await modal.getByPlaceholder(/contraseña/i).fill('equipo123')
+  await modal.getByLabel('Expiración').selectOption({ label: '30 días' })
+  await modal.getByRole('button', { name: 'Crear enlace' }).click()
+  await expect(modal.getByLabel('Enlace público')).toHaveValue(/\/r\/[\w-]+$/)
+
+  await modal.getByRole('link', { name: 'Ver como invitado' }).click()
+  await expect(page.getByText('Solo lectura')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Reporte protegido' })).toBeVisible()
+
+  await page.getByLabel('Contraseña').fill('mala')
+  await page.getByRole('button', { name: 'Ver reporte' }).click()
+  await expect(page.getByText('Contraseña incorrecta')).toBeVisible()
+
+  await page.getByLabel('Contraseña').fill('equipo123')
+  await page.getByRole('button', { name: 'Ver reporte' }).click()
+  await expect(page.getByRole('heading', { name: 'equipo/api-pagos' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Hallazgos principales' })).toBeVisible()
+  await expect(page.getByText(/Este enlace expira en \d+ día/)).toBeVisible()
+  // Sin menú de la app: es una vista pública
+  await expect(page.getByRole('navigation')).toHaveCount(0)
+})
+
 test('4 · preguntar a la IA y abrir la fuente en el editor', async ({ page }) => {
   test.setTimeout(90_000)
   await openReport(page)

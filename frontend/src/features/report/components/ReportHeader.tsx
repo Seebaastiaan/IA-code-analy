@@ -3,7 +3,7 @@ import { CAT } from '@/shared/constants/categories'
 import { paths } from '@/shared/constants/paths'
 import { TONE, tone } from '@/shared/constants/tones'
 import { CATEGORIES, type Category, type Severity } from '@/shared/types/common'
-import { Card, Chip, DeltaBadge, Icon, ProgressBar, ScoreRing, buttonClass } from '@/shared/ui'
+import { Button, Card, Chip, DeltaBadge, Icon, ProgressBar, ScoreRing, buttonClass } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { formatDateTime, formatDuration } from '@/shared/utils/format'
 import { f1, weightSum } from '@/shared/utils/score'
@@ -14,9 +14,10 @@ interface ReportHeaderProps {
   report: Report
   cat: CatFilter
   onCat: (cat: CatFilter) => void
+  onShare: () => void
 }
 
-export function ReportHeader({ report: r, cat, onCat }: ReportHeaderProps) {
+export function ReportHeader({ report: r, cat, onCat, onShare }: ReportHeaderProps) {
   const open = r.findings.filter((f) => f.status === 'open')
   const count = (s: Severity) => open.filter((f) => f.sev === s).length
   const sum = weightSum(r.weights) || 1
@@ -75,7 +76,11 @@ export function ReportHeader({ report: r, cat, onCat }: ReportHeaderProps) {
             </span>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 sm:flex gap-2">
+          <Button onClick={onShare}>
+            <Icon name="share" className="w-4 h-4" />
+            Compartir
+          </Button>
           <Link to={paths.assistant(r.repo_id)} className={buttonClass('secondary')}>
             <Icon name="chat" className="w-4 h-4" />
             Preguntar

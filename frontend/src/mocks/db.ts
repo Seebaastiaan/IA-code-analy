@@ -6,6 +6,7 @@
 import type { Job, JobMessage } from '@/features/analysis/types'
 import type { Finding, Patch } from '@/features/findings/types'
 import type { Repo, TreeEntry } from '@/features/repos/types'
+import type { PublicReport } from '@/features/public-report/types'
 import type { Report } from '@/features/report/types'
 import type { ProjectConfig } from '@/features/settings/types'
 import { JOB_STEPS } from '@/features/analysis/constants/jobSteps'
@@ -13,6 +14,7 @@ import type { Category, Scores, Severity, Weights } from '@/shared/types/common'
 import { calcScore } from '@/shared/utils/score'
 import { FILES, lineAt } from './fixtures/code'
 import { COMPLEXITY, COVERAGE, FINDINGS, FIXES, RESOLVED_BEFORE, type FindingTemplate } from './fixtures/findings'
+import { demoUser } from './fixtures/user'
 
 // ───────────────────────── Modelo interno ─────────────────────────
 
@@ -53,6 +55,13 @@ interface JobRecord extends Job {
   timer: ReturnType<typeof setInterval> | null
   listeners: Set<(m: JobMessage) => void>
   speed: number
+}
+
+interface ShareRecord {
+  report_id: string
+  password: string | null
+  expires_at: string | null
+  include_code: boolean
 }
 
 const DAY = 86_400_000
@@ -127,6 +136,8 @@ const configs: Record<string, ProjectConfig> = Object.fromEntries(
 )
 
 const jobs = new Map<string, JobRecord>()
+const shares = new Map<string, ShareRecord>()
+const shareTokens = new Map<string, string>()
 let jobSeq = 0
 
 // ───────────────────────── Vistas (DTO) ─────────────────────────
@@ -308,6 +319,48 @@ export function saveConfig(repoId: string, cfg: ProjectConfig) {
   getRepo(repoId)
   configs[repoId] = cfg
   return cfg
+}
+
+// ───────────────────────── Compartir ─────────────────────────
+
+export function createShare(reportId: string, password: string | null, days: number, include_code: boolean) {
+  const share_id = Math.random().toString(16).slice(2, 8)
+  const expires_at = days ? new Date(Date.now() + days * DAY).toISOString() : null
+  shares.set(share_id, { report_id: reportId, password: password || null, expires_at, include_code })
+  return { share_id, url: `${window.location.origin}/r/${share_id}`, expires_at }
+}
+
+export type PublicResult = { ok: true; data: PublicReport } | { ok: false; status: number; code: string; message: string }
+
+export function publicReport(shareId: string, token: string | null): PublicResult {
+  const s = shares.get(shareId)
+  if (!s) return { ok: false, status: 404, code: 'not_found', message: 'Este enlace no existe' }
+  if (s.expires_at && new Date(s.expires_at).getTime() < Date.now()) return { ok: false, status: 410, code: 'expired', message: 'Este enlace expiró' }
+  if (s.password && shareTokens.get(shareId) !== token) return { ok: false, status: 401, code: 'password_required', message: 'Este reporte está protegido' }
+  const repoId = s.report_id.split('-')[0]
+  const { repo, report } = findReport(repoId, s.report_id)
+  return {
+    ok: true,
+    data: {
+      repo_name: repo.name,
+      branch: report.branch,
+      commit: report.commit,
+      created_at: report.created_at,
+      scores: scoresOf(repoId, report.cat),
+      findings: visibleFindings(repo, report, s.include_code).filter((f) => f.sev !== 'baja' && f.status === 'open'),
+      shared_by: demoUser.name,
+      expires_at: s.expires_at,
+      include_code: s.include_code,
+    },
+  }
+}
+
+export function unlockShare(shareId: string, password: string) {
+  const s = shares.get(shareId)
+  if (!s || s.password !== password) return null
+  const token = Math.random().toString(36).slice(2)
+  shareTokens.set(shareId, token)
+  return token
 }
 
 // ───────────────────────── Jobs de análisis ─────────────────────────

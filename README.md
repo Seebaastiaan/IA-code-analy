@@ -3,15 +3,15 @@
 Analizador de calidad de código **Python** para equipos. El usuario indica un repositorio de GitHub (URL +
 rama); el backend lo clona, lo analiza y guarda el resultado en el historial del repositorio.
 
-> Estado: **Sprint 7 (10 nov)** — Reporte de hallazgos, asistente IA (RAG) y editor. Pruebas: 162 de backend · 22 unitarias del frontend · 7 e2e.
+> Estado: **Sprint 8 (17 nov)** — Compartir y exportar el reporte. Pruebas: 179 de backend · 22 unitarias del frontend · 8 e2e.
 
 ## Objetivo del sprint
 
-Ver cada hallazgo en un reporte navegable, que la IA explique el código con contexto real (RAG, paso 11 del análisis) y corregir los hallazgos desde el editor.
+Compartir el reporte con personas fuera del equipo (enlace con contraseña y expiración) y exportarlo a JSON, HTML, Markdown y SARIF; medir la calidad del asistente con un set de evaluación.
 
-**Demo:** Abrir el reporte → detalle de un hallazgo con su código → "Preguntar a la IA" → respuesta en streaming con fuentes archivo:línea → abrir la fuente en el editor → aplicar la corrección de Ruff y ver subir el score.
+**Demo:** Compartir el reporte con contraseña → abrir el enlace sin sesión → contraseña incorrecta y luego correcta → exportar a SARIF y HTML.
 
-**Criterio de aceptación:** Pruebas de backend, unitarias y e2e en verde; ignorar una regla recalcula el score al instante.
+**Criterio de aceptación:** Pruebas de backend, unitarias y e2e en verde; la vista pública no muestra el código si no se permitió.
 
 ## Lo que hace la app
 
@@ -26,27 +26,28 @@ Ver cada hallazgo en un reporte navegable, que la IA explique el código con con
 - Score ponderado por categoría (pesos de Configuración / `.ia_voy.toml`) en Repositorios y en el tablero, con tendencia y hallazgos prioritarios
 - Reporte navegable: hallazgos con su código, cobertura y complejidad; ignorar una regla recalcula el score
 - Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones automáticas
+- Compartir el reporte con un enlace público (contraseña y expiración opcionales) y exportarlo a JSON, HTML, Markdown o SARIF
 
 Llega en los siguientes sprints:
 
-- Compartir el reporte y exportarlo (S8)
-- Comparativa y respaldo del modelo (S9)
+- Comparativa entre análisis y respaldo del modelo del asistente (S9)
+- Documentación y entrega (S10)
 
 ## Tareas del sprint
 
 | # | Responsable | Equipo | Tarea | Archivos |
 |---|---|---|---|---|
-| 1 | Uriel Castorela | IA & Analizadores | Endpoint del asistente con streaming | assistant/router.py, llm.py |
-| 2 | Diego Salinas | IA & Analizadores | Índice de embeddings del asistente | index.py, config.py, pyproject.toml, .env.example |
-| 3 | Marco Espino | IA & Analizadores | Fragmentador del código | chunker.py |
-| 4 | Carlos Jara | Backend & Plataforma | Paso 11: indexar para el asistente | jobs.py, fake.py, analysis/router.py |
-| 5 | Dylan Martínez | Backend & Plataforma | API del editor: árbol, guardar con respaldo y correcciones | editor/router.py (retira repos/router.py) |
-| 6 | Ana Cristina Luciano | Backend & Plataforma | Tablas del asistente e integración | db.py, main.py |
-| 7 | Evelyn Martínez | QA | Pruebas del asistente | test_assistant.py, test_analysis.py, test_jobs.py |
-| 8 | Luis Gabriel Manzano | QA | Pruebas del editor y unitarias | test_modules.py, chatStream.test.ts, patches.test.ts, suggestions.test.ts |
-| 9 | Karen Peña | Front-End & UX | Editor Monaco y aplicar correcciones | features/editor |
-| 10 | Emiliano Sánchez | Front-End & UX | Reporte, detalle del hallazgo e ignorar reglas | features/report, features/findings, SettingsForm |
-| 11 | Andrea Nallely Peña Osorio | Front-End & UX | Pantalla del asistente y coordinación del sprint | features/assistant, routes, navigation, mocks, flujos.e2e.ts |
+| 1 | Carlos Jara | Backend & Plataforma | Enlaces públicos del reporte | share/router.py |
+| 2 | Ana Cristina Luciano | Backend & Plataforma | Tablas de enlaces y freno a la fuerza bruta | db.py |
+| 3 | Diego Salinas | IA & Analizadores | Exportación del reporte (JSON, HTML, MD, SARIF) | reports/router.py |
+| 4 | Uriel Castorela | IA & Analizadores | Set de evaluación del asistente | docs/ia/evaluacion.md |
+| 5 | Marco Espino | IA & Analizadores | Ajustes del prompt con el set de evaluación | docs/ia/ajustes-prompt.md |
+| 6 | Dylan Martínez | Backend & Plataforma | Integración y versión del backend | main.py, pyproject.toml |
+| 7 | Luis Gabriel Manzano | QA | Pruebas de compartir y exportar | test_share.py, test_modules.py |
+| 8 | Evelyn Martínez | QA | Flujo e2e de compartir | flujos.e2e.ts |
+| 9 | Karen Peña | Front-End & UX | Modal Compartir | ShareModal, ReportHeader, ReportPage |
+| 10 | Emiliano Sánchez | Front-End & UX | Vista pública del reporte | PublicReportPage, routes |
+| 11 | Andrea Nallely Peña Osorio | Front-End & UX | Backend simulado de compartir y exportar; coordinación | mocks/db.ts, mocks/handlers |
 
 ## Comandos
 
@@ -56,7 +57,7 @@ cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
 uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 162 pruebas
+uv run pytest              # 179 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)

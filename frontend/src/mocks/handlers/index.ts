@@ -5,6 +5,7 @@ import type { GithubCallbackRequest } from '@/features/auth/types'
 import type { SaveFileRequest } from '@/features/editor/types'
 import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
+import type { ShareRequest } from '@/features/share/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
@@ -96,6 +97,24 @@ export const handlers = [
     const repo = param(request, 'repo') ?? (params.reportId as string).split('-')[0]
     return json(db.reportView(repo, params.reportId as string))
   })),
+  http.get(EP.report.export(':reportId'), route(({ request, params }) => {
+    const id = params.reportId as string
+    const format = param(request, 'format') ?? 'json'
+    const report = db.reportView(id.split('-')[0], id)
+    const body =
+      format === 'md'
+        ? `# ${report.repo_name} · #${report.num}\n\nScore: ${report.scores.global}\n\n${report.findings.map((f) => `- [${f.sev}] ${f.rule} ${f.file}:${f.line} — ${f.msg}`).join('\n')}\n`
+        : format === 'html'
+          ? `<!doctype html><meta charset="utf-8"><title>${report.repo_name}</title><h1>${report.repo_name} · #${report.num}</h1><p>Score ${report.scores.global}</p>`
+          : JSON.stringify(format === 'sarif' ? { version: '2.1.0', runs: [{ tool: { driver: { name: 'IA voy' } }, results: report.findings.map((f) => ({ ruleId: f.rule, message: { text: f.msg }, locations: [{ physicalLocation: { artifactLocation: { uri: f.file }, region: { startLine: f.line } } }] })) }] } : report, null, 2)
+    const ext = format === 'sarif' ? 'sarif.json' : format
+    return new HttpResponse(body, { headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="reporte-${id}.${ext}"` } })
+  })),
+  http.post(EP.report.share(':reportId'), route(async ({ request, params }) => {
+    const body = (await request.json()) as ShareRequest
+    return json(db.createShare(params.reportId as string, body.password, body.expires_days, body.include_code))
+  })),
+
   // ─── Editor ───
   http.get(EP.file, route(({ request }) => {
     const path = param(request, 'path') ?? ''
@@ -138,6 +157,17 @@ export const handlers = [
   // ─── Configuración ───
   http.get(EP.config(':projectId'), route(({ params }) => json(db.getConfig(params.projectId as string)))),
   http.put(EP.config(':projectId'), route(async ({ request, params }) => json(db.saveConfig(params.projectId as string, (await request.json()) as ProjectConfig)))),
+
+  // ─── Público ───
+  http.get(EP.public.get(':shareId'), route(({ request, params }) => {
+    const r = db.publicReport(params.shareId as string, param(request, 'token'))
+    return r.ok ? json(r.data) : fail(r.status, r.code, r.message)
+  })),
+  http.post(EP.public.unlock(':shareId'), route(async ({ request, params }) => {
+    const { password } = (await request.json()) as { password: string }
+    const token = db.unlockShare(params.shareId as string, password)
+    return token ? json({ token }) : fail(403, 'wrong_password', 'Contraseña incorrecta')
+  })),
 
   // ─── Equipo ───
   http.get(EP.team.root, route(() => json(team.getTeam()))),

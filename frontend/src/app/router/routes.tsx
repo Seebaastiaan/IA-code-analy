@@ -16,6 +16,7 @@ export const router = createBrowserRouter([
         Component: RedirectIfAuth,
         children: [{ path: '/login', lazy: page(() => import('@/features/auth/pages/LoginPage')) }],
       },
+      { path: '/r/:shareId', lazy: page(() => import('@/features/public-report/pages/PublicReportPage')) },
       // Público: sirve para el login y para volver a autorizar GitHub con la sesión abierta
       { path: '/github/callback', lazy: page(() => import('@/features/auth/pages/GithubCallbackPage')) },
     ],

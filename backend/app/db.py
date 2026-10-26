@@ -92,6 +92,13 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_repo ON jobs (repo_id, status);
 
+-- Intentos fallidos de contraseña de un enlace compartido (app.share), para frenar la fuerza bruta
+CREATE TABLE IF NOT EXISTS share_failures (
+    share_id    TEXT NOT NULL,
+    at          REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS share_failures_share ON share_failures (share_id, at);
+
 CREATE TABLE IF NOT EXISTS reports (
     id          TEXT PRIMARY KEY,
     repo_id     TEXT NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
@@ -155,6 +162,17 @@ CREATE TABLE IF NOT EXISTS code_chunks (
     embedding   BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS code_chunks_repo ON code_chunks (repo_id, hash);
+
+-- Enlaces públicos de un reporte (app.share). password_hash = "sal$hash" de scrypt, NULL = sin contraseña
+CREATE TABLE IF NOT EXISTS shares (
+    id            TEXT PRIMARY KEY,
+    report_id     TEXT NOT NULL REFERENCES reports (id) ON DELETE CASCADE,
+    user_id       TEXT NOT NULL,
+    password_hash TEXT,
+    expires_at    TEXT,
+    include_code  INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL
+);
 
 -- `state` de OAuth pendientes (app.github.states): un solo uso, vencen en 10 minutos
 CREATE TABLE IF NOT EXISTS oauth_states (
