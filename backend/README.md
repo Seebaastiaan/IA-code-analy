@@ -88,7 +88,7 @@ crea el repo (o reutiliza el del equipo con el mismo `owner/repo`) y lanza un jo
 `422 missing_analyzers`). Los no elegidos no corren: su paso dice "omitido (no seleccionado)" y no aportan
 hallazgos. Sin coverage, la cobertura queda "no medida" (`summary.coverage_total = null`) y el score de
 pruebas solo descuenta las que fallan. El reporte guarda la lista (`analyzers`) y re-analizar la repite.
-`index: false` omite el paso 11 (índice del asistente).
+`index: false` omite el paso 12 (índice del asistente).
 
 **Jobs persistentes** (tabla `jobs`, [app/analysis/jobs.py](app/analysis/jobs.py)): el proceso que corre un
 job guarda su estado con cada evento y renueva un latido cada 5 s.
@@ -106,12 +106,22 @@ entorno de git: no queda en `.git/config` ni en la línea de comandos. Sin Git C
 prompts, con `core.symlinks=false` y límite de 180 s. Si falla (rama o repo inexistente, sin acceso), el
 job termina en `error` con un mensaje claro y se puede reintentar.
 
-**Pasos 2-10** ([app/analysis/pipeline.py](app/analysis/pipeline.py)):
+**Pasos 2-11** ([app/analysis/pipeline.py](app/analysis/pipeline.py)):
 - **En el backend:** Ruff y Bandit (hallazgos, una ejecución por repo) y Radon (complejidad). Solo leen el
   código, así que no necesitan sandbox. Ruff usa la configuración del repo si tiene; si no, `--isolated`.
 - **En el sandbox:** entorno, dependencias, pip-audit, pytest y coverage (ejecutan el código del repo).
   Corren en paralelo con lo anterior y la terminal avanza con cada fase. Sin sandbox se simulan: sus
   números salen de la semilla del job y sus hallazgos dicen "(simulado)".
+
+**Paso 10, reglas de negocio** ([app/analyses/reglas.py](app/analyses/reglas.py),
+[ADR-003](../docs/adr/ADR-003-reglas-de-negocio.md)): lee `reglas_negocio.toml` (raíz del repo o `docs/`), lo
+valida y verifica el nivel **patrón** en el backend: `prohibido` (regex que no debe aparecer) y `obligatorio`
+(regex que debe aparecer en cada archivo con código) sobre los `.py` de `rutas`, sin las pruebas ni las rutas
+excluidas. Cada regla queda `cumple`, `no_cumple` (con `archivo:línea`) o `sin_verificar` (sin patrón; las
+pruebas con `@pytest.mark.regla` llegan en el Sprint 8). Un archivo inválido no detiene el análisis: el paso
+muestra el error. Los resultados van en sus propias tablas (`business_rule_checks`, `business_rule_results`),
+**no** son hallazgos y todavía no entran al score. `GET /api/report/{id}/reglas` (o `latest?repo=`) devuelve
+la matriz regla → estado → evidencia, con `historia`, `responsable` y `criterio` para la trazabilidad.
 
 ### Sandbox
 
@@ -205,14 +215,15 @@ conservan los `seg/test/prac` que se guardaron.
 ```
 
 Analiza [seed_data/demo_repo](seed_data/demo_repo) (con problemas a propósito) con Ruff, Bandit y Radon
-reales y crea 4 análisis semanales para que la tendencia tenga historia.
+reales y crea 4 análisis semanales para que la tendencia tenga historia. Incluye un
+[reglas_negocio.toml](seed_data/demo_repo/reglas_negocio.toml) con 4 reglas (1 cumple, 2 no cumplen, 1 sin verificar).
 
 ## Asistente IA
 
 **Índice** ([app/assistant/index.py](app/assistant/index.py)): el código del clon se parte con el `ast` de
 Python (una función o clase por fragmento; el resto de archivos de texto en bloques de 60 líneas) y cada
 fragmento se guarda en SQLite (`code_chunks`) con su embedding de `gemini-embedding-001` (768 dimensiones,
-normalizado). Se indexa en el paso 10 del análisis y, si falta, al abrir el asistente. Antes de cada
+normalizado). Se indexa en el paso 12 del análisis y, si falta, al abrir el asistente. Antes de cada
 pregunta se re-fragmenta (local, rápido) y solo se piden embeddings de lo nuevo o cambiado (por hash): lo
 guardado en el editor se refleja sin re-indexar todo.
 

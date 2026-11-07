@@ -10,6 +10,7 @@ from app.editor import router as editor
 from app.errors import register_error_handlers
 from app.github import router as github
 from app.projects import router as projects
+from app.reports import reglas as business_rules
 from app.reports import router as reports
 from app.share import router as share
 from app.teams import router as teams
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis.router)
     app.include_router(dashboard.router)
     app.include_router(reports.router)
+    app.include_router(business_rules.router)
     app.include_router(editor.router)
     app.include_router(assistant.router)
     app.include_router(projects.router)

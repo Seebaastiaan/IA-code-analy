@@ -5,7 +5,7 @@ Todo se deriva de una semilla guardada con el reporte, así que un mismo reporte
 
 import random
 
-# Los 11 pasos del análisis (mismo orden que frontend/src/features/analysis/constants/jobSteps.ts)
+# Los 12 pasos del análisis (mismo orden que frontend/src/features/analysis/constants/jobSteps.ts)
 JOB_STEPS: list[tuple[str, str]] = [
     ("Clonando repositorio", "git clone --depth 1 --branch {branch} {url}"),
     ("Creando entorno aislado", "uv venv .venv  (sandbox)"),
@@ -16,6 +16,7 @@ JOB_STEPS: list[tuple[str, str]] = [
     ("coverage", "coverage json"),
     ("Ruff", "ruff check . --output-format json"),
     ("Radon", "radon cc . -j && radon mi . -j"),
+    ("Verificando reglas de negocio", "reglas_negocio.toml → patrones prohibido/obligatorio"),
     ("Calculando score", "agregación ponderada (.ia_voy.toml)"),
     ("Indexando para el asistente", "ast → embeddings (Gemini) → SQLite"),
 ]
@@ -150,7 +151,7 @@ def step_summary(step: int, seed: int, cat: dict) -> str | None:
         6: f"  cobertura total: {d['summary']['coverage_total']} %",
         7: f"  {len(by('Ruff'))} problema(s)",
         8: f"  complejidad media: {d['summary']['avg_complexity']}",
-        9: f"  score global: {global_score(cat)}",
+        10: f"  score global: {global_score(cat)}",
     }
     return lines.get(step)
 

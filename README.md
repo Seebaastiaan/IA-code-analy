@@ -3,7 +3,7 @@
 Analizador de calidad de código **Python** para equipos. El usuario indica un repositorio de GitHub (URL +
 rama); el backend lo clona, lo analiza y guarda el resultado en el historial del repositorio.
 
-> Estado: **Sprint 8 (17 nov)** — Compartir y exportar el reporte. Pruebas: 179 de backend · 22 unitarias del frontend · 8 e2e.
+> Estado: **Sprint 8 (17 nov)** — Compartir y exportar el reporte. Pruebas: 210 de backend · 22 unitarias del frontend · 8 e2e.
 
 ## Objetivo del sprint
 
@@ -27,6 +27,7 @@ Compartir el reporte con personas fuera del equipo (enlace con contraseña y exp
 - Reporte navegable: hallazgos con su código, cobertura y complejidad; ignorar una regla recalcula el score
 - Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones automáticas
 - Compartir el reporte con un enlace público (contraseña y expiración opcionales) y exportarlo a JSON, HTML, Markdown o SARIF
+- Reglas de negocio del proyecto (`reglas_negocio.toml`): paso 10 del análisis con verificación por patrones y API con la matriz regla → estado → evidencia ([ADR-003](docs/adr/ADR-003-reglas-de-negocio.md)); aún no cuentan en el score
 
 Llega en los siguientes sprints:
 
@@ -57,7 +58,7 @@ cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
 uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 179 pruebas
+uv run pytest              # 210 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)
