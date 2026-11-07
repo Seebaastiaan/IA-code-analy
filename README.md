@@ -3,11 +3,11 @@
 Analizador de calidad de código **Python** para equipos. El usuario indica un repositorio de GitHub (URL +
 rama); el backend lo clona, lo analiza y guarda el resultado en el historial del repositorio.
 
-> Estado: **Sprint 7 (10 nov)** — Reporte de hallazgos, asistente IA (RAG) y editor. Pruebas: 162 de backend · 22 unitarias del frontend · 7 e2e.
+> Estado: **Sprint 7 (10 nov)** — Reporte de hallazgos, asistente IA (RAG) y editor. Pruebas: 193 de backend · 22 unitarias del frontend · 7 e2e.
 
 ## Objetivo del sprint
 
-Ver cada hallazgo en un reporte navegable, que la IA explique el código con contexto real (RAG, paso 11 del análisis) y corregir los hallazgos desde el editor.
+Ver cada hallazgo en un reporte navegable, que la IA explique el código con contexto real (RAG, paso 12 del análisis) y corregir los hallazgos desde el editor.
 
 **Demo:** Abrir el reporte → detalle de un hallazgo con su código → "Preguntar a la IA" → respuesta en streaming con fuentes archivo:línea → abrir la fuente en el editor → aplicar la corrección de Ruff y ver subir el score.
 
@@ -26,6 +26,7 @@ Ver cada hallazgo en un reporte navegable, que la IA explique el código con con
 - Score ponderado por categoría (pesos de Configuración / `.ia_voy.toml`) en Repositorios y en el tablero, con tendencia y hallazgos prioritarios
 - Reporte navegable: hallazgos con su código, cobertura y complejidad; ignorar una regla recalcula el score
 - Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones automáticas
+- Reglas de negocio del proyecto (`reglas_negocio.toml`): paso 10 del análisis con verificación por patrones y API con la matriz regla → estado → evidencia ([ADR-003](docs/adr/ADR-003-reglas-de-negocio.md)); aún no cuentan en el score
 
 Llega en los siguientes sprints:
 
@@ -56,7 +57,7 @@ cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
 uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 162 pruebas
+uv run pytest              # 193 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)

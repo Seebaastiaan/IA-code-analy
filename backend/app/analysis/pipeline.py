@@ -1,11 +1,13 @@
 """
-Pasos 2-10 del análisis sobre el clon:
+Pasos 2-11 del análisis sobre el clon:
 - Ruff y Bandit (hallazgos) y Radon (complejidad): siempre reales. Solo leen el código y corren en el backend
   (`analyze_static`).
 - pip-audit, pytest y coverage: ejecutan el código del repo, así que corren en el sandbox
   (app.analysis.sandbox) cuando `SANDBOX` es `wsl` o `docker`. Con `SANDBOX=off`, o si el sandbox no está
   disponible, se SIMULAN: sus números salen de la semilla del job (el mismo reporte siempre se ve igual)
   y sus hallazgos dicen "(simulado)" para no confundirse con resultados reales.
+- Reglas de negocio (`reglas_negocio.toml`, app.analyses.reglas): nivel patrón, en el backend. Sus resultados
+  van aparte de los hallazgos y todavía no entran al score (docs/adr/ADR-003-reglas-de-negocio.md).
 """
 
 import logging
@@ -13,6 +15,7 @@ import random
 import re
 from dataclasses import dataclass
 
+from app.analyses import reglas
 from app.analyses.analyzers import complexity, is_test_path, static_findings_dir
 from app.analyses.config_file import FILENAME, ConfigError, from_toml
 from app.analyses.models import ComplexityInput, CoverageInput, FindingInput, ReportInput
@@ -27,6 +30,7 @@ log = logging.getLogger(__name__)
 
 # Índices de fake.JOB_STEPS
 VENV_STEP, INSTALL_STEP, BANDIT_STEP, AUDIT_STEP, PYTEST_STEP, COVERAGE_STEP = 1, 2, 3, 4, 5, 6
+RULES_STEP, SCORE_STEP = 9, 10
 # Fase del sandbox con la que termina cada paso
 SANDBOX_PHASE = {VENV_STEP: "venv", INSTALL_STEP: "install", AUDIT_STEP: "audit", PYTEST_STEP: "tests", COVERAGE_STEP: "coverage"}
 MAX_TEST_FINDINGS = 50
@@ -57,6 +61,8 @@ class StaticResult:
     cfg: ProjectConfig
     # Líneas de Python analizadas (escala del score)
     code_lines: int = 0
+    # Reglas de negocio del repo (paso 10)
+    rules: reglas.RulesCheck | None = None
 
 
 @dataclass
@@ -67,6 +73,7 @@ class PipelineResult:
     # pytest, coverage y pip-audit se simularon (sin sandbox)
     simulated: bool = True
     vulnerable: int = 0
+    rules: reglas.RulesCheck | None = None
 
 
 _is_test = is_test_path
@@ -129,7 +136,7 @@ def import_repo_config(store: AnalysisStore, ws: Workspace, repo_id: str) -> Non
 
 
 def analyze_static(settings: Settings, repo_id: str, analyzers: list[str] | tuple[str, ...] = ALL_ANALYZERS) -> StaticResult:
-    """Ruff, Bandit y Radon (los elegidos) sobre el clon. Bloqueante: el job lo llama con asyncio.to_thread."""
+    """Ruff, Bandit y Radon (los elegidos) y las reglas de negocio sobre el clon. Bloqueante: el job lo llama con asyncio.to_thread."""
     ws = Workspace(settings, repo_id)
     with session(settings.database_path) as conn:
         store = AnalysisStore(conn)
@@ -139,7 +146,10 @@ def analyze_static(settings: Settings, repo_id: str, analyzers: list[str] | tupl
     py = [f for f in files if f.endswith(".py")]
     findings = static_findings_dir(ws.root, files, ruff_on="ruff" in analyzers, bandit_on="bandit" in analyzers)
     lines = sum(len(lines) for f in py if (lines := ws.read_lines(f)))
-    return StaticResult(files=files, py=py, findings=findings, complexity=complexity(ws.root, py) if "radon" in analyzers else [], cfg=cfg, code_lines=lines)
+    return StaticResult(
+        files=files, py=py, findings=findings, complexity=complexity(ws.root, py) if "radon" in analyzers else [], cfg=cfg, code_lines=lines,
+        rules=reglas.run(ws.root, files, ws.read_lines),
+    )
 
 
 # ───────────────────────── Resultados del sandbox ─────────────────────────
@@ -274,7 +284,7 @@ def build(
     )
     ignored = set(cfg.ignored)
     cats = category_scores(((f.cat, f.sev) for f in findings if f.rule not in ignored), effective_coverage(cov_total, analyzers), failed, static.code_lines)
-    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, cats), simulated=simulated, vulnerable=len(vulns))
+    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, cats), simulated=simulated, vulnerable=len(vulns), rules=static.rules)
 
 
 def run(settings: Settings, repo_id: str, branch: str, commit: str | None, seed: int, cat: dict) -> PipelineResult:
@@ -333,6 +343,7 @@ def step_summary(step: int, r: PipelineResult) -> str | None:
         6: f"  cobertura total: {r.report.coverage_total} %{sim}",
         7: f"  {len(ruff)} problema(s) ({sum(x.fix for x in ruff)} con corrección automática)",
         8: f"  complejidad media: {r.report.avg_complexity} · {len(r.report.complexity)} funciones",
-        9: f"  score global: {r.score}",
+        RULES_STEP: reglas.summary_line(r.rules),
+        SCORE_STEP: f"  score global: {r.score}",
     }
     return lines.get(step)

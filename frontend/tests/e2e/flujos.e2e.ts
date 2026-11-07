@@ -27,7 +27,7 @@ test('1 · analizar un repositorio y abrir su reporte', async ({ page }) => {
 
   // Progreso en vivo por WebSocket
   await expect(page).toHaveURL(/\/analyze\/jobs\//)
-  await expect(page.getByText('[01/11] Clonando repositorio')).toBeVisible()
+  await expect(page.getByText('[01/12] Clonando repositorio')).toBeVisible()
   await expect(page.getByRole('main').getByText('Análisis completado')).toBeVisible({ timeout: 20_000 })
 
   await page.getByRole('link', { name: 'Ver reporte' }).click()

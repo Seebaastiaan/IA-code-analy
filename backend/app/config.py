@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Carpeta de los repos clonados. Vacía = fuera del proyecto (ver app.analysis.clone.clones_root):
     # dentro de OneDrive/Dropbox la sincronización bloquea los archivos recién clonados.
     clones_path: str = ""
-    # Pausa visual entre los pasos del análisis (11 pasos) para seguirlos en la terminal en vivo
+    # Pausa visual entre los pasos del análisis (12 pasos) para seguirlos en la terminal en vivo
     job_step_seconds: float = 0.9
     # Dónde corren pytest, coverage y pip-audit (app.analysis.sandbox): off = simulados, wsl o docker
     sandbox: Literal["off", "wsl", "docker"] = "off"

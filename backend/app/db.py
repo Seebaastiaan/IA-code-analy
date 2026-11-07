@@ -143,6 +143,39 @@ CREATE TABLE IF NOT EXISTS findings (
 );
 CREATE INDEX IF NOT EXISTS findings_report ON findings (report_id, file);
 
+-- Reglas de negocio del repo analizado (app.analyses.reglas, docs/adr/ADR-003). Van aparte de `findings`
+-- (su CHECK solo admite seg/test/prac) y todavía no entran al score. Una fila por análisis que las revisó:
+-- source NULL = el repo no declara reglas; error = el archivo no es válido (no hay resultados).
+CREATE TABLE IF NOT EXISTS business_rule_checks (
+    report_id   TEXT PRIMARY KEY REFERENCES reports (id) ON DELETE CASCADE,
+    source      TEXT,
+    project     TEXT,
+    error       TEXT
+);
+
+-- Una fila por regla. status: cumple | no_cumple | sin_verificar; level: patron | ninguno (Sprint 8: pruebas).
+-- Sin CHECK en status/level para agregar niveles sin reconstruir la tabla. paths y evidence son JSON.
+CREATE TABLE IF NOT EXISTS business_rule_results (
+    report_id       TEXT NOT NULL REFERENCES reports (id) ON DELETE CASCADE,
+    rule_id         TEXT NOT NULL,
+    pos             INTEGER NOT NULL,
+    title           TEXT NOT NULL,
+    description     TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    paths           TEXT NOT NULL DEFAULT '[]',
+    forbidden       TEXT,
+    required        TEXT,
+    story           TEXT,
+    owner           TEXT,
+    criterion       TEXT,
+    status          TEXT NOT NULL,
+    level           TEXT NOT NULL,
+    detail          TEXT NOT NULL,
+    evidence        TEXT NOT NULL DEFAULT '[]',
+    evidence_total  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (report_id, rule_id)
+);
+
 -- Índice del asistente (app.assistant): fragmentos del código con su embedding (float32, normalizado)
 CREATE TABLE IF NOT EXISTS code_chunks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
