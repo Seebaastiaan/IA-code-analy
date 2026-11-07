@@ -3,7 +3,7 @@
 Analizador de calidad de código **Python** para equipos. El usuario indica un repositorio de GitHub (URL +
 rama); el backend lo clona, lo analiza y guarda el resultado en el historial del repositorio.
 
-> Estado: **Sprint 9 (24 nov)** — Comparativa, respaldo del modelo y code freeze (v1.0). Pruebas: 195 de backend · 22 unitarias del frontend · 8 e2e.
+> Estado: **Sprint 9 (24 nov)** — Comparativa, respaldo del modelo y code freeze (v1.0). Pruebas: 226 de backend · 22 unitarias del frontend · 8 e2e.
 
 ## Objetivo del sprint
 
@@ -28,6 +28,7 @@ Demostrar la mejora real entre dos análisis (hallazgos nuevos y resueltos), que
 - Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones automáticas
 - Compartir el reporte con un enlace público (contraseña y expiración opcionales) y exportarlo a JSON, HTML, Markdown o SARIF
 - Comparativa entre dos análisis (nuevos y resueltos) y respaldo del asistente (modelos de Gemini y Groq)
+- Reglas de negocio del proyecto (`reglas_negocio.toml`): paso 10 del análisis con verificación por patrones y API con la matriz regla → estado → evidencia ([ADR-003](docs/adr/ADR-003-reglas-de-negocio.md)); aún no cuentan en el score
 
 Llega en los siguientes sprints:
 
@@ -57,7 +58,7 @@ cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
 uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 195 pruebas
+uv run pytest              # 226 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)

@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from cryptography.fernet import Fernet
 
 from app.analyses.analyzers import AnalyzerError
+from app.analyses.reglas_store import RulesStore
 from app.analyses.store import AnalysisStore
 from app.analyses.views import report_scores
 from app.analyses.workspace import Workspace
@@ -39,7 +40,7 @@ from app.github.store import GithubAccountStore
 
 log = logging.getLogger(__name__)
 # "Indexando para el asistente" en fake.JOB_STEPS
-INDEX_STEP = 10
+INDEX_STEP = 11
 # Cada cuánto el proceso que corre un job renueva su latido y revisa si lo cancelaron desde otro worker
 HEARTBEAT_S = 5.0
 # Sin latido por más de esto, el job se considera interrumpido
@@ -393,7 +394,7 @@ class JobManager:
             while job.step < job.total:
                 self._start_step(job)
                 if job.step == INDEX_STEP:
-                    # Paso 10, real: índice del asistente (no detiene el análisis si falla)
+                    # Paso 12, real: índice del asistente (no detiene el análisis si falla)
                     summary = await asyncio.to_thread(index_for_job, settings, job.repo_id) if job.index else pipeline.OMITTED
                 elif not pipeline.chosen(job.step, set(job.analyzers)):
                     await asyncio.sleep(settings.job_step_seconds)
@@ -427,12 +428,14 @@ def _set_repo(settings: Settings, repo_id: str, status: str, error: str | None) 
 
 
 def _save_report(settings: Settings, job: Job) -> tuple[int, float]:
-    """Guarda el reporte con sus hallazgos (app.analyses) y devuelve (número, score global)."""
+    """Guarda el reporte con sus hallazgos (app.analyses) y las reglas de negocio, y devuelve (número, score global)."""
     with session(settings.database_path) as conn:
         store = AnalysisStore(conn)
         job.result.report.duration_s = round(time.monotonic() - job.started)
         job.result.report.languages = [{"name": lang.name, "files": lang.files} for lang in job.repo_languages]
         job.report_id, num = store.save_report(job.repo_id, job.result.report, Workspace(settings, job.repo_id))
+        if job.result.rules is not None:
+            RulesStore(conn).save(job.report_id, job.result.rules)
         conn.execute("UPDATE repos SET status = 'listo', error = NULL, branch = ? WHERE id = ?", (job.branch, job.repo_id))
         score = report_scores(store, store.report(job.report_id), store.config(job.repo_id)).global_
     return num, score
