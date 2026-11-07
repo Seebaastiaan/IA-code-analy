@@ -16,7 +16,7 @@ a un asistente IA (RAG), comparar análisis y compartir el reporte con un enlace
 | Backend (FastAPI) | ✅ completo: login con GitHub, **equipos**, análisis con analizadores elegibles (sandbox WSL2/Docker para pytest, coverage y pip-audit), jobs persistentes, tablero, reportes, editor, asistente IA con streaming, configuración, comparativa y compartir / vista pública | [backend/](backend) |
 | Documentación técnica (LaTeX) | ✅ entregada | [docs/latex/](docs/latex) |
 
-Versión **1.0** (Sprint 10, 1 de diciembre de 2026): backend `pytest` → 195 pruebas pasan; frontend `npm test` → 22 pruebas
+Versión **1.0** (Sprint 10, 1 de diciembre de 2026): backend `pytest` → 226 pruebas pasan; frontend `npm test` → 22 pruebas
 unitarias, `npm run test:e2e` → 8 pruebas (los 5 flujos del spec, reintento, equipo y analizadores) pasan;
 `npm run build` sin errores.
 
@@ -55,7 +55,7 @@ flowchart LR
 | **Frontend** | UI: tablero, análisis en vivo, reporte, editor, asistente, comparativa, configuración, vista pública | React 19, TypeScript, Vite 8, Tailwind 4, React Router 7, TanStack Query 5, Zustand 5, Monaco |
 | **API** | Autenticación, repos, reportes, archivos, fixes, chat, configuración, enlaces públicos | FastAPI + Uvicorn, SQLite; REST bajo `/api`, WebSocket bajo `/ws` |
 | **Integración GitHub** | Vincular la cuenta por OAuth y listar repos (incluidos privados) y ramas; el token se guarda cifrado (Fernet) y nunca llega al navegador | `httpx`, `cryptography` |
-| **Worker de análisis** | Ejecuta los 11 pasos de un job (en memoria) y emite el progreso por WebSocket | `git clone`; sandbox WSL2 o Docker con `uv` (`SANDBOX`) |
+| **Worker de análisis** | Ejecuta los 12 pasos de un job (en memoria) y emite el progreso por WebSocket | `git clone`; sandbox WSL2 o Docker con `uv` (`SANDBOX`) |
 | **Analizadores** | Generan los hallazgos de cada categoría | Ruff, Bandit, Radon en el backend; pip-audit, pytest, coverage en el sandbox (simulados con `SANDBOX=off`) |
 | **Índice RAG** | Fragmenta el código (una función/clase por fragmento) y lo indexa para el asistente | `ast` de Python, `gemini-embedding-001`, SQLite + numpy (coseno) |
 | **LLM** | Responde preguntas sobre el código con fuentes `archivo:línea`, por streaming (SSE) | `gemini-3.8-flash` → respaldos `gemini-3.5-flash`, `gemini-3.1-flash-lite` → Groq (Llama 3.3) si responden `429`/`503` |
@@ -127,7 +127,7 @@ Estado revisado el 2026-10-17 en la máquina de desarrollo (Windows 11):
 Además, para el backend:
 
 - ✅ `backend/.venv` creado con sus dependencias (FastAPI, Uvicorn, httpx, pydantic-settings,
-  cryptography, Ruff, Bandit, Radon, numpy, pytest). `pytest`: 195 pruebas pasan.
+  cryptography, Ruff, Bandit, Radon, numpy, pytest). `pytest`: 226 pruebas pasan.
 - ✅ `backend/.env` creado a partir de `.env.example` (ver [§3.2](#32-backend)), con `SANDBOX=wsl`.
 - ✅ Sandbox WSL2 probado de punta a punta con `seed_data/demo_repo`: entorno, dependencias,
   pip-audit (5 paquetes vulnerables), pytest (2 pasan) y coverage reales en ~16 s.
@@ -272,6 +272,7 @@ backend.
 | ✅ | Tablero / repos | `GET /api/dashboard?repo=`, `GET /api/repos`, `GET /api/repos/{id}/history`, `POST /api/repos/{id}/analyze` |
 | ✅ | Análisis (analizadores elegibles, al menos uno por categoría; pytest, coverage y pip-audit en el sandbox) | `POST /api/analyze`, `WS /ws/jobs/{id}`, `GET /api/jobs/{id}`, `DELETE /api/jobs/{id}`, `POST /api/jobs/{id}/retry` |
 | ✅ | Reporte | `GET /api/report/{id}` (`id` puede ser `latest` con `?repo=`), `GET /api/report/{id}/export?format=json\|html\|md\|sarif` |
+| ✅ | Reglas de negocio del proyecto (`reglas_negocio.toml`, [ADR-003](docs/adr/ADR-003-reglas-de-negocio.md); aún no cuentan en el score) | `GET /api/report/{id}/reglas` |
 | ✅ | Editor | `GET /api/repos/{id}/tree`, `GET /api/file?repo=&path=`, `PUT /api/file`, `POST /api/fix` |
 | ✅ | Asistente (Gemini + RAG en SQLite; respuesta por streaming SSE) | `POST /api/chat/stream`, `POST /api/chat`, `GET /api/repos/{id}/index` |
 | ✅ | Comparativa (nuevos y resueltos entre dos análisis del mismo repo) | `GET /api/repos/{id}/analyses`, `POST /api/diff` |
@@ -296,12 +297,17 @@ Son los comandos que muestra la terminal en vivo del frontend:
 | 7 | coverage (pruebas) | `coverage json` | sandbox |
 | 8 | Ruff (prácticas) | `ruff check . --output-format json` | backend |
 | 9 | Radon (prácticas) | `radon cc . -j && radon mi . -j` | backend |
-| 10 | Calcular score | agregación ponderada según la configuración del proyecto | backend |
-| 11 | Indexar para el asistente | `ast` → embeddings de Gemini → SQLite | backend |
+| 10 | Verificar reglas de negocio | `reglas_negocio.toml` → patrones `prohibido` / `obligatorio` | backend (solo lee el código) |
+| 11 | Calcular score | agregación ponderada según la configuración del proyecto | backend |
+| 12 | Indexar para el asistente | `ast` → embeddings de Gemini → SQLite | backend |
 
 El sandbox corre en paralelo con Ruff/Bandit/Radon y la terminal avanza con cada fase. Con `SANDBOX=off`
 (o si el sandbox no está disponible, o se desmarca "Ejecutar en sandbox" en el formulario) los pasos del
 sandbox se simulan: sus números salen de una semilla del job y sus hallazgos dicen "(simulado)".
+
+El paso 10 lee las reglas de negocio que el proyecto declara en `reglas_negocio.toml` (raíz o `docs/`) y deja cada una
+como cumple, no cumple (con `archivo:línea`) o sin verificar. Sus resultados van aparte de los hallazgos y todavía no
+entran al score ([PROPUESTA_REGLAS_NEGOCIO.md](docs/PROPUESTA_REGLAS_NEGOCIO.md)).
 
 Los analizadores que no se marcan en el formulario no corren: su paso dice "omitido (no seleccionado)" y no
 aportan hallazgos. Hay que elegir al menos uno por categoría. Sin coverage, la cobertura sale "no medida"

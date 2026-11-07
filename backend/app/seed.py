@@ -14,8 +14,10 @@ import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from app.analyses import reglas
 from app.analyses.analyzers import complexity, static_findings_dir
 from app.analyses.models import CoverageInput, FindingInput, ReportInput
+from app.analyses.reglas_store import RulesStore
 from app.analyses.store import AnalysisStore
 from app.analyses.workspace import Workspace
 from app.analysis.clone import remove_tree
@@ -72,12 +74,13 @@ def seed(login: str, settings: Settings | None = None) -> str:
     avg_cc = round(sum(c.cc for c in cc) / len(cc), 1) if cc else 0.0
     min_cov = store.config(repo_id).thresholds["cov"]
 
+    rules = reglas.run(ws.root, files, ws.read_lines)
     now = datetime.now(UTC).replace(microsecond=0)
     for weeks_ago, cov_total, failed, extra in HISTORY:
         coverage = {f: max(0, pct - (74 - cov_total)) for f, pct in COVERAGE.items()}
         # Los análisis anteriores tenían además algunos hallazgos que después se corrigieron
         findings = static + static[:extra] + test_findings(coverage, failed, min_cov)
-        store.save_report(repo_id, ReportInput(
+        report_id, _ = store.save_report(repo_id, ReportInput(
             branch="main", commit=f"{0xA3F9C1E - weeks_ago * 4099:07x}", duration_s=150 + weeks_ago * 7,
             coverage_total=cov_total, tests_failed=failed, avg_complexity=avg_cc,
             findings=findings,
@@ -85,9 +88,12 @@ def seed(login: str, settings: Settings | None = None) -> str:
             complexity=cc,
             created_at=(now - timedelta(weeks=weeks_ago, hours=2)).isoformat().replace("+00:00", "Z"),
         ), ws)
+        # Reglas de negocio de seed_data/demo_repo/reglas_negocio.toml (nivel patrón, ADR-003)
+        RulesStore(conn).save(report_id, rules)
     store.set_repo_status(repo_id, "listo", files=len(py))
     print(f"Repo de demostración listo: {DEMO_NAME} (id {repo_id}, usuario {user['login']})")
     print(f"  {len(static)} hallazgos de Ruff/Bandit, {len(cc)} funciones medidas, {len(HISTORY)} análisis")
+    print(reglas.summary_line(rules).replace("  ", "  reglas de negocio: ", 1))
     print(f"  Copia de trabajo: {ws.root}")
     conn.close()
     return repo_id

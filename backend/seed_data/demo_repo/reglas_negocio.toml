@@ -1,0 +1,45 @@
+# reglas_negocio.toml — reglas de negocio de api-pagos (formato: docs/PROPUESTA_REGLAS_NEGOCIO.md)
+# IA voy las lee al analizar el repo y verifica cada una con su patrón (prohibido / obligatorio).
+
+[proyecto]
+nombre  = "API de pagos"
+version = "1.0"
+
+[[regla]]
+id          = "RN-001"
+titulo      = "Montos con Decimal"
+descripcion = "Todo monto de dinero se calcula con Decimal; nunca con float."
+severidad   = "alta"
+rutas       = ["pagos/"]
+prohibido   = 'float\('
+historia    = "HU-02"
+responsable = "Equipo backend"
+criterio    = "Dado un pago de $0.10 con comisión de 10 %, cuando se cobra, entonces el monto es exactamente $0.09"
+
+[[regla]]
+id          = "RN-002"
+titulo      = "Consultas SQL parametrizadas"
+descripcion = "Ninguna consulta SQL se arma concatenando datos del cliente; se usan parámetros (?)."
+severidad   = "alta"
+rutas       = ["api.py"]
+prohibido   = '(SELECT|INSERT|UPDATE|DELETE)[^"]*"\s*\+'
+historia    = "HU-05"
+responsable = "Equipo backend"
+
+[[regla]]
+id          = "RN-003"
+titulo      = "La clave de los tokens viene del entorno"
+descripcion = "La clave con la que se firman los tokens se lee de una variable de entorno; nunca va en el código."
+severidad   = "media"
+rutas       = ["auth.py"]
+obligatorio = 'os\.(environ|getenv)'
+historia    = "HU-01"
+
+[[regla]]
+id          = "RN-004"
+titulo      = "Pagos sobre el límite requieren autorización"
+descripcion = "Un pago mayor al límite solo se cobra si lo autorizó alguien de admin o finanzas."
+severidad   = "alta"
+historia    = "HU-03"
+criterio    = "Dado un pago de $5,000 con límite de $1,000 autorizado por «ventas», cuando se procesa, entonces se rechaza con motivo «autorizador»"
+# Sin patrón: se verificará con una prueba marcada @pytest.mark.regla("RN-004") (Sprint 8)

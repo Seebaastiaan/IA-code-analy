@@ -1,7 +1,7 @@
 import type { Category } from '@/shared/types/common'
 import type { AnalyzerId } from '../types'
 
-/** Los 11 pasos del análisis. El backend envía el nombre y el comando real por WebSocket. */
+/** Los 12 pasos del análisis (backend/app/analysis/fake.py). El backend envía el nombre y el comando real por WebSocket. */
 export const JOB_STEPS: { name: string; command: string }[] = [
   { name: 'Clonando repositorio', command: 'git clone --depth 1 --branch {branch} {url}' },
   { name: 'Creando entorno aislado', command: 'uv venv .venv  (sandbox)' },
@@ -12,6 +12,7 @@ export const JOB_STEPS: { name: string; command: string }[] = [
   { name: 'coverage', command: 'coverage json' },
   { name: 'Ruff', command: 'ruff check . --output-format json' },
   { name: 'Radon', command: 'radon cc . -j && radon mi . -j' },
+  { name: 'Verificando reglas de negocio', command: 'reglas_negocio.toml → patrones prohibido/obligatorio' },
   { name: 'Calculando score', command: 'agregación ponderada (.ia_voy.toml)' },
   { name: 'Indexando para el asistente', command: 'ast → embeddings (Gemini) → SQLite' },
 ]
