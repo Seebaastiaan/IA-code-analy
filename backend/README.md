@@ -53,7 +53,7 @@ En el frontend, `frontend/.env.development` con `VITE_USE_MOCKS=false`: Vite red
 | `SANDBOX` | Dónde corren pytest, coverage y pip-audit: `off` (simulados, por defecto en código), `wsl` o `docker`. Ver [Sandbox](#sandbox). |
 | `SANDBOX_WSL_DISTRO` / `SANDBOX_DOCKER_IMAGE` / `SANDBOX_TIMEOUT_S` | Opcionales. Por defecto `Ubuntu-24.04`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` y 1200 s por análisis. |
 | `GEMINI_API_KEY` | Asistente IA (respuestas y embeddings): https://aistudio.google.com/apikey. Sin ella el asistente responde `503 llm_not_configured`. |
-| `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Opcionales. Por defecto `gemini-3.8-flash` y, si responde 429/503, `gemini-3.5-flash,gemini-3.1-flash-lite`. |
+| `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Opcionales. Por defecto `gemini-3.5-flash-lite` y, si responde 429/503, `gemini-3.5-flash,gemini-3.1-flash-lite`. |
 | `GROQ_API_KEY` | Opcional. Último respaldo (Llama 3.3), independiente de Google: https://console.groq.com/keys |
 | `CLONES_PATH` | Carpeta de los repos clonados (por defecto `%LOCALAPPDATA%\ia-voy\repos`). No uses una carpeta de OneDrive/Dropbox. |
 
