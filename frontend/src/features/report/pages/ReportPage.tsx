@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
+import { useApplyFix } from '@/features/editor/hooks/useApplyFix'
 import { FindingDrawer, useFindingParam } from '@/features/findings'
 import { useSelectedRepo } from '@/features/repos'
 import { RulesTab } from '@/features/rules'
@@ -21,6 +22,7 @@ const TABS: { value: ReportTab; label: string }[] = [
 export default function ReportPage() {
   const { repoId = '', reportId = 'latest' } = useParams()
   const { data: report, isPending, error, refetch } = useReport(repoId, reportId)
+  const applyFix = useApplyFix(repoId)
   const filters = useReportFilters()
   const { findingId, open, close } = useFindingParam()
   const [params, setParams] = useSearchParams()
@@ -60,7 +62,7 @@ export default function ReportPage() {
       <Tabs className="mt-6" options={TABS} value={filters.tab} onChange={(tab) => filters.set({ tab })} />
 
       {filters.tab === 'hallazgos' ? (
-        <FindingsTab findings={report.findings} q={filters.q} sev={filters.sev} cat={filters.cat} onChange={filters.set} onClear={filters.clear} onOpen={open} />
+        <FindingsTab findings={report.findings} q={filters.q} sev={filters.sev} cat={filters.cat} onChange={filters.set} onClear={filters.clear} onOpen={open} onFixAll={(list) => applyFix.mutate(list)} fixing={applyFix.isPending} />
       ) : filters.tab === 'cobertura' ? (
         <CoverageTab coverage={report.coverage} threshold={report.thresholds.cov} />
       ) : filters.tab === 'reglas' ? (

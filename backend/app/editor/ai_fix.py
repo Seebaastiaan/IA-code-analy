@@ -10,11 +10,14 @@ También está la corrección determinista de pip-audit (`bump_requirement`): ca
 """
 
 import ast
+import json
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass
 from itertools import pairwise
 
+from app.analyses.analyzers import AnalyzerError, ruff_raw
 from app.assistant.llm import LLM, Turn
 from app.errors import ApiError
 
@@ -27,6 +30,10 @@ MAX_TEXT_FILE = 200
 # Cuánto se puede haber movido la línea del hallazgo desde el análisis
 SEARCH = 30
 CR = "\r"
+# Intentos con el modelo: si la primera propuesta no es válida, se le devuelve el error una vez
+ATTEMPTS = 2
+
+log = logging.getLogger(__name__)
 
 SYSTEM = """Eres el corrector de código de IA voy, un analizador de calidad de Python. Recibes hallazgos de
 seguridad, pruebas o buenas prácticas y fragmentos numerados del archivo. Devuelve el cambio MÍNIMO que corrige
@@ -161,6 +168,29 @@ def _insert_imports(lines: list[str], imports: list[str]) -> list[str]:
     return lines[:last] + new + lines[last:]
 
 
+NUMBERED = re.compile(r"^\s*\d+\| ?")
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def clean_replacement(text: str, original: str) -> str:
+    """
+    Errores típicos del modelo que rompen la compilación: copiar el prefijo `   83| ` de los fragmentos o devolver
+    el bloque sin la indentación del código que reemplaza.
+    """
+    lines = text.split("\n")
+    body = [line for line in lines if line.strip()]
+    if body and all(NUMBERED.match(line) for line in body):
+        lines = [NUMBERED.sub("", line, count=1) for line in lines]
+        body = [line for line in lines if line.strip()]
+    base = _indent(original.rstrip(CR))
+    if body and base and not _indent(body[0]):
+        lines = [base + line if line.strip() else line for line in lines]
+    return "\n".join(lines)
+
+
 def apply_ai_edits(path: str, lines: list[str], data: dict, spans: list[tuple[int, int]]) -> list[str]:
     """Aplica la respuesta del modelo validándola. ApiError 422 si propone algo fuera de lo permitido."""
     edits = data.get("edits") or []
@@ -172,6 +202,8 @@ def apply_ai_edits(path: str, lines: list[str], data: dict, spans: list[tuple[in
             raise ApiError(422, "ai_fix_invalid", "La IA devolvió una corrección con un formato inesperado; vuelve a intentarlo") from exc
         if start > end or not any(s <= start and end <= f for s, f in spans):
             raise ApiError(422, "ai_fix_invalid", f"La IA quiso cambiar las líneas {start}-{end}, fuera del código del hallazgo; vuelve a intentarlo")
+        if path.endswith(".py") and text and 1 <= start <= len(lines):
+            text = clean_replacement(text, lines[start - 1])
         checked.append((start, end, text))
     checked.sort()
     if any(a[1] >= b[0] for a, b in pairwise(checked)):
@@ -183,20 +215,58 @@ def apply_ai_edits(path: str, lines: list[str], data: dict, spans: list[tuple[in
     return _insert_imports(out, [str(i) for i in data.get("imports") or []])
 
 
+UNDEFINED = re.compile(r"Undefined name `([^`]+)`")
+
+
+def _undefined_names(content: str, path: str) -> set[str]:
+    """Nombres sin definir (F821 de Ruff): compilar no basta, p. ej. usar `logger` sin crearlo."""
+    try:
+        diags = ruff_raw(content, path, None)
+    except AnalyzerError:
+        return set()  # sin Ruff no se bloquea la corrección; ya se validó que compila
+    return {m.group(1) for d in diags if d.get("code") == "F821" and (m := UNDEFINED.search(d.get("message", "")))}
+
+
 def ai_fix(llm: LLM, path: str, content: str, targets: list[Target]) -> tuple[str, str]:
     """(contenido corregido, explicación). LlmError si el modelo falla; ApiError si su propuesta no sirve."""
     lines = content.split("\n")
     spans = windows(path, lines, targets)
-    data = llm.answer(SYSTEM, [Turn("user", prompt(path, lines, targets, spans))], SCHEMA).data
-    fixed = "\n".join(apply_ai_edits(path, lines, data, spans))
-    if fixed == content:
-        raise ApiError(409, "fix_unavailable", "La IA no encontró un cambio para estos hallazgos")
-    if path.endswith(".py"):
+    turns = [Turn("user", prompt(path, lines, targets, spans))]
+    baseline: set[str] | None = None  # nombres sin definir del original, se calculan una vez
+    for attempt in range(ATTEMPTS):
+        data = llm.answer(SYSTEM, turns, SCHEMA).data
         try:
-            ast.parse(fixed)
-        except SyntaxError as exc:
-            raise ApiError(422, "ai_fix_invalid", f"La corrección de la IA no compila (línea {exc.lineno}); vuelve a intentarlo") from exc
-    return fixed, str(data.get("explanation") or "").strip()
+            fixed = "\n".join(apply_ai_edits(path, lines, data, spans))
+            if fixed == content:
+                raise ApiError(409, "fix_unavailable", "La IA no encontró un cambio para estos hallazgos")
+            if path.endswith(".py") and baseline is None:
+                baseline = _undefined_names(content, path)
+            _check_python(path, fixed, baseline or set())
+            return fixed, str(data.get("explanation") or "").strip()
+        except ApiError as exc:
+            # Propuesta inválida (no compila, nombres sin definir, fuera de la ventana…): se le devuelve el error
+            # al modelo para que la corrija, en vez de dejar a la persona reintentando a mano
+            if exc.status != 422 or attempt == ATTEMPTS - 1:
+                log.warning("Corrección con IA rechazada en %s: %s\n%s", path, exc.message, json.dumps(data, ensure_ascii=False)[:2000])
+                raise
+            turns += [
+                Turn("model", json.dumps(data, ensure_ascii=False)),
+                Turn("user", f"Tu corrección no sirve: {exc.message}. Revisa la indentación, que cada bloque quede completo "
+                             "y que todo nombre que uses esté definido o importado. Responde de nuevo con el mismo formato."),
+            ]
+    raise AssertionError("inalcanzable")
+
+
+def _check_python(path: str, fixed: str, baseline: set[str]) -> None:
+    if not path.endswith(".py"):
+        return
+    try:
+        ast.parse(fixed)
+    except SyntaxError as exc:
+        raise ApiError(422, "ai_fix_invalid", f"La corrección de la IA no compila (línea {exc.lineno}: {exc.msg})") from exc
+    if new := _undefined_names(fixed, path) - baseline:
+        names = ", ".join(f"`{n}`" for n in sorted(new))
+        raise ApiError(422, "ai_fix_invalid", f"La corrección de la IA usa nombres sin definir ({names})")
 
 
 # ─── pip-audit: cambiar la versión ───

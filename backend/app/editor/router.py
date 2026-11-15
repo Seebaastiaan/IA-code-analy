@@ -16,7 +16,7 @@ from app.analyses.analyzers import (
 )
 from app.analyses.models import FindingInput
 from app.analyses.store import AnalysisStore
-from app.analyses.views import SEV_ORDER, fix_kind, report_scores, visible
+from app.analyses.views import SEV_ORDER, fix_kind, report_analyzers, report_scores, visible
 from app.analyses.workspace import Workspace, language_of, snippet
 from app.assistant.llm import LLM, LlmError
 from app.config import Settings, get_settings
@@ -137,12 +137,19 @@ def _match(existing: sqlite3.Row, current: list[FindingInput], lines: list[str])
     return min(candidates, key=lambda f: abs(f.line - existing["line"]), default=None)
 
 
-def reanalyze_file(store: AnalysisStore, ws: Workspace, report_id: str, path: str, content: str) -> tuple[list[int], list[int]]:
-    """Recalcula Ruff y Bandit del archivo: resuelve lo que ya no aparece y agrega lo nuevo."""
+def analyze_file(ws: Workspace, path: str, content: str, report: sqlite3.Row) -> list[FindingInput]:
+    """Ruff y Bandit del archivo, solo los que se usaron en el reporte (no se cuelan hallazgos de uno apagado)."""
     try:
-        current = static_findings(content, path, ws.root)
+        found = static_findings(content, path, ws.root)
     except AnalyzerError as exc:
         raise analyzer_failure(exc) from exc
+    # Reportes viejos no guardan la lista: corrieron todos
+    used = {a.lower() for a in report_analyzers(report)} or {t.lower() for t in REANALYZED_TOOLS}
+    return [f for f in found if f.tool.lower() in used]
+
+
+def reanalyze_file(store: AnalysisStore, report_id: str, path: str, content: str, current: list[FindingInput]) -> tuple[list[int], list[int]]:
+    """Con los resultados `current` de Ruff y Bandit del archivo: resuelve lo que ya no aparece y agrega lo nuevo."""
     lines = content.split("\n")
     resolved = []
     for f in store.findings(report_id, file=path):
@@ -168,10 +175,14 @@ def save_file(body: SaveFileRequest, store: Analyses, user_id: UserId, settings:
     latest = store.latest_report(body.repo_id)
     cfg = store.config(body.repo_id)
     before = report_scores(store, latest, cfg).global_ if latest else 0.0
+    reanalyze = latest is not None and body.path.endswith(".py")
+    # Se analiza ANTES de escribir: si Ruff o Bandit fallan no se guarda nada, en vez de dejar el archivo
+    # cambiado y el reporte con los hallazgos (y el código) de la versión anterior
+    current = analyze_file(ws, body.path, body.content, latest) if reanalyze else []
     ws.write(body.path, body.content)
-    if latest is None or not body.path.endswith(".py"):
+    if not reanalyze:
         return SaveFileResponse(resolved_ids=[], new_ids=[], score_before=before, score_after=before)
-    resolved, new_ids = reanalyze_file(store, ws, latest["id"], body.path, body.content)
+    resolved, new_ids = reanalyze_file(store, latest["id"], body.path, body.content, current)
     after = report_scores(store, latest, cfg).global_
     return SaveFileResponse(resolved_ids=resolved, new_ids=new_ids, score_before=before, score_after=after)
 
@@ -192,6 +203,15 @@ def fix(body: FixRequest, store: Analyses, user_id: UserId, settings: Config, ll
     if not fixable:
         raise ApiError(422, "fix_unavailable", "Estos hallazgos no tienen corrección")
     ws = workspace(settings, body.repo_id)
+    # Primero se sincroniza el reporte con el archivo guardado: si ya se corrigió (p. ej. un guardado anterior
+    # que no pudo re-analizar), el hallazgo queda resuelto en vez de pedirle a la IA corregir código que ya cambió
+    stale: set[int] = set()
+    for path in {r["file"] for r in fixable if r["file"].endswith(".py") and r["tool"] in REANALYZED_TOOLS}:
+        content = ws.read(path)
+        stale.update(reanalyze_file(store, latest["id"], path, content, analyze_file(ws, path, content, latest))[0])
+    fixable = [r for r in fixable if r["id"] not in stale]
+    if not fixable:
+        raise ApiError(409, "already_fixed", "El archivo ya tiene esta corrección: el reporte mostraba la versión anterior y el hallazgo quedó resuelto")
     by_file: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for r in fixable:
         by_file[r["file"]].append(r)
@@ -200,7 +220,11 @@ def fix(body: FixRequest, store: Analyses, user_id: UserId, settings: Config, ll
         raise ApiError(503, "llm_not_configured", "Las correcciones con IA necesitan GEMINI_API_KEY en backend/.env; las de Ruff funcionan sin ella")
     if len(ai_files) > MAX_AI_FILES:
         raise ApiError(422, "too_many_files", f"Corrige con IA hasta {MAX_AI_FILES} archivos a la vez")
+    patches, notes = _fix_patches(ws, by_file, llm)
+    return FixResponse(patches=[Patch(**p) for p in patches], notes=notes)
 
+
+def _fix_patches(ws: Workspace, by_file: dict[str, list[sqlite3.Row]], llm: LLM | None) -> tuple[list[dict], list[str]]:
     patches, notes = [], []
     for path, items in by_file.items():
         content = ws.read(path)
@@ -236,4 +260,4 @@ def fix(body: FixRequest, store: Analyses, user_id: UserId, settings: Config, ll
         patches += diff_patches(path, content, current)
     if not patches:
         raise ApiError(409, "fix_unavailable", "La corrección ya no aplica: el código cambió o el hallazgo se resolvió")
-    return FixResponse(patches=[Patch(**p) for p in patches], notes=notes)
+    return patches, notes

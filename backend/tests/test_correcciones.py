@@ -13,7 +13,7 @@ from app.analyses.models import FindingInput
 from app.analyses.remedies import BANDIT, bandit_remedy, ruff_remedy
 from app.analyses.store import fix_kind_of
 from app.assistant.llm import Answer, LlmError
-from app.editor.ai_fix import Target, apply_ai_edits, bump_requirement, fix_version, windows
+from app.editor.ai_fix import Target, apply_ai_edits, bump_requirement, clean_replacement, fix_version, windows
 from app.editor.router import get_fix_llm
 from app.errors import ApiError
 from app.seed import seed
@@ -152,10 +152,14 @@ class FakeLLM:
 
     def __init__(self):
         self.reply: dict | Exception = {"edits": [], "explanation": ""}
+        # Respuestas en orden para los reintentos; al acabarse se usa `reply`
+        self.replies: list[dict] = []
         self.prompts: list[str] = []
 
     def answer(self, system, turns, schema, on_delta=None):
         self.prompts.append(turns[-1].text)
+        if self.replies:
+            return Answer(self.replies.pop(0), "Fake")
         if isinstance(self.reply, Exception):
             raise self.reply
         return Answer(self.reply, "Fake")
@@ -228,6 +232,89 @@ def test_errores_del_modelo(client, demo, fake_llm):
     assert res.status_code == 503 and res.json()["error"]["code"] == "llm_rate_limited"
     fake_llm.reply = {"edits": [], "explanation": "Nada que cambiar"}
     assert fix(client, demo, f["id"]).status_code == 409
+
+
+def test_si_la_propuesta_no_compila_la_ia_reintenta_con_el_error(client, demo, fake_llm):
+    f = finding(client, demo, "B602")
+    fake_llm.replies = [
+        {"edits": [{"start_line": 25, "end_line": 25, "replacement": "    subprocess.call(["}], "explanation": ""},
+        {"edits": [{"start_line": 25, "end_line": 25, "replacement": '    subprocess.call(["cp", "pagos.db", destino])'}], "explanation": "Lista."},
+    ]
+    res = fix(client, demo, f["id"])
+    assert res.status_code == 200, res.json()
+    assert len(fake_llm.prompts) == 2 and "no compila" in fake_llm.prompts[-1]
+
+
+@pytest.mark.parametrize(("text", "original", "esperado"), [
+    # Copió el prefijo de los fragmentos numerados
+    ("   25|     x = 1\n   26|     y = 2", "    x = 0", "    x = 1\n    y = 2"),
+    # Devolvió el bloque sin la indentación de la línea que reemplaza
+    ("try:\n    x = 1\nexcept ValueError:\n    pass", "        x = 0", "        try:\n            x = 1\n        except ValueError:\n            pass"),
+    # Ya venía bien: no se toca
+    ("    x = 1", "    x = 0", "    x = 1"),
+])
+def test_limpia_la_respuesta_del_modelo(text, original, esperado):
+    assert clean_replacement(text, original) == esperado
+
+
+def test_la_ia_no_puede_usar_nombres_sin_definir(client, demo, fake_llm):
+    f = finding(client, demo, "B602")
+    fake_llm.reply = {"edits": [{"start_line": 25, "end_line": 25, "replacement": "    logger.warning(destino)"}], "explanation": ""}
+    res = fix(client, demo, f["id"])
+    assert res.status_code == 422 and "`logger`" in res.json()["error"]["message"]
+
+
+def test_ruff_ignora_fix_true_del_repo(tmp_path):
+    # Con `fix = true`, Ruff sobre stdin imprimía el código corregido en vez del JSON
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nfix = true\n", encoding="utf-8")
+    code = "import os\n"
+    (tmp_path / "m.py").write_text(code, encoding="utf-8")
+    assert [f.rule for f in static_findings(code, "m.py", tmp_path)] == ["F401"]
+    analyzers.static_findings_dir(tmp_path, ["m.py"], bandit_on=False)
+    # Sobre la carpeta tampoco reescribe los archivos del clon
+    assert (tmp_path / "m.py").read_text(encoding="utf-8") == code
+
+
+def test_fix_de_un_hallazgo_ya_corregido_lo_resuelve(client, demo, settings, fake_llm):
+    from app.analyses.workspace import Workspace
+
+    f = finding(client, demo, "B602")
+    ws = Workspace(settings, demo)
+    # Corregido en disco sin re-analizar (como un guardado cuyo análisis falló)
+    content = ws.read("api.py").replace('subprocess.call("cp pagos.db " + destino, shell=True)', 'subprocess.call(["cp", "pagos.db", destino])')
+    ws.write("api.py", content)
+    res = fix(client, demo, f["id"])
+    assert res.status_code == 409 and res.json()["error"]["code"] == "already_fixed"
+    assert fake_llm.prompts == []  # no se gastó una llamada a la IA
+    assert all(x["rule"] != "B602" or x["status"] != "open" for x in client.get("/api/report/latest", params={"repo": demo}).json()["findings"])
+
+
+def test_reanalizar_respeta_los_analizadores_del_reporte(demo, settings):
+    from app.analyses.workspace import Workspace
+    from app.editor.router import analyze_file
+
+    ws = Workspace(settings, demo)
+    content = ws.read("api.py")
+    tools = lambda analyzers: {f.tool for f in analyze_file(ws, "api.py", content, {"analyzers": analyzers})}  # noqa: E731
+    assert tools('["ruff", "bandit"]') == {"Ruff", "Bandit"}
+    # Un análisis sin Bandit no gana hallazgos de Bandit al guardar o corregir
+    assert tools('["ruff", "pytest"]') == {"Ruff"}
+    # Reportes viejos sin la lista: corrieron todos
+    assert tools(None) == {"Ruff", "Bandit"}
+
+
+def test_guardar_no_escribe_si_el_analisis_falla(client, demo, settings, monkeypatch):
+    from app.analyses.workspace import Workspace
+    from app.editor import router
+
+    def falla(*_):
+        raise analyzers.AnalyzerError("Ruff no devolvió un resultado válido")
+
+    monkeypatch.setattr(router, "static_findings", falla)
+    before = Workspace(settings, demo).read("api.py")
+    res = client.put("/api/file", json={"repo_id": demo, "path": "api.py", "content": before + "\nx = 1\n"})
+    assert res.status_code == 502
+    assert Workspace(settings, demo).read("api.py") == before
 
 
 def test_el_asistente_no_manda_a_leer_la_documentacion():

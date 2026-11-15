@@ -55,11 +55,13 @@ def _ruff_config_args(root: Path | None) -> list[str]:
     Configuración y reglas de Ruff: la del propio repo (más RUFF_EXTEND) si la tiene; si no, `--isolated` (que no
     se cuele la de una carpeta superior ni la del usuario del servidor) con las reglas fijas de RUFF_SELECT.
     """
+    # --no-fix siempre: si el repo trae `fix = true`, Ruff con stdin imprime el código corregido en vez del JSON
+    # (y sobre la carpeta reescribiría los archivos del clon). Las correcciones se aplican aparte con fix_content.
     for name in RUFF_CONFIGS:
         cfg = root / name if root else None
         if cfg and cfg.is_file() and (name != "pyproject.toml" or "[tool.ruff" in cfg.read_text(encoding="utf-8", errors="replace")):
-            return ["--config", str(cfg), "--extend-select", RUFF_EXTEND]
-    return ["--isolated", "--select", RUFF_SELECT]
+            return ["--config", str(cfg), "--extend-select", RUFF_EXTEND, "--no-fix"]
+    return ["--isolated", "--select", RUFF_SELECT, "--no-fix"]
 
 
 def ruff_raw(content: str, path: str, cwd: Path | None) -> list[dict]:

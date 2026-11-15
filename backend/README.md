@@ -38,7 +38,7 @@ copy .env.example .env   # y llena GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-Con `uv`: `uv sync --extra dev` y `uv run uvicorn app.main:app --reload --port 8000`.
+Con `uv`: `uv sync --extra dev` y `uv run uvicorn app.main:app --reload --reload-dir app --port 8000`.
 
 En el frontend, `frontend/.env.development` con `VITE_USE_MOCKS=false`: Vite redirige `/api` y `/ws` a
 `http://localhost:8000` (`VITE_PROXY_TARGET`).

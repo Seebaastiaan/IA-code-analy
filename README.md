@@ -58,7 +58,7 @@ Llega en los siguientes sprints:
 cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --reload-dir app --port 8000
 uv run pytest              # 235 pruebas
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
