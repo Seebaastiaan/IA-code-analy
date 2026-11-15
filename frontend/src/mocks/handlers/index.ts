@@ -127,7 +127,7 @@ export const handlers = [
   }, 1200)),
   http.post(EP.fix, route(async ({ request }) => {
     const body = (await request.json()) as FixRequest
-    return json({ patches: db.fixPatches(body.finding_ids) })
+    return json({ patches: db.fixPatches(body.finding_ids), notes: db.fixNotes(body.finding_ids) })
   })),
 
   // ─── Asistente ───

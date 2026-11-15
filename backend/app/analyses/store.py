@@ -23,6 +23,21 @@ def default_config() -> ProjectConfig:
     return ProjectConfig(weights=dict(DEFAULT_WEIGHTS), thresholds=dict(DEFAULT_THRESHOLDS), ignored=["B101"], excluded=["migrations/", "tests/fixtures/"])
 
 
+def fix_kind_of(f: FindingInput) -> str | None:
+    """
+    Cómo se corrige el hallazgo: "auto" (Ruff, versión de pip-audit), "ia" (el LLM propone el cambio en el editor)
+    o None. Una prueba que falla (real, no simulada) se corrige con IA en su archivo; la cobertura baja y las
+    dependencias que no se instalan no se arreglan con un parche de una línea.
+    """
+    if f.fix_kind:
+        return f.fix_kind
+    if f.fix:
+        return "auto"
+    if f.tool == "pytest" and f.rule in ("FAIL", "ERROR") and f.file.endswith(".py") and "simulado" not in f.rec:
+        return "ia"
+    return None
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -122,10 +137,11 @@ class AnalysisStore:
             lines = cache[f.file]
             code = f.code if f.code is not None else (lines[f.line - 1].rstrip("\r") if lines and 1 <= f.line <= len(lines) else "")
             snip = snippet(lines, f.line)
+            kind = fix_kind_of(f)
             cur = self.conn.execute(
-                """INSERT INTO findings (report_id, sev, cat, tool, rule, file, line, msg, why, rec, fix, code, snippet)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (report_id, f.sev, f.cat, f.tool, f.rule, f.file, f.line, f.msg, f.why, f.rec, int(f.fix), code, json.dumps(snip) if snip else None),
+                """INSERT INTO findings (report_id, sev, cat, tool, rule, file, line, msg, why, rec, fix, fix_kind, code, snippet)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (report_id, f.sev, f.cat, f.tool, f.rule, f.file, f.line, f.msg, f.why, f.rec, int(kind is not None), kind, code, json.dumps(snip) if snip else None),
             )
             ids.append(cur.lastrowid)
         if commit:

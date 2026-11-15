@@ -43,6 +43,8 @@ class Finding(BaseModel):
     why: str
     rec: str
     fix: bool
+    # auto: Ruff / versión de pip-audit · ia: la propone el LLM (POST /api/fix) · None: sin corrección
+    fix_kind: Literal["auto", "ia"] | None = None
     status: Literal["open", "resolved"]
     snippet: list[SnippetLine] | None = None
 

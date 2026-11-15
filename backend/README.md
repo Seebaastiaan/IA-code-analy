@@ -219,8 +219,17 @@ conservan los `seg/test/prac` que se guardaron.
 - `PUT /api/file` respalda la versión anterior en `data/backups/{repo}/{fecha}/{ruta}` y re-analiza el
   archivo con Ruff y Bandit: resuelve lo que desapareció, mueve lo que cambió de línea y agrega lo
   nuevo. Responde `{resolved_ids, new_ids, score_before, score_after}`.
-- `POST /api/fix` devuelve parches con las correcciones "safe" de Ruff, ubicando cada hallazgo por regla
-  y texto de su línea. Bandit no tiene correcciones automáticas.
+- `POST /api/fix` devuelve parches `{patches, notes}` para todo hallazgo que se arregla en el código
+  (`fix_kind`, [docs/ia/catalogo-reglas.md](../docs/ia/catalogo-reglas.md)):
+  - `auto`: las correcciones `safe` y `unsafe` de Ruff (cada hallazgo se ubica por regla y texto de su línea) y
+    la versión corregida de pip-audit en `requirements*.txt`.
+  - `ia` ([app/editor/ai_fix.py](app/editor/ai_fix.py)): Bandit, Ruff sin corrección, pruebas que fallan y
+    pip-audit en `pyproject.toml`. Gemini recibe la función del hallazgo numerada y devuelve ediciones por rango
+    de líneas (más imports); se rechazan (`422 ai_fix_invalid`) si salen de esa función, se solapan o el `.py`
+    no compila. Necesita `GEMINI_API_KEY` (`503 llm_not_configured`); `notes` explica qué cambió.
+  - Sin corrección: `COV` y `DEPS` (no se arreglan con un parche). Nada se guarda hasta aceptar el diff.
+- Cada hallazgo de Bandit y Ruff trae una recomendación concreta en español
+  ([app/analyses/remedies.py](app/analyses/remedies.py)), no un enlace a la documentación.
 
 **Datos de demostración** (sin analizar un repo de GitHub): entra una vez con GitHub y luego
 
@@ -247,7 +256,8 @@ guardado en el editor se refleja sin re-indexar todo.
    mencionado en la pregunta (`regla` y `archivo:línea`) con ±12 líneas de código, y los fragmentos.
 3. Pide a Gemini una respuesta JSON con esquema (`answer`, `sources`, `finding_id`).
 4. Valida: solo quedan las fuentes que estaban en el contexto (nada de `archivo:línea` inventados) y la
-   acción solo se ofrece si el hallazgo está abierto y tiene corrección automática.
+   acción solo se ofrece si el hallazgo está abierto y tiene corrección ("Aplicar corrección automática" o
+   "Corregir con IA"). El prompt le prohíbe responder solo "revisa la documentación": debe decir qué cambiar.
 
 **`POST /api/chat/stream`** hace lo mismo pero responde con Server-Sent Events: `delta` (`{text}`) con cada
 trozo del campo `answer` mientras Gemini lo genera (`streamGenerateContent`), y al final `done` (la misma

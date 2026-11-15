@@ -16,7 +16,7 @@ export function useApplyFix(repoId: string) {
 
   return useMutation({
     mutationFn: async (findings: Finding[]) => {
-      const { patches } = await fileApi.fix({ repo_id: repoId, finding_ids: findings.map((f) => f.id) })
+      const { patches, notes = [] } = await fileApi.fix({ repo_id: repoId, finding_ids: findings.map((f) => f.id) })
       const files = [...new Set(patches.map((p) => p.file))]
       let missed = 0
       for (const path of files) {
@@ -27,11 +27,13 @@ export function useApplyFix(repoId: string) {
         missed += result.missed
         store.applyFix(key, result.content, findings.filter((f) => f.file === path).map((f) => f.id))
       }
-      return { file: files[0] ?? findings[0]?.file, missed }
+      return { file: files[0] ?? findings[0]?.file, missed, notes }
     },
-    onSuccess: ({ file, missed }) => {
+    onSuccess: ({ file, missed, notes }) => {
       if (file) navigateTo(paths.editor(repoId, { file, diff: true }))
       if (missed) toast('Parte de la corrección no se pudo aplicar: el código cambió. Revisa el diff.', { tone: 'err' })
+      // La IA explica qué cambió y por qué
+      else if (notes.length) toast(`Propuesta de la IA: ${notes.join(' ')} Revisa el diff y guarda.`, { tone: 'info' })
       else toast('Corrección aplicada. Revisa el diff y guarda.', { tone: 'info' })
     },
     onError: (e) => toast(e.message, { tone: 'err' }),

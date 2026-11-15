@@ -143,6 +143,8 @@ CREATE TABLE IF NOT EXISTS findings (
     why        TEXT NOT NULL,
     rec        TEXT NOT NULL,
     fix        INTEGER NOT NULL DEFAULT 0,
+    -- auto (Ruff, versión de pip-audit) | ia (la propone el LLM en el editor) | NULL; fix = 1 si hay alguna
+    fix_kind   TEXT,
     status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
     -- Texto de la línea señalada: permite reconocer el hallazgo aunque el archivo se mueva de lugar
     code       TEXT NOT NULL DEFAULT '',
@@ -261,6 +263,10 @@ MIGRATIONS = {
     },
     "business_rule_results": {
         "tests": "TEXT NOT NULL DEFAULT '[]'",
+    },
+    # Correcciones con IA para lo que Ruff no corrige (Bandit, pruebas que fallan…); NULL = reportes anteriores
+    "findings": {
+        "fix_kind": "TEXT",
     },
 }
 

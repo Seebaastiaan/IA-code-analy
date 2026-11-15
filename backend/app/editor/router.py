@@ -16,9 +16,11 @@ from app.analyses.analyzers import (
 )
 from app.analyses.models import FindingInput
 from app.analyses.store import AnalysisStore
-from app.analyses.views import SEV_ORDER, report_scores, visible
+from app.analyses.views import SEV_ORDER, fix_kind, report_scores, visible
 from app.analyses.workspace import Workspace, language_of, snippet
+from app.assistant.llm import LLM, LlmError
 from app.config import Settings, get_settings
+from app.editor.ai_fix import Target, ai_fix, bump_requirement, fix_version, locate
 from app.errors import ApiError
 
 router = APIRouter(prefix="/api", tags=["editor"])
@@ -26,6 +28,8 @@ router = APIRouter(prefix="/api", tags=["editor"])
 # Herramientas cuyo resultado se puede recalcular al guardar un archivo
 REANALYZED_TOOLS = {"Ruff", "Bandit"}
 MAX_FIX_FINDINGS = 50
+# Archivos que se corrigen con IA en una sola petición (una llamada al modelo por archivo)
+MAX_AI_FILES = 5
 
 Config = Annotated[Settings, Depends(get_settings)]
 
@@ -71,6 +75,22 @@ class Patch(BaseModel):
 
 class FixResponse(BaseModel):
     patches: list[Patch]
+    # Qué cambió la IA y por qué, por archivo (vacío si solo hubo correcciones de Ruff o de versión)
+    notes: list[str] = Field(default_factory=list)
+
+
+def get_fix_llm(settings: Config) -> LLM | None:
+    """El LLM para las correcciones con IA; None si no hay GEMINI_API_KEY (las de Ruff funcionan igual)."""
+    return LLM(settings) if settings.gemini_api_key else None
+
+
+FixLlm = Annotated[LLM | None, Depends(get_fix_llm)]
+
+
+def _llm_failure(exc: LlmError) -> ApiError:
+    if exc.rate_limited:
+        return ApiError(503, "llm_rate_limited", "La IA está saturada en este momento; vuelve a intentar la corrección en un minuto")
+    return ApiError(503, "llm_unavailable", f"No se pudo generar la corrección con IA: {exc}")
 
 
 def workspace(settings: Settings, repo_id: str) -> Workspace:
@@ -157,26 +177,63 @@ def save_file(body: SaveFileRequest, store: Analyses, user_id: UserId, settings:
 
 
 @router.post("/fix", response_model=FixResponse)
-def fix(body: FixRequest, store: Analyses, user_id: UserId, settings: Config) -> FixResponse:
-    """Parches de las correcciones automáticas, calculados sobre la versión guardada de cada archivo."""
+def fix(body: FixRequest, store: Analyses, user_id: UserId, settings: Config, llm: FixLlm) -> FixResponse:
+    """
+    Parches de las correcciones, calculados sobre la versión guardada de cada archivo y en este orden: las de
+    Ruff, el cambio de versión de pip-audit y, para el resto (Bandit, Ruff sin fix, pruebas que fallan…), la
+    propuesta de la IA. Nada se guarda: el editor muestra el diff y la persona decide.
+    """
     require_repo(store, user_id, body.repo_id)
     latest = store.latest_report(body.repo_id)
     rows = store.findings_by_id(body.finding_ids)
     if latest is None or len(rows) != len(set(body.finding_ids)) or any(r["report_id"] != latest["id"] for r in rows):
         raise ApiError(404, "not_found", "Hallazgo no encontrado en el último análisis")
-    fixable = [r for r in rows if r["fix"] and r["status"] == "open"]
+    fixable = [r for r in rows if fix_kind(r) and r["status"] == "open"]
     if not fixable:
-        raise ApiError(422, "fix_unavailable", "Estos hallazgos no tienen corrección automática")
+        raise ApiError(422, "fix_unavailable", "Estos hallazgos no tienen corrección")
     ws = workspace(settings, body.repo_id)
-    by_file: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
+    by_file: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for r in fixable:
-        by_file[r["file"]].append((r["rule"], r["code"], r["line"]))
-    patches = []
-    for path, targets in by_file.items():
+        by_file[r["file"]].append(r)
+    ai_files = [path for path, items in by_file.items() if any(fix_kind(r) == "ia" for r in items)]
+    if ai_files and llm is None:
+        raise ApiError(503, "llm_not_configured", "Las correcciones con IA necesitan GEMINI_API_KEY en backend/.env; las de Ruff funcionan sin ella")
+    if len(ai_files) > MAX_AI_FILES:
+        raise ApiError(422, "too_many_files", f"Corrige con IA hasta {MAX_AI_FILES} archivos a la vez")
+
+    patches, notes = [], []
+    for path, items in by_file.items():
         content = ws.read(path)
-        try:
-            fixed = fix_content(content, path, ws.root, targets)
-        except AnalyzerError as exc:
-            raise analyzer_failure(exc) from exc
-        patches += diff_patches(path, content, fixed)
-    return FixResponse(patches=[Patch(**p) for p in patches])
+        current = content
+        ruff = [(r["rule"], r["code"], r["line"]) for r in items if fix_kind(r) == "auto" and r["tool"] == "Ruff"]
+        if ruff:
+            try:
+                current = fix_content(current, path, ws.root, ruff)
+            except AnalyzerError as exc:
+                raise analyzer_failure(exc) from exc
+            except ApiError:
+                # La corrección de Ruff ya no aplica; si hay otras en el archivo, se siguen con esas
+                if len(items) == len(ruff):
+                    raise
+        for r in items:
+            if fix_kind(r) == "auto" and r["tool"] == "pip-audit" and (version := fix_version(r["rec"])):
+                current = bump_requirement(current, locate(current.split("\n"), r), version)
+        ai = [r for r in items if fix_kind(r) == "ia"]
+        if ai:
+            lines = current.split("\n")
+            targets = [Target(r["id"], r["tool"], r["rule"], locate(lines, r), r["msg"], r["rec"]) for r in ai]
+            try:
+                current, note = ai_fix(llm, path, current, targets)
+            except LlmError as exc:
+                raise _llm_failure(exc) from exc
+            except ApiError as exc:
+                # Sin cambio de la IA pero con correcciones de Ruff o de versión en el archivo: se entregan esas
+                if exc.status != 409 or current == content:
+                    raise
+                note = "la IA no propuso cambios para los demás hallazgos"
+            if note:
+                notes.append(f"{path}: {note}")
+        patches += diff_patches(path, content, current)
+    if not patches:
+        raise ApiError(409, "fix_unavailable", "La corrección ya no aplica: el código cambió o el hallazgo se resolvió")
+    return FixResponse(patches=[Patch(**p) for p in patches], notes=notes)

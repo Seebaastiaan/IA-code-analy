@@ -1,4 +1,4 @@
-import type { Finding } from '@/features/findings'
+import { isAiFix, type Finding } from '@/features/findings'
 import { GRADE } from '@/shared/constants/grades'
 import { Card, CategoryChip, Chip, EmptyState, Icon, Input, SegmentedControl, Select, SeverityBadge } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
@@ -92,8 +92,8 @@ export function FindingsTab({ findings, q, sev, cat, onChange, onClear, onOpen }
                   ) : (
                     f.fix && (
                       <Chip tone="brand">
-                        <Icon name="wand" className="w-3 h-3" />
-                        Fix
+                        <Icon name={isAiFix(f) ? 'sparkle' : 'wand'} className="w-3 h-3" />
+                        {isAiFix(f) ? 'Fix IA' : 'Fix'}
                       </Chip>
                     )
                   )}

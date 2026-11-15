@@ -182,8 +182,12 @@ def audit_findings(ws: Workspace, files: list[str], out: SandboxOutput) -> list[
     findings = []
     for v in parse_audit(out.audit):
         fix = f"Actualizar a {v.package} {v.fix_versions[0]} o superior" if v.fix_versions else "No hay versión corregida publicada: evalúa reemplazar el paquete"
+        line = _package_line(lines, v.package)
+        # La versión se cambia sola en un requirements*.txt donde aparece el paquete; en otro archivo la propone la IA
+        pinned = bool(lines) and 1 <= line <= len(lines) and _normalize(v.package) in _normalize(lines[line - 1])
+        kind = ("auto" if pinned and deps.endswith(".txt") else "ia") if v.fix_versions else None
         findings.append(FindingInput(
-            sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=_package_line(lines, v.package),
+            sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=line, fix=kind is not None, fix_kind=kind,
             msg=f"{v.package} {v.version} tiene {len(v.ids)} vulnerabilidad(es) conocida(s): {', '.join(v.ids[:5])}",
             why=v.description[:400] or "La versión instalada tiene avisos de seguridad publicados.",
             rec=f"{fix} y volver a correr las pruebas.",

@@ -3,6 +3,11 @@ import type { SnippetLine } from '@/shared/ui'
 
 export type Tool = 'Bandit' | 'pip-audit' | 'pytest' | 'coverage' | 'Ruff' | 'Radon'
 
+export type FixKind = 'auto' | 'ia'
+
+/** La corrección la propone la IA (no la herramienta). */
+export const isAiFix = (f: Pick<Finding, 'fix' | 'fix_kind'>) => f.fix && f.fix_kind === 'ia'
+
 export interface Finding {
   id: number
   sev: Severity
@@ -17,8 +22,10 @@ export interface Finding {
   why: string
   /** Cómo corregirlo */
   rec: string
-  /** Hay corrección automática */
+  /** Hay corrección (de la herramienta o de la IA) */
   fix: boolean
+  /** auto: Ruff / versión de pip-audit · ia: la propone el LLM; en ambos casos se revisa el diff antes de guardar */
+  fix_kind?: FixKind | null
   status: 'open' | 'resolved'
   /** ±2 líneas alrededor del hallazgo (se omite en enlaces públicos sin código) */
   snippet?: SnippetLine[]
@@ -41,4 +48,6 @@ export interface FixRequest {
 
 export interface FixResponse {
   patches: Patch[]
+  /** Qué cambió la IA y por qué, por archivo */
+  notes?: string[]
 }

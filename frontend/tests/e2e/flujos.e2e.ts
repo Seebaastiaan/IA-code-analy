@@ -100,7 +100,10 @@ test('3 · compartir el reporte y verlo como invitado', async ({ page }) => {
 test('4 · preguntar a la IA y abrir la fuente en el editor', async ({ page }) => {
   test.setTimeout(90_000)
   await openReport(page)
+  // Bandit no corrige solo: la corrección la propone la IA
+  await expect(page.getByRole('button', { name: /B105 Clave secreta/ })).toContainText('Fix IA')
   await page.getByRole('button', { name: /B105 Clave secreta/ }).click()
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Corregir con IA' })).toBeVisible()
   await page.getByRole('dialog').getByRole('link', { name: 'Preguntar a la IA' }).click()
 
   await expect(page).toHaveURL(/\/repos\/r1\/assistant/)
