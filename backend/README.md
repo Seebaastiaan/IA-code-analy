@@ -17,7 +17,7 @@ Implementado hasta ahora:
 - **Asistente IA** (`app/assistant`): `POST /api/chat/stream` (respuesta por SSE mientras se genera),
   `POST /api/chat` y `GET /api/repos/{id}/index` (RAG sobre el código con Gemini).
 - **Configuración** (`app/projects`): `GET` y `PUT /api/projects/{id}/config` (pesos, umbrales, reglas
-  ignoradas, rutas excluidas) y `.ia_voy.toml`.
+  ignoradas, rutas excluidas) y `.ia_voy.toml`; reglas de negocio cargadas en la app (`/api/projects/{id}/reglas`).
 - **Comparativa** (`app/compare`): `GET /api/repos/{id}/analyses` y `POST /api/diff` (nuevos y resueltos entre
   dos análisis del mismo repo; los hallazgos se reconocen por herramienta, regla, archivo y texto de la línea).
 - **Equipos** (`app/teams`): `/api/team`, invitaciones, unirse, salir, quitar y ceder (ver [Equipos](#equipos)).
@@ -115,13 +115,27 @@ job termina en `error` con un mensaje claro y se puede reintentar.
 
 **Paso 10, reglas de negocio** ([app/analyses/reglas.py](app/analyses/reglas.py),
 [ADR-003](../docs/adr/ADR-003-reglas-de-negocio.md)): lee `reglas_negocio.toml` (raíz del repo o `docs/`), lo
-valida y verifica el nivel **patrón** en el backend: `prohibido` (regex que no debe aparecer) y `obligatorio`
-(regex que debe aparecer en cada archivo con código) sobre los `.py` de `rutas`, sin las pruebas ni las rutas
-excluidas. Cada regla queda `cumple`, `no_cumple` (con `archivo:línea`) o `sin_verificar` (sin patrón; las
-pruebas con `@pytest.mark.regla` llegan en el Sprint 8). Un archivo inválido no detiene el análisis: el paso
-muestra el error. Los resultados van en sus propias tablas (`business_rule_checks`, `business_rule_results`),
-**no** son hallazgos y todavía no entran al score. `GET /api/report/{id}/reglas` (o `latest?repo=`) devuelve
-la matriz regla → estado → evidencia, con `historia`, `responsable` y `criterio` para la trazabilidad.
+valida y la verifica en dos niveles:
+- **Patrón**, en el backend: `prohibido` (regex que no debe aparecer) y `obligatorio` (regex que debe aparecer
+  en cada archivo con código) sobre los `.py` de `rutas`, sin las pruebas ni las rutas excluidas.
+- **Pruebas**: las marcadas `@pytest.mark.regla("RN-002")` (en la función, la clase o `pytestmark`) o llamadas
+  `test_rn002_…`. En el sandbox pytest corre con el plugin [`-p ia_voy_reglas`](app/analysis/ia_voy_reglas.py)
+  (se copia a la carpeta de salida y registra el marcador), que escribe `reglas.json` con cada prueba ligada y
+  su resultado. Sin sandbox, o si no se eligió pytest, las pruebas se encuentran leyendo el código (`ast`) y
+  sus reglas quedan "sin verificar" con el motivo.
+
+Estado: `no_cumple` si aparece el patrón o falla una de sus pruebas; `cumple` si todo lo que la verifica pasó;
+`sin_verificar` si no tiene patrón ni pruebas, o sus pruebas no corrieron. Las pruebas que usan una regla que
+no existe salen como avisos en la terminal. Un archivo inválido no detiene el análisis: el paso muestra el
+error. Los resultados van en sus propias tablas (`business_rule_checks`, `business_rule_results`), **no** son
+hallazgos y todavía no entran al score. `GET /api/report/{id}/reglas` (o `latest?repo=`) devuelve la matriz
+regla → estado → evidencia (`archivo:línea` del patrón y `tests`), con `historia`, `responsable` y `criterio`.
+
+**Cargar reglas desde la app** ([app/projects/reglas.py](app/projects/reglas.py), de apoyo mientras se redactan):
+`GET`/`PUT`/`DELETE /api/projects/{id}/reglas` (`PUT {content}` valida y responde `422 invalid_rules` con la línea
+del error), `POST /api/reglas/validar` y `GET /api/reglas/plantilla`. Se guardan en `business_rules_upload` y el
+análisis solo las usa si el repo no tiene su `reglas_negocio.toml` (el del repo siempre gana); la terminal
+avisa que hay que subirlas al repositorio.
 
 ### Sandbox
 
@@ -216,7 +230,7 @@ conservan los `seg/test/prac` que se guardaron.
 
 Analiza [seed_data/demo_repo](seed_data/demo_repo) (con problemas a propósito) con Ruff, Bandit y Radon
 reales y crea 4 análisis semanales para que la tendencia tenga historia. Incluye un
-[reglas_negocio.toml](seed_data/demo_repo/reglas_negocio.toml) con 4 reglas (1 cumple, 2 no cumplen, 1 sin verificar).
+[reglas_negocio.toml](seed_data/demo_repo/reglas_negocio.toml) con 4 reglas (1 cumple, 2 no cumplen, 1 sin verificar: su prueba `test_rn004_…` no se ejecuta sin sandbox).
 
 ## Asistente IA
 

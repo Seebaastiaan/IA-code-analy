@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router'
 import type { Category, Severity } from '@/shared/types/common'
 
-export type ReportTab = 'hallazgos' | 'cobertura' | 'complejidad'
+export type ReportTab = 'hallazgos' | 'cobertura' | 'complejidad' | 'reglas'
 export type SevFilter = Severity | 'todas'
 export type CatFilter = Category | 'todas'
 

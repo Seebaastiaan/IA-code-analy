@@ -25,6 +25,8 @@ export const EP = {
     get: (id: string) => `/api/report/${id}`,
     share: (id: string) => `/api/report/${id}/share`,
     export: (id: string) => `/api/report/${id}/export`,
+    /** Matriz regla → estado → evidencia de un análisis (id puede ser 'latest' con ?repo=) */
+    rules: (id: string) => `/api/report/${id}/reglas`,
   },
   file: '/api/file',
   fix: '/api/fix',
@@ -32,6 +34,12 @@ export const EP = {
   chatStream: '/api/chat/stream',
   diff: '/api/diff',
   config: (projectId: string) => `/api/projects/${projectId}/config`,
+  /** Reglas de negocio: origen y carga desde Configuración (docs/adr/ADR-003) */
+  rules: {
+    project: (projectId: string) => `/api/projects/${projectId}/reglas`,
+    validate: '/api/reglas/validar',
+    template: '/api/reglas/plantilla',
+  },
   github: {
     status: '/api/github/status',
     repos: '/api/github/repos',

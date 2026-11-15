@@ -1,7 +1,7 @@
 # ADR-003 · Las reglas de negocio se declaran en el repo analizado y se verifican de forma determinista
 
-- Estado: aceptada · en implementación (Sprint 7: archivo, validación y nivel patrón)
-- Fecha: 25 de octubre de 2026 (Sprint 5); actualizada el 7 de noviembre de 2026 (Sprint 7)
+- Estado: aceptada · en implementación (Sprint 7: archivo, validación y nivel patrón · Sprint 8: nivel pruebas, Configuración y vista Reglas)
+- Fecha: 25 de octubre de 2026 (Sprint 5); actualizada el 7 de noviembre de 2026 (Sprint 7) y el 14 de noviembre de 2026 (Sprint 8)
 - Responsable: por definir
 
 ## Contexto
@@ -94,8 +94,11 @@ Cada regla termina en uno de tres estados:
   `business_rule_results`) y no como hallazgos: la tabla `findings` solo admite `cat IN ('seg','test','prac')`
   (un `CHECK` que SQLite no deja cambiar sin reconstruir la tabla) y las categorías están fijas en el backend y
   el frontend. Todavía no entran al score. API: `GET /api/report/{id}/reglas`.
-- **Sprint 8**: nivel pruebas (nombre `test_rn###_…` y plugin `-p ia_voy_reglas`), pestaña en Configuración y
-  vista Reglas.
+- **Sprint 8**: nivel pruebas (marcador, nombre `test_rn###_…` y plugin `-p ia_voy_reglas`, que escribe
+  `reglas.json` en el sandbox; sin sandbox las pruebas se leen con `ast` y quedan sin ejecutar), pestaña
+  Configuración → Reglas de negocio (plantilla, validar, cargar en la app con precedencia del repo, descargar) y
+  vista Reglas en el reporte. Tabla nueva `business_rules_upload` y columnas `origin`, `warnings`, `tests_ran`
+  (`business_rule_checks`) y `tests` (`business_rule_results`).
 - **Después**: categoría `neg` en el score (migración de `reports` y de las categorías fijas) y nivel IA.
 
 ## Alternativas descartadas

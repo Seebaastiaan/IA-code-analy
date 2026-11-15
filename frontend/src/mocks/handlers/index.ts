@@ -9,6 +9,7 @@ import type { ShareRequest } from '@/features/share/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
+import * as rules from '../rules'
 import * as team from '../team'
 import { answer } from '../fixtures/chat'
 import { languageOf } from '../fixtures/code'
@@ -157,6 +158,21 @@ export const handlers = [
   // ─── Configuración ───
   http.get(EP.config(':projectId'), route(({ params }) => json(db.getConfig(params.projectId as string)))),
   http.put(EP.config(':projectId'), route(async ({ request, params }) => json(db.saveConfig(params.projectId as string, (await request.json()) as ProjectConfig)))),
+
+  // ─── Reglas de negocio ───
+  http.get(EP.report.rules(':reportId'), route(({ request, params }) => {
+    const repo = param(request, 'repo') ?? (params.reportId as string).split('-')[0]
+    return json(rules.reportRules(repo, params.reportId as string))
+  })),
+  http.get(EP.rules.project(':projectId'), route(({ params }) => json(rules.projectRules(params.projectId as string)))),
+  http.put(EP.rules.project(':projectId'), route(async ({ request, params }) => {
+    const { content } = (await request.json()) as { content: string }
+    const saved = rules.upload(params.projectId as string, content)
+    return typeof saved === 'string' ? fail(422, 'invalid_rules', saved) : json(saved)
+  })),
+  http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
+  http.post(EP.rules.validate, route(async ({ request }) => json(rules.validate(((await request.json()) as { content: string }).content)))),
+  http.get(EP.rules.template, route(() => new HttpResponse(rules.TEMPLATE, { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

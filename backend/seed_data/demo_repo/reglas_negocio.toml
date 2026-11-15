@@ -1,5 +1,5 @@
 # reglas_negocio.toml — reglas de negocio de api-pagos (formato: docs/PROPUESTA_REGLAS_NEGOCIO.md)
-# IA voy las lee al analizar el repo y verifica cada una con su patrón (prohibido / obligatorio).
+# IA voy las lee al analizar el repo y verifica cada una con su patrón (prohibido / obligatorio) y sus pruebas.
 
 [proyecto]
 nombre  = "API de pagos"
@@ -42,4 +42,4 @@ descripcion = "Un pago mayor al límite solo se cobra si lo autorizó alguien de
 severidad   = "alta"
 historia    = "HU-03"
 criterio    = "Dado un pago de $5,000 con límite de $1,000 autorizado por «ventas», cuando se procesa, entonces se rechaza con motivo «autorizador»"
-# Sin patrón: se verificará con una prueba marcada @pytest.mark.regla("RN-004") (Sprint 8)
+# Sin patrón: la verifica tests/test_procesador.py::test_rn004_… (o una prueba marcada @pytest.mark.regla("RN-004"))

@@ -153,15 +153,20 @@ CREATE INDEX IF NOT EXISTS findings_report ON findings (report_id, file);
 -- Reglas de negocio del repo analizado (app.analyses.reglas, docs/adr/ADR-003). Van aparte de `findings`
 -- (su CHECK solo admite seg/test/prac) y todavía no entran al score. Una fila por análisis que las revisó:
 -- source NULL = el repo no declara reglas; error = el archivo no es válido (no hay resultados).
+-- origin: repo | app (cargadas en Configuración); warnings: JSON (pruebas con reglas que no existen…);
+-- tests_ran: 1 = las pruebas corrieron en el sandbox.
 CREATE TABLE IF NOT EXISTS business_rule_checks (
     report_id   TEXT PRIMARY KEY REFERENCES reports (id) ON DELETE CASCADE,
     source      TEXT,
     project     TEXT,
-    error       TEXT
+    error       TEXT,
+    origin      TEXT,
+    warnings    TEXT NOT NULL DEFAULT '[]',
+    tests_ran   INTEGER NOT NULL DEFAULT 0
 );
 
--- Una fila por regla. status: cumple | no_cumple | sin_verificar; level: patron | ninguno (Sprint 8: pruebas).
--- Sin CHECK en status/level para agregar niveles sin reconstruir la tabla. paths y evidence son JSON.
+-- Una fila por regla. status: cumple | no_cumple | sin_verificar; level: pruebas | patron | pruebas_y_patron | ninguno.
+-- Sin CHECK en status/level para agregar niveles sin reconstruir la tabla. paths, evidence y tests son JSON.
 CREATE TABLE IF NOT EXISTS business_rule_results (
     report_id       TEXT NOT NULL REFERENCES reports (id) ON DELETE CASCADE,
     rule_id         TEXT NOT NULL,
@@ -180,7 +185,17 @@ CREATE TABLE IF NOT EXISTS business_rule_results (
     detail          TEXT NOT NULL,
     evidence        TEXT NOT NULL DEFAULT '[]',
     evidence_total  INTEGER NOT NULL DEFAULT 0,
+    tests           TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (report_id, rule_id)
+);
+
+-- Reglas cargadas desde Configuración → Reglas de negocio (de apoyo, ADR-003): solo se usan si el repo no
+-- tiene su reglas_negocio.toml. Una por repo.
+CREATE TABLE IF NOT EXISTS business_rules_upload (
+    repo_id     TEXT PRIMARY KEY REFERENCES repos (id) ON DELETE CASCADE,
+    content     TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    updated_by  TEXT
 );
 
 -- Índice del asistente (app.assistant): fragmentos del código con su embedding (float32, normalizado)
@@ -237,6 +252,15 @@ MIGRATIONS = {
         "languages": "TEXT NOT NULL DEFAULT '[]'",
         # Líneas de Python analizadas (escala del score); 0 = reportes anteriores, sin escalar
         "code_lines": "INTEGER NOT NULL DEFAULT 0",
+    },
+    # Sprint 8: nivel pruebas y reglas cargadas en la app
+    "business_rule_checks": {
+        "origin": "TEXT",
+        "warnings": "TEXT NOT NULL DEFAULT '[]'",
+        "tests_ran": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "business_rule_results": {
+        "tests": "TEXT NOT NULL DEFAULT '[]'",
     },
 }
 

@@ -9,8 +9,9 @@ Un solo script bash (SCRIPT) corre en WSL2 o en Docker según `SANDBOX`:
 - `off`: no se ejecuta nada; pipeline simula esos pasos (marcados "(simulado)").
 
 El script copia el clon a una carpeta temporal del sandbox (el clon del editor no se toca) y deja en OUT un
-`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más audit.json, junit.xml y
-coverage.json. El job espera cada `.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
+`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más audit.json, junit.xml,
+coverage.json y reglas.json (plugin ia_voy_reglas: pruebas ligadas a las reglas de negocio).
+El job espera cada `.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
 """
 
 import asyncio
@@ -35,6 +36,8 @@ log = logging.getLogger(__name__)
 PHASES = ("venv", "install", "audit", "tests", "coverage")
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 LOG_TAIL_LINES = 12
+# Plugin de pytest de las reglas de negocio: se copia a OUT/plugins y pytest lo carga con -p ia_voy_reglas
+PLUGIN = Path(__file__).with_name("ia_voy_reglas.py")
 
 SCRIPT = r"""#!/usr/bin/env bash
 # Sandbox de IA voy (app/analysis/sandbox.py). Uso: sandbox.sh SRC OUT
@@ -91,7 +94,9 @@ SITE="$(echo "$VIRTUAL_ENV"/lib/python3*/site-packages)"
 phase audit 300 env -u VIRTUAL_ENV uvx pip-audit --path "$SITE" -f json -o "$OUT/audit.json" --progress-spinner off
 
 uv pip install -q pytest coverage > "$OUT/tools.log" 2>&1
-phase tests 600 coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider \
+# -p ia_voy_reglas (app/analysis/ia_voy_reglas.py, copiado a OUT/plugins): pruebas ligadas a reglas de negocio
+phase tests 600 env PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas.json" \
+  coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider -p ia_voy_reglas \
   --junitxml="$OUT/junit.xml" -o junit_family=xunit1
 phase coverage 120 coverage json -q -o "$OUT/coverage.json"
 """
@@ -115,6 +120,8 @@ class SandboxOutput:
     audit: dict | None = None
     junit: str | None = None
     coverage: dict | None = None
+    # Pruebas ligadas a reglas de negocio (plugin ia_voy_reglas); None = pytest no llegó a escribirlo
+    reglas: dict | None = None
 
     @property
     def usable(self) -> bool:
@@ -215,6 +222,7 @@ class SandboxRun:
             audit=_load_json(self.out / "audit.json"),
             junit=(self.out / "junit.xml").read_text(encoding="utf-8", errors="replace") if (self.out / "junit.xml").is_file() else None,
             coverage=_load_json(self.out / "coverage.json"),
+            reglas=_load_json(self.out / "reglas.json"),
         )
 
     def _kill_inside(self) -> None:
@@ -269,6 +277,8 @@ def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | No
     out.mkdir(parents=True)
     # newline="\n": bash no acepta los \r de Windows
     (out / "sandbox.sh").write_text(SCRIPT, encoding="utf-8", newline="\n")
+    (out / "plugins").mkdir()
+    (out / "plugins" / PLUGIN.name).write_text(PLUGIN.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     # Entorno mínimo: el código analizado no hereda las claves del backend (.env ya cargado en os.environ)
     env = {k: v for k, v in os.environ.items() if k.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "LOCALAPPDATA", "PROGRAMDATA", "DOCKER_HOST"}}
     # Que wsl.exe escriba sus errores (p. ej. distro no encontrada) en UTF-8 y no en UTF-16

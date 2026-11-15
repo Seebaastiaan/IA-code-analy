@@ -131,6 +131,37 @@ test('5 · seguir la evolución: tablero y configuración', async ({ page }) => 
   await expect(page.getByText('Configuración guardada')).toBeVisible()
 })
 
+test('reglas de negocio: matriz del reporte y carga desde configuración', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('tab', { name: 'Reglas' }).click()
+  await expect(page).toHaveURL(/tab=reglas/)
+  await expect(page.getByRole('heading', { name: 'Reglas de negocio · API de pagos' })).toBeVisible()
+  await expect(page.getByLabel('Resumen de reglas').getByText('2 no cumplen')).toBeVisible()
+  await expect(page.getByText(/usa RN-099, que no está/)).toBeVisible()
+
+  // Detalle: la prueba que verifica la regla, con enlace al editor
+  await page.getByRole('button', { name: /RN-004/ }).click()
+  await expect(page.getByRole('link', { name: /tests\/test_procesador\.py:15/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Cumple', exact: true }).click()
+  await expect(page.getByRole('button', { name: /RN-002/ })).toHaveCount(0)
+
+  // Un repo sin reglas_negocio.toml: se cargan desde Configuración
+  await page.goto('/repos/r2/settings?tab=reglas')
+  await expect(page.getByRole('tab', { name: 'Reglas de negocio' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText('Sin reglas')).toBeVisible()
+  const editor = page.getByLabel('Contenido de reglas_negocio.toml')
+  await editor.fill('[proyecto]\nnombre = "ETL"\n\n[[regla]]\nid = "RN-1"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n')
+  await page.getByRole('button', { name: 'Guardar en la app' }).click()
+  await expect(page.getByRole('alert')).toContainText('línea 4: `RN-1` no cumple el formato')
+
+  await editor.fill('[proyecto]\nnombre = "ETL"\n\n[[regla]]\nid = "RN-001"\ntitulo = "Ventas sin duplicados"\ndescripcion = "D"\nseveridad = "alta"\n')
+  await page.getByRole('button', { name: 'Validar' }).click()
+  await expect(page.getByText('Válido · ETL · 1 regla(s)')).toBeVisible()
+  await page.getByRole('button', { name: 'Guardar en la app' }).click()
+  await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
+  await expect(page.getByText('Cargadas en la app', { exact: true })).toBeVisible()
+})
+
 test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await page.goto('/repos')
   await page.getByRole('navigation').getByRole('link', { name: 'Equipo' }).click()

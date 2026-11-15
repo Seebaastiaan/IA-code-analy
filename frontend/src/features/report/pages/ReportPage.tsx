@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { FindingDrawer, useFindingParam } from '@/features/findings'
 import { useSelectedRepo } from '@/features/repos'
+import { RulesTab } from '@/features/rules'
 import { ShareModal } from '@/features/share'
 import { paths } from '@/shared/constants/paths'
 import { ErrorState, Icon, PageLoader, Tabs } from '@/shared/ui'
@@ -14,6 +15,7 @@ const TABS: { value: ReportTab; label: string }[] = [
   { value: 'hallazgos', label: 'Hallazgos' },
   { value: 'cobertura', label: 'Cobertura' },
   { value: 'complejidad', label: 'Complejidad' },
+  { value: 'reglas', label: 'Reglas' },
 ]
 
 export default function ReportPage() {
@@ -61,6 +63,8 @@ export default function ReportPage() {
         <FindingsTab findings={report.findings} q={filters.q} sev={filters.sev} cat={filters.cat} onChange={filters.set} onClear={filters.clear} onOpen={open} />
       ) : filters.tab === 'cobertura' ? (
         <CoverageTab coverage={report.coverage} threshold={report.thresholds.cov} />
+      ) : filters.tab === 'reglas' ? (
+        <RulesTab repoId={repoId} reportId={report.id} />
       ) : (
         <ComplexityTab complexity={report.complexity} />
       )}

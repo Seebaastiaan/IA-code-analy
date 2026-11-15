@@ -1,6 +1,6 @@
 # Propuesta · Reglas de negocio por proyecto
 
-> Estado: en implementación (Sprint 7: archivo, validación y patrones; ver ADR-003 §5). Propuesta del 25 de octubre de 2026. Decisión técnica resumida en
+> Estado: en implementación (Sprint 7: archivo, validación y patrones; Sprint 8: pruebas, Configuración y vista Reglas; ver ADR-003 §5). Propuesta del 25 de octubre de 2026. Decisión técnica resumida en
 > [ADR-003](adr/ADR-003-reglas-de-negocio.md).
 
 ## 1. Qué se busca
@@ -221,6 +221,6 @@ Un archivo inválido **no detiene el análisis**: el paso 12 termina con el erro
 **Plan sugerido**:
 
 1. Archivo, validación y patrones (sin sandbox). **Hecho en el Sprint 7.**
-2. Plugin de pytest y estados por regla.
-3. Pestaña de carga en Configuración y vista Reglas.
+2. Plugin de pytest y estados por regla. **Hecho en el Sprint 8.**
+3. Pestaña de carga en Configuración y vista Reglas. **Hecho en el Sprint 8** (sin el formulario por campos: se edita el TOML).
 4. Nivel de IA.
