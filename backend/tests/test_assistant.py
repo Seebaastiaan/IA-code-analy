@@ -120,7 +120,7 @@ def test_busqueda_encuentra_el_codigo_relevante(settings, repo_id, llm):
 def test_info_del_indice(client, repo_id, llm, settings):
     res = client.get(f"/api/repos/{repo_id}/index").json()
     # Sin GEMINI_API_KEY en la configuración de prueba
-    assert res["status"] == "not_configured" and res["report_num"] == 4 and res["model"] == "Gemini 3.8 Flash"
+    assert res["status"] == "not_configured" and res["report_num"] == 4 and res["model"] == "Gemini 3.5 Flash Lite"
 
 
 # ─── Chat ───

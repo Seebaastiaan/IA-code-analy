@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     sandbox_timeout_s: int = 1200
     # Asistente IA: Gemini (respuestas y embeddings). El análisis no lo usa (docs/adr/ADR-001)
     gemini_api_key: str = ""
-    # gemini-2.5-flash ya no está disponible para claves nuevas
-    gemini_model: str = "gemini-3.8-flash"
+    # gemini-2.5-flash ya no está disponible para claves nuevas y gemini-3.8-flash suele responder 503 (alta demanda)
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
 
     @property
