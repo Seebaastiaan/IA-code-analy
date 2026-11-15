@@ -75,6 +75,8 @@ export interface RulesValidation {
   error: string | null
   project: string | null
   rules: RulePreview[]
+  /** `rutas` que no existen en el repositorio del proyecto (no impiden guardar) */
+  warnings?: string[]
 }
 
 export interface RulesFile extends RulesValidation {

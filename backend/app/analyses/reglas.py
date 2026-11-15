@@ -98,6 +98,47 @@ obligatorio = '@requiere_admin'              # opcional · regex que DEBE aparec
 '''
 
 
+def _toml_str(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def code_folders(files: list[str]) -> list[str]:
+    """Carpetas de primer nivel con código del proyecto (sin pruebas), las de más archivos primero."""
+    count: dict[str, int] = {}
+    for f in files:
+        parts = PurePosixPath(f).parts
+        if len(parts) > 1 and f.endswith(".py") and not is_test_path(f) and parts[0] != "docs":
+            count[parts[0]] = count.get(parts[0], 0) + 1
+    return sorted(count, key=lambda d: (-count[d], d))
+
+
+def template_for(project: str, files: list[str]) -> str:
+    """
+    Plantilla de un proyecto: su nombre en [proyecto] y `rutas` de carpetas que existen en su repositorio
+    (sin clonar todavía, o sin carpetas con código: todo el repo).
+    """
+    folders = code_folders(files)
+    first = folders[0] if folders else None
+    second = folders[1] if len(folders) > 1 else first
+    rutas = lambda d: f'["{d}/"]' if d else "[]"
+    return (
+        TEMPLATE.replace("reglas de negocio del proyecto (", f"reglas de negocio de {project} (", 1)
+        .replace('nombre  = "Mi proyecto"', f"nombre  = {_toml_str(project)}", 1)
+        .replace('rutas       = ["app/pagos/"]                 #', f"rutas       = {rutas(first)}".ljust(46) + " #", 1)
+        .replace('rutas       = ["app/admin/"]', f"rutas       = {rutas(second)}", 1)
+    )
+
+
+def missing_paths(ruleset: "RuleSet", files: list[str], project: str) -> list[str]:
+    """Avisos de `rutas` que no corresponden a ningún archivo del proyecto (la regla no revisaría nada)."""
+    return [
+        f"{r.id}: la ruta `{p}` no existe en {project}"
+        for r in ruleset.rules
+        for p in r.paths
+        if not any(is_excluded(f, [p]) for f in files)
+    ][:MAX_WARNINGS]
+
+
 class RulesError(ValueError):
     """El archivo no es válido. El mensaje lo ve el usuario (terminal y API)."""
 

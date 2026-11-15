@@ -1,8 +1,9 @@
 """
 Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §2 y §6, ADR-003).
 
-La fuente oficial es `reglas_negocio.toml` en el repositorio. Desde la app se pueden cargar reglas de apoyo
-(mientras se redactan): se validan igual y solo se usan en el análisis si el repo no tiene el archivo.
+Las reglas son de cada proyecto (repo): la fuente oficial es su `reglas_negocio.toml`. Desde la app se pueden
+cargar reglas de apoyo para ese proyecto (mientras se redactan): se validan igual —también contra las rutas de su
+repositorio— y solo se usan en su análisis si el repo no tiene el archivo. No hay reglas generales.
 """
 
 from typing import Literal
@@ -38,6 +39,8 @@ class Validation(BaseModel):
     error: str | None = None
     project: str | None = None
     rules: list[RulePreview] = Field(default_factory=list)
+    # Revisadas contra el repositorio del proyecto: `rutas` que no existen en él (no bloquean el guardado)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RulesFile(Validation):
@@ -64,7 +67,8 @@ class ProjectRules(BaseModel):
     commit: str | None
 
 
-def validate(text: str) -> Validation:
+def validate(text: str, files: list[str] | None = None, project: str = "") -> Validation:
+    """`files` = archivos del clon del proyecto (None = sin clonar: las rutas no se revisan)."""
     try:
         rs = reglas.parse(text)
     except reglas.RulesError as exc:
@@ -72,11 +76,18 @@ def validate(text: str) -> Validation:
     return Validation(
         valid=True, project=rs.project,
         rules=[RulePreview(id=r.id, title=r.title, severity=r.severity, pattern=bool(r.forbidden or r.required)) for r in rs.rules],
+        warnings=reglas.missing_paths(rs, files, project) if files is not None else [],
     )
+
+
+def _files(ws: Workspace) -> list[str] | None:
+    return ws.list_files([]) if ws.exists() else None
 
 
 def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRules:
     ws = Workspace(settings, repo_id)
+    files = _files(ws)
+    name = store.repo(repo_id)["name"]
     repo_file: RepoRulesFile | None = None
     if ws.exists():
         try:
@@ -86,9 +97,9 @@ def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRu
         else:
             if found:
                 path, text = found
-                repo_file = RepoRulesFile(**validate(text).model_dump(), path=path, content=text)
+                repo_file = RepoRulesFile(**validate(text, files, name).model_dump(), path=path, content=text)
     row = RulesStore(store.conn).upload(repo_id)
-    uploaded = UploadedRules(**validate(row["content"]).model_dump(), content=row["content"], updated_at=row["updated_at"]) if row else None
+    uploaded = UploadedRules(**validate(row["content"], files, name).model_dump(), content=row["content"], updated_at=row["updated_at"]) if row else None
     latest = store.latest_report(repo_id)
     return ProjectRules(
         active="repo" if repo_file else "app" if uploaded else None,
@@ -120,15 +131,19 @@ def delete_rules(project_id: str, store: Analyses, user_id: UserId, settings: Co
     return _project_rules(store, settings, project_id)
 
 
-@router.post("/api/reglas/validar", response_model=Validation)
-def validate_rules(body: RulesContent, user_id: UserId) -> Validation:
-    """Valida un reglas_negocio.toml sin guardarlo (botón Validar)."""
-    return validate(body.content)
+@router.post("/api/projects/{project_id}/reglas/validar", response_model=Validation)
+def validate_rules(project_id: str, body: RulesContent, store: Analyses, user_id: UserId, settings: Config) -> Validation:
+    """Valida un reglas_negocio.toml del proyecto sin guardarlo (botón Validar): sintaxis y rutas de su repositorio."""
+    repo = require_repo(store, user_id, project_id)
+    return validate(body.content, _files(Workspace(settings, project_id)), repo["name"])
 
 
-@router.get("/api/reglas/plantilla")
-def template(user_id: UserId) -> Response:
+@router.get("/api/projects/{project_id}/reglas/plantilla")
+def template(project_id: str, store: Analyses, user_id: UserId, settings: Config) -> Response:
+    """Plantilla del proyecto: su nombre y rutas de carpetas que existen en su repositorio."""
+    repo = require_repo(store, user_id, project_id)
+    ws = Workspace(settings, project_id)
     return Response(
-        reglas.TEMPLATE, media_type="application/toml; charset=utf-8",
+        reglas.template_for(repo["name"], ws.list_files([])), media_type="application/toml; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{reglas.FILENAME}"'},
     )

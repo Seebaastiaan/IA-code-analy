@@ -53,6 +53,8 @@ severidad   = "media"
 `,
 }
 
+const TEMPLATE = REPO_RULES.r1.replace('API de pagos', 'Mi proyecto')
+
 /** Resultado del último análisis de r1: patrones y pruebas (como si hubiera corrido en el sandbox). */
 const R1_RESULTS: BusinessRuleResult[] = [
   {
@@ -95,6 +97,7 @@ const uploads = new Map<string, { content: string; updated_at: string }>()
 
 interface ParsedRule extends RulePreview {
   description: string
+  paths: string[]
 }
 
 class RulesError extends Error {}
@@ -122,6 +125,7 @@ function parse(text: string): { project: string; rules: ParsedRule[] } {
     return {
       id, title: value(block, 'titulo')!, description: value(block, 'descripcion')!, severity: severity as Severity,
       pattern: Boolean(value(block, 'prohibido') ?? value(block, 'obligatorio')),
+      paths: [...(/^\s*rutas\s*=\s*\[([^\]]*)\]/m.exec(block)?.[1] ?? '').matchAll(/["']([^"']+)["']/g)].map((m) => m[1]),
     }
   })
   return { project, rules }
@@ -137,6 +141,33 @@ export function validate(content: string): RulesValidation {
   }
 }
 
+const inPath = (file: string, path: string) => {
+  const p = path.replace(/^\/+|\/+$/g, '')
+  return file === p || file.startsWith(`${p}/`)
+}
+
+/** Validación de las reglas de un proyecto: además de la sintaxis, que sus `rutas` existan en el repo. */
+export function validateFor(repoId: string, content: string): RulesValidation {
+  const repo = getRepo(repoId)
+  const result = validate(content)
+  if (!result.valid || repo.reports.length === 0) return result
+  const files = Object.keys(repo.content)
+  const warnings = parse(content).rules.flatMap((r) => r.paths.filter((p) => !files.some((f) => inPath(f, p))).map((p) => `${r.id}: la ruta \`${p}\` no existe en ${repo.name}`))
+  return { ...result, warnings }
+}
+
+/** Plantilla del proyecto: su nombre y una carpeta con código que existe en su repositorio. */
+export function templateFor(repoId: string): string {
+  const repo = getRepo(repoId)
+  const folders = [...new Set(Object.keys(repo.content).filter((f) => f.endsWith('.py') && f.includes('/') && !f.startsWith('tests/')).map((f) => f.split('/')[0]))]
+  const rutas = folders[0] ? `["${folders[0]}/"]` : '[]'
+  return TEMPLATE.replace('nombre  = "Mi proyecto"', `nombre  = ${JSON.stringify(repo.name)}`)
+    .replace('reglas de negocio de api-pagos', `reglas de negocio de ${repo.name}`)
+    .replace('rutas       = ["pagos/"]', `rutas       = ${rutas}`)
+    .replace('rutas       = ["api.py"]', 'rutas       = []')
+    .replace('rutas       = ["auth.py"]', 'rutas       = []')
+}
+
 // ─── API ───
 
 export function projectRules(repoId: string): ProjectRules {
@@ -146,7 +177,7 @@ export function projectRules(repoId: string): ProjectRules {
   return {
     active: own ? 'repo' : up ? 'app' : null,
     repo: own ? { ...validate(own), content: own, path: FILENAME } : null,
-    uploaded: up ? { ...validate(up.content), ...up } : null,
+    uploaded: up ? { ...validateFor(repoId, up.content), ...up } : null,
     cloned: repo.reports.length > 0,
     commit: repo.reports.at(-1)?.commit ?? null,
   }
@@ -192,4 +223,3 @@ export function reportRules(repoId: string, reportId: string): BusinessRules {
   return { ...base, source: APP_SOURCE, origin: 'app', project, tests_ran: false, rules: results, summary: count(results) }
 }
 
-export const TEMPLATE = REPO_RULES.r1.replace('API de pagos', 'Mi proyecto')

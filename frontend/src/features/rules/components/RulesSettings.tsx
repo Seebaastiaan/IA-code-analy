@@ -59,6 +59,11 @@ function ValidationResult({ result }: { result: RulesValidation }) {
           ))}
         </ul>
       )}
+      {result.warnings?.map((w) => (
+        <p key={w} className="mt-2 text-amber-700 dark:text-amber-300 font-mono text-xs">
+          Aviso: {w}
+        </p>
+      ))}
     </div>
   )
 }
@@ -79,7 +84,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     toast(message)
   }
 
-  const validate = useMutation({ mutationFn: () => rulesApi.validate(text), onSuccess: setResult, onError: (e) => toast(e.message, { tone: 'err' }) })
+  const validate = useMutation({ mutationFn: () => rulesApi.validate(repoId, text), onSuccess: setResult, onError: (e) => toast(e.message, { tone: 'err' }) })
   const save = useMutation({
     mutationFn: () => rulesApi.upload(repoId, text),
     onSuccess: (saved) => {
@@ -94,7 +99,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     onSuccess: (saved) => onSaved(saved, 'Se quitaron las reglas cargadas en la app'),
     onError: (e) => toast(e.message, { tone: 'err' }),
   })
-  const template = useMutation({ mutationFn: rulesApi.template, onError: (e) => toast(e.message, { tone: 'err' }) })
+  const template = useMutation({ mutationFn: () => rulesApi.template(repoId), onError: (e) => toast(e.message, { tone: 'err' }) })
 
   const upload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -173,9 +178,9 @@ const STEPS = [
 
 /** Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §6). */
 export function RulesSettings({ repoId }: { repoId: string }) {
-  const { data, error, refetch } = useProjectRules(repoId)
+  const { data, error, refetch, isPlaceholderData } = useProjectRules(repoId)
   if (error) return <ErrorState error={error} onRetry={() => void refetch()} />
-  if (!data) return <PageLoader />
+  if (!data || isPlaceholderData) return <PageLoader />
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -190,7 +195,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
           )}
         </Card>
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
-        <Editor key={`${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+        <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
       </div>
       <Card className="p-5 h-fit">
         <h2 className="font-semibold mb-3">Cómo se verifican</h2>
@@ -202,7 +207,9 @@ export function RulesSettings({ repoId }: { repoId: string }) {
             </li>
           ))}
         </ol>
-        <p className="mt-4 text-xs text-slate-400">Si el repositorio tiene el archivo, gana el del repositorio. Las reglas todavía no cuentan en el score.</p>
+        <p className="mt-4 text-xs text-slate-400">
+          Las reglas son de este proyecto: no se comparten con otros repositorios. Si el repositorio tiene el archivo, gana el del repositorio. Las reglas todavía no cuentan en el score.
+        </p>
       </Card>
     </div>
   )

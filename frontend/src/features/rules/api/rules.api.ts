@@ -10,8 +10,8 @@ export const rulesApi = {
   project: (repoId: string) => http.get<ProjectRules>(EP.rules.project(repoId)),
   upload: (repoId: string, content: string) => http.put<ProjectRules>(EP.rules.project(repoId), { content }),
   remove: (repoId: string) => http.delete<ProjectRules>(EP.rules.project(repoId)),
-  validate: (content: string) => http.post<RulesValidation>(EP.rules.validate, { content }),
-  template: () => download(EP.rules.template, {}, RULES_FILENAME),
+  validate: (repoId: string, content: string) => http.post<RulesValidation>(EP.rules.validate(repoId), { content }),
+  template: (repoId: string) => download(EP.rules.template(repoId), {}, RULES_FILENAME),
 }
 
 /** Bajo la clave del reporte: se refresca junto con él (re-analizar, guardar en el editor). */

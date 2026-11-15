@@ -37,8 +37,9 @@ export const EP = {
   /** Reglas de negocio: origen y carga desde Configuración (docs/adr/ADR-003) */
   rules: {
     project: (projectId: string) => `/api/projects/${projectId}/reglas`,
-    validate: '/api/reglas/validar',
-    template: '/api/reglas/plantilla',
+    /** Las reglas son de cada proyecto: se validan contra su repositorio y la plantilla lleva su nombre */
+    validate: (projectId: string) => `/api/projects/${projectId}/reglas/validar`,
+    template: (projectId: string) => `/api/projects/${projectId}/reglas/plantilla`,
   },
   github: {
     status: '/api/github/status',

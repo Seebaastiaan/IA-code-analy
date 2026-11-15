@@ -163,6 +163,11 @@ test('reglas de negocio: matriz del reporte y carga desde configuración', async
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
   await expect(page.getByText('Cargadas en la app', { exact: true })).toBeVisible()
+
+  // Las reglas son de este proyecto: las rutas se revisan contra su repositorio
+  await editor.fill('[proyecto]\nnombre = "ETL"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\nrutas = ["no_existe/"]\n')
+  await page.getByRole('button', { name: 'Validar' }).click()
+  await expect(page.getByText(/Aviso: RN-001: la ruta `no_existe\/` no existe en/)).toBeVisible()
 })
 
 test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {

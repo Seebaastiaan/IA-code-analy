@@ -171,8 +171,8 @@ export const handlers = [
     return typeof saved === 'string' ? fail(422, 'invalid_rules', saved) : json(saved)
   })),
   http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
-  http.post(EP.rules.validate, route(async ({ request }) => json(rules.validate(((await request.json()) as { content: string }).content)))),
-  http.get(EP.rules.template, route(() => new HttpResponse(rules.TEMPLATE, { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
+  http.post(EP.rules.validate(':projectId'), route(async ({ request, params }) => json(rules.validateFor(params.projectId as string, ((await request.json()) as { content: string }).content)))),
+  http.get(EP.rules.template(':projectId'), route(({ params }) => new HttpResponse(rules.templateFor(params.projectId as string), { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

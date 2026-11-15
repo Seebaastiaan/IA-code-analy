@@ -319,15 +319,35 @@ def test_el_archivo_del_repo_gana(client):
     assert client.get(f"/api/report/{job['report_id']}/reglas").json()["origin"] == "repo"
 
 
-def test_validar_y_plantilla(client):
-    ok = client.post("/api/reglas/validar", json={"content": REGLAS}).json()
-    assert ok["valid"] and ok["project"] == "Tienda" and len(ok["rules"]) == 2
-    mal = client.post("/api/reglas/validar", json={"content": "[proyecto"}).json()
+def test_validar_y_plantilla_del_proyecto(client):
+    rid = repo_id(client)
+    nombre = client.get("/api/repos").json()[0]["name"]
+    ok = client.post(f"/api/projects/{rid}/reglas/validar", json={"content": REGLAS}).json()
+    assert ok["valid"] and ok["project"] == "Tienda" and len(ok["rules"]) == 2 and ok["warnings"] == []
+    mal = client.post(f"/api/projects/{rid}/reglas/validar", json={"content": "[proyecto"}).json()
     assert mal["valid"] is False and "TOML" in mal["error"]
-    res = client.get("/api/reglas/plantilla")
+    # Las rutas se revisan contra el repositorio de ESTE proyecto
+    otra = client.post(f"/api/projects/{rid}/reglas/validar", json={"content": REGLAS.replace('["app/"]', '["no_existe/"]')}).json()
+    assert otra["valid"] and otra["warnings"] == [f"RN-001: la ruta `no_existe/` no existe en {nombre}"]
+
+    res = client.get(f"/api/projects/{rid}/reglas/plantilla")
     assert res.status_code == 200 and "reglas_negocio.toml" in res.headers["content-disposition"]
     rs = parse(res.text)
+    assert rs.project == nombre and "Mi proyecto" not in res.text
     assert [r.id for r in rs.rules] == ["RN-001", "RN-002", "RN-003"] and rs.rules[0].forbidden == r"float\("
+    # rutas de carpetas que existen en el repo del proyecto
+    assert rs.rules[0].paths == ("app/",) and rs.rules[2].paths == ("app/",)
+    assert client.post(f"/api/projects/{rid}/reglas/validar", json={"content": res.text}).json()["warnings"] == []
+    # Ya no hay validación ni plantilla generales
+    assert client.post("/api/reglas/validar", json={"content": REGLAS}).status_code in (404, 405)
+    assert client.get("/api/reglas/plantilla").status_code in (404, 405)
+
+
+def test_plantilla_sin_carpetas():
+    t = reglas.template_for('Mi "repo"', [])
+    rs = parse(t)
+    assert rs.project == 'Mi "repo"' and all(r.paths == () for r in rs.rules)
+    assert reglas.code_folders(["a.py", "tests/test_a.py", "pkg/x.py", "pkg/y.py", "lib/z.py", "docs/conf.py"]) == ["pkg", "lib"]
 
 
 def test_reglas_de_otro_equipo(client, fake):
@@ -336,6 +356,8 @@ def test_reglas_de_otro_equipo(client, fake):
     login(client)
     assert client.get(f"/api/projects/{rid}/reglas").status_code == 404
     assert client.put(f"/api/projects/{rid}/reglas", json={"content": REGLAS}).status_code == 404
+    assert client.post(f"/api/projects/{rid}/reglas/validar", json={"content": REGLAS}).status_code == 404
+    assert client.get(f"/api/projects/{rid}/reglas/plantilla").status_code == 404
 
 
 def test_migra_bases_anteriores(tmp_path):

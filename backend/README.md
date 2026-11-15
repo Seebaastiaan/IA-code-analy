@@ -133,7 +133,7 @@ regla → estado → evidencia (`archivo:línea` del patrón y `tests`), con `hi
 
 **Cargar reglas desde la app** ([app/projects/reglas.py](app/projects/reglas.py), de apoyo mientras se redactan):
 `GET`/`PUT`/`DELETE /api/projects/{id}/reglas` (`PUT {content}` valida y responde `422 invalid_rules` con la línea
-del error), `POST /api/reglas/validar` y `GET /api/reglas/plantilla`. Se guardan en `business_rules_upload` y el
+del error), `POST /api/projects/{id}/reglas/validar` (sintaxis y rutas del repo del proyecto) y `GET /api/projects/{id}/reglas/plantilla` (con el nombre y carpetas del proyecto). Se guardan en `business_rules_upload` y el
 análisis solo las usa si el repo no tiene su `reglas_negocio.toml` (el del repo siempre gana); la terminal
 avisa que hay que subirlas al repositorio.
 
