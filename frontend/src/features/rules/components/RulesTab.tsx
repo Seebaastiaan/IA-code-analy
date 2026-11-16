@@ -18,7 +18,19 @@ function Notices({ data, repoId }: { data: BusinessRules; repoId: string }) {
   const withTests = data.rules.some((r) => r.tests.length)
   return (
     <>
-      {data.origin === 'app' && (
+      {data.origin === 'app' && data.repo_error && (
+        <div className="px-5 py-2.5 text-sm bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200 border-b border-amber-200/60 dark:border-amber-500/20">
+          <p>
+            Reglas corregidas en la app: el archivo del repositorio tiene errores y no se usó.{' '}
+            <Link to={paths.settings(repoId, 'reglas')} className="font-medium underline">
+              Descarga las corregidas para subirlas al repo
+            </Link>
+            .
+          </p>
+          <p className="mt-1 font-mono text-xs">{data.repo_error}</p>
+        </div>
+      )}
+      {data.origin === 'app' && !data.repo_error && (
         <p className="px-5 py-2.5 text-sm bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200 border-b border-amber-200/60 dark:border-amber-500/20">
           Reglas cargadas en la app: no están en el repositorio y no cuentan como entregable.{' '}
           <Link to={paths.settings(repoId, 'reglas')} className="font-medium underline">

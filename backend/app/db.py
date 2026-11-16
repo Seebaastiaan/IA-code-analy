@@ -164,7 +164,9 @@ CREATE TABLE IF NOT EXISTS business_rule_checks (
     error       TEXT,
     origin      TEXT,
     warnings    TEXT NOT NULL DEFAULT '[]',
-    tests_ran   INTEGER NOT NULL DEFAULT 0
+    tests_ran   INTEGER NOT NULL DEFAULT 0,
+    -- El archivo del repo no era válido y se usaron las reglas corregidas en la app (origin = app)
+    repo_error  TEXT
 );
 
 -- Una fila por regla. status: cumple | no_cumple | sin_verificar; level: pruebas | patron | pruebas_y_patron | ninguno.
@@ -191,8 +193,8 @@ CREATE TABLE IF NOT EXISTS business_rule_results (
     PRIMARY KEY (report_id, rule_id)
 );
 
--- Reglas cargadas desde Configuración → Reglas de negocio (de apoyo, ADR-003): solo se usan si el repo no
--- tiene su reglas_negocio.toml. Una por repo.
+-- Reglas cargadas en la app (Configuración o Nuevo análisis; de apoyo, ADR-003): se usan si el repo no tiene su
+-- reglas_negocio.toml o el suyo no es válido. Una por repo.
 CREATE TABLE IF NOT EXISTS business_rules_upload (
     repo_id     TEXT PRIMARY KEY REFERENCES repos (id) ON DELETE CASCADE,
     content     TEXT NOT NULL,
@@ -260,6 +262,7 @@ MIGRATIONS = {
         "origin": "TEXT",
         "warnings": "TEXT NOT NULL DEFAULT '[]'",
         "tests_ran": "INTEGER NOT NULL DEFAULT 0",
+        "repo_error": "TEXT",
     },
     "business_rule_results": {
         "tests": "TEXT NOT NULL DEFAULT '[]'",

@@ -1,5 +1,5 @@
 import type { CHIP_TONES } from '@/shared/ui/styles'
-import type { BusinessRuleResult, RuleLevel, RuleStatus, TestOutcome } from '../types'
+import type { BusinessRuleResult, RuleLevel, RulesPrecheck, RuleStatus, RulesValidation, TestOutcome } from '../types'
 
 type Tone = keyof typeof CHIP_TONES
 
@@ -50,4 +50,54 @@ export function saveText(name: string, text: string, type = 'application/toml') 
   a.download = name
   a.click()
   URL.revokeObjectURL(url)
+}
+
+/** "owner/repo" de una URL de GitHub (mismo criterio que el backend); null si no es de GitHub. */
+export function githubRepo(url: string): string | null {
+  const m = /^https:\/\/(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i.exec(url.trim())
+  return m ? `${m[1]}/${m[2]}` : null
+}
+
+export type PrecheckTone = 'ok' | 'warn' | 'error' | 'neutral'
+
+export interface PrecheckView {
+  tone: PrecheckTone
+  title: string
+  detail: string | null
+  /** Qué reglas usará el análisis: las del repo, las cargadas en la app, las escritas en el formulario o ninguna */
+  uses: 'repo' | 'app' | 'form' | null
+}
+
+const count = (v: RulesValidation) => `${v.rules.length} regla(s) · ${v.project}`
+
+/**
+ * Lo que dice la revisión de reglas en Nuevo análisis. `form` = reglas escritas o corregidas en el modal
+ * (ya validadas): se mandan con el análisis y se usan si el repo no tiene un archivo válido.
+ */
+export function precheckView(p: RulesPrecheck, form: RulesValidation | null): PrecheckView {
+  const file = p.file
+  if (p.status === 'valid' && file)
+    return {
+      tone: 'ok', uses: 'repo', title: `${count(file)} de negocio`,
+      detail: form
+        ? `Se usarán las de ${file.path}: el archivo válido del repositorio gana a las escritas aquí.`
+        : `${file.path} del repositorio${file.warnings?.length ? ` · ${file.warnings.length} aviso(s)` : ''}`,
+    }
+  if (form)
+    return {
+      tone: 'ok', uses: 'form', title: `${count(form)} escritas aquí`,
+      detail: p.status === 'invalid'
+        ? `${file?.path} del repositorio tiene errores: este análisis usará estas reglas corregidas. Súbelas al repositorio.`
+        : 'Se guardan en el proyecto. Descárgalas y súbelas al repositorio para que cuenten como entregable.',
+    }
+  const app = p.uploaded?.valid ? p.uploaded : null
+  if (p.status === 'invalid' && file)
+    return app
+      ? { tone: 'warn', uses: 'app', title: `${file.path} no es válido`, detail: `Se usarán las reglas corregidas en la app (${count(app)}). Error del repositorio: ${file.error}` }
+      : { tone: 'error', uses: null, title: `${file.path} no es válido`, detail: file.error }
+  if (p.status === 'missing')
+    return app
+      ? { tone: 'neutral', uses: 'app', title: 'Este repo no declara reglas de negocio', detail: `Se usarán las cargadas en la app (${count(app)}).` }
+      : { tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio', detail: 'Descarga la plantilla o escríbelas aquí; si no, el análisis no verifica reglas.' }
+  return { tone: 'neutral', uses: app ? 'app' : null, title: 'No se pudieron revisar las reglas', detail: p.message }
 }

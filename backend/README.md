@@ -80,7 +80,7 @@ que el frontend interpreta como sesión vencida) y el frontend ofrece volver a a
 
 ## Análisis
 
-`POST /api/analyze` `{url, branch, analyzers, sandbox, index}` acepta solo URLs `https://github.com/owner/repo`,
+`POST /api/analyze` `{url, branch, analyzers, sandbox, index, rules?}` acepta solo URLs `https://github.com/owner/repo`,
 crea el repo (o reutiliza el del equipo con el mismo `owner/repo`) y lanza un job que emite por
 `WS /ws/jobs/{id}` los mensajes `snapshot`, `step`, `log`, `step_done`, `error` y `done`.
 
@@ -134,8 +134,18 @@ regla → estado → evidencia (`archivo:línea` del patrón y `tests`), con `hi
 **Cargar reglas desde la app** ([app/projects/reglas.py](app/projects/reglas.py), de apoyo mientras se redactan):
 `GET`/`PUT`/`DELETE /api/projects/{id}/reglas` (`PUT {content}` valida y responde `422 invalid_rules` con la línea
 del error), `POST /api/projects/{id}/reglas/validar` (sintaxis y rutas del repo del proyecto) y `GET /api/projects/{id}/reglas/plantilla` (con el nombre y carpetas del proyecto). Se guardan en `business_rules_upload` y el
-análisis solo las usa si el repo no tiene su `reglas_negocio.toml` (el del repo siempre gana); la terminal
-avisa que hay que subirlas al repositorio.
+análisis las usa si el repo no tiene su `reglas_negocio.toml` **o el suyo no es válido** (un archivo válido del
+repo siempre gana). En ese segundo caso el reporte trae `repo_error` con el error del archivo del repo. La
+terminal avisa que hay que subirlas al repositorio.
+
+**Revisar las reglas al cargar el repo** (Nuevo análisis): `POST /api/reglas/revisar` `{url, branch, content?}`
+lee `reglas_negocio.toml` con la API de GitHub, sin clonar (árbol de la rama y el archivo crudo; con el token del
+usuario y, si GitHub lo rechaza, sin él), y lo valida con el mismo parser y contra las rutas de la rama. Responde
+`status` (`valid`, `invalid`, `missing`, o `unavailable` si no se pudo leer: nunca bloquea), el archivo, las
+reglas cargadas en la app si el repo ya es proyecto, cuáles usará el análisis (`active`) y una plantilla con el
+nombre y carpetas del repo. Con `content` valida ese texto en vez del archivo (editor del formulario). Las reglas
+corregidas en el formulario viajan en `POST /api/analyze` como `rules`: se validan (`422 invalid_rules`) y se
+guardan como reglas cargadas en la app del proyecto.
 
 ### Sandbox
 

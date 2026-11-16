@@ -1,7 +1,8 @@
 """
 Reglas de negocio en la base de datos (docs/adr/ADR-003-reglas-de-negocio.md):
 - resultados por análisis (`business_rule_checks`, `business_rule_results`), aparte de `findings`;
-- reglas cargadas desde Configuración (`business_rules_upload`), de apoyo: el archivo del repo siempre gana.
+- reglas cargadas en la app (`business_rules_upload`), de apoyo: se usan si el repo no tiene el archivo o el suyo
+  no es válido; un archivo válido del repo siempre gana.
 """
 
 import json
@@ -20,9 +21,12 @@ class RulesStore:
         """Reemplaza lo guardado para el reporte."""
         self.conn.execute("DELETE FROM business_rule_results WHERE report_id = ?", (report_id,))
         self.conn.execute(
-            """INSERT OR REPLACE INTO business_rule_checks (report_id, source, project, error, origin, warnings, tests_ran)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (report_id, check.source, check.project, check.error, check.origin, json.dumps(check.warnings, ensure_ascii=False), int(check.tests_ran)),
+            """INSERT OR REPLACE INTO business_rule_checks (report_id, source, project, error, origin, warnings, tests_ran, repo_error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report_id, check.source, check.project, check.error, check.origin, json.dumps(check.warnings, ensure_ascii=False),
+                int(check.tests_ran), check.repo_error,
+            ),
         )
         self.conn.executemany(
             """INSERT INTO business_rule_results (report_id, rule_id, pos, title, description, severity, paths, forbidden,

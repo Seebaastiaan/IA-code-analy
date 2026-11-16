@@ -24,8 +24,11 @@ La propuesta cumple dos condiciones:
 | **Repositorio** (principal) | Archivo `reglas_negocio.toml` en la raíz del repo, con commit como cualquier otro archivo | Siempre que se pueda | **Sí**: es la fuente de verdad |
 | **App: Configuración → Reglas de negocio** | Subir el archivo, o escribir las reglas en un formulario | Mientras se redactan, o para probar antes de hacer commit | No: la app avisa "súbelo al repositorio" y ofrece descargarlo |
 
-**Precedencia**: si el repositorio tiene `reglas_negocio.toml`, gana el del repositorio y la versión cargada en la
-app se ignora (la app lo indica). Así nadie califica con reglas que no están en el código entregado.
+**Precedencia**: si el repositorio tiene un `reglas_negocio.toml` válido, gana el del repositorio y la versión
+cargada en la app se ignora (la app lo indica). Así nadie califica con reglas que no están en el código entregado.
+Si el del repositorio tiene errores, el análisis usa la versión corregida en la app (desde Configuración o desde
+Nuevo análisis, que revisa el archivo al cargar el repo, antes de clonar) y el reporte lo indica junto con el
+error del archivo del repo.
 
 ### Por qué un archivo propio y no dentro de `.ia_voy.toml`
 

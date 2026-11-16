@@ -26,7 +26,8 @@ con evidencia. La IA solo explica.
 Un archivo propio, no una sección de `.ia_voy.toml`: ahí `[reglas]` ya significa "reglas de Bandit/Ruff
 ignoradas" (TOML no admite `[reglas]` y `[[reglas]]` juntos) y la pantalla de Configuración reescribe ese
 archivo completo al guardar. El archivo se versiona con git como el resto del código; también se puede cargar
-desde Configuración → Reglas de negocio, pero si el repo lo tiene, gana el del repo. Formato, campos y
+desde Configuración → Reglas de negocio o al cargar el repo en Nuevo análisis, pero si el repo lo tiene y es
+válido, gana el del repo (si el del repo tiene errores, se usan las corregidas en la app). Formato, campos y
 nomenclatura completos en [PROPUESTA_REGLAS_NEGOCIO.md](../PROPUESTA_REGLAS_NEGOCIO.md).
 
 ```toml

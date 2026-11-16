@@ -1,7 +1,7 @@
-"""Cliente mínimo de la API de GitHub para el flujo OAuth y la lista de repos/ramas."""
+"""Cliente mínimo de la API de GitHub: flujo OAuth, lista de repos/ramas y lectura de reglas_negocio.toml sin clonar."""
 
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -58,8 +58,12 @@ class GithubClient:
             raise GithubError(400, data.get("error_description") or "GitHub rechazó el código de autorización")
         return TokenGrant(access_token=data["access_token"], scope=data.get("scope", ""))
 
-    async def _get(self, token: str, path: str, params: dict | None = None) -> httpx.Response:
-        res = await self.http.get(f"{API_URL}{path}", params=params, headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+    async def _get(self, token: str | None, path: str, params: dict | None = None, accept: str = "application/vnd.github+json") -> httpx.Response:
+        # Sin token: solo repos públicos (y con el límite de GitHub para anónimos)
+        headers = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        res = await self.http.get(f"{API_URL}{path}", params=params, headers=headers)
         if res.status_code == 401:
             raise GithubAuthError()
         if not res.is_success:
@@ -82,3 +86,11 @@ class GithubClient:
 
     async def list_branches(self, token: str, full_name: str) -> list[dict]:
         return (await self._get(token, f"/repos/{full_name}/branches", {"per_page": 100})).json()
+
+    async def get_tree(self, token: str | None, full_name: str, ref: str) -> dict:
+        """Árbol completo de la rama: {"tree": [{"path", "type", "size"}], "truncated"}. 404 si no hay repo o rama."""
+        return (await self._get(token, f"/repos/{full_name}/git/trees/{quote(ref, safe='')}", {"recursive": "1"})).json()
+
+    async def get_file(self, token: str | None, full_name: str, path: str, ref: str) -> bytes:
+        """Contenido crudo de un archivo de la rama."""
+        return (await self._get(token, f"/repos/{full_name}/contents/{path}", {"ref": ref}, accept="application/vnd.github.raw+json")).content

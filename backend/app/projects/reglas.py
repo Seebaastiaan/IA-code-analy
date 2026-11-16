@@ -2,12 +2,18 @@
 Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §2 y §6, ADR-003).
 
 Las reglas son de cada proyecto (repo): la fuente oficial es su `reglas_negocio.toml`. Desde la app se pueden
-cargar reglas de apoyo para ese proyecto (mientras se redactan): se validan igual —también contra las rutas de su
-repositorio— y solo se usan en su análisis si el repo no tiene el archivo. No hay reglas generales.
+cargar reglas de apoyo para ese proyecto (mientras se redactan, o para corregir un archivo del repo con errores): se
+validan igual —también contra las rutas de su repositorio— y se usan en su análisis si el repo no tiene el archivo o
+el suyo no es válido. No hay reglas generales.
+
+`POST /api/reglas/revisar` revisa las reglas al cargar el repo (Nuevo análisis), antes de clonar: lee el archivo
+con la API de GitHub y lo valida con el mismo parser.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
@@ -15,8 +21,11 @@ from app.analyses import reglas
 from app.analyses.access import Analyses, UserId, require_repo
 from app.analyses.reglas_store import RulesStore
 from app.analyses.workspace import Workspace
-from app.analysis.router import Config
+from app.analysis.router import BRANCH, REPO_URL, Config, Db
 from app.errors import ApiError
+from app.github.client import GithubAuthError, GithubError
+from app.github.deps import Client, Store
+from app.teams.store import team_id_of
 
 router = APIRouter(tags=["reglas de negocio"])
 
@@ -80,6 +89,16 @@ def validate(text: str, files: list[str] | None = None, project: str = "") -> Va
     )
 
 
+def _active(repo_file: Validation | None, uploaded: Validation | None) -> Literal["repo", "app"] | None:
+    """Qué reglas usa el siguiente análisis (mismo criterio que reglas.run)."""
+    if repo_file and repo_file.valid:
+        return "repo"
+    if uploaded and uploaded.valid:
+        return "app"
+    # Archivo del repo con errores y nada en la app: el análisis reporta el error
+    return "repo" if repo_file else None
+
+
 def _files(ws: Workspace) -> list[str] | None:
     return ws.list_files([]) if ws.exists() else None
 
@@ -102,7 +121,7 @@ def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRu
     uploaded = UploadedRules(**validate(row["content"], files, name).model_dump(), content=row["content"], updated_at=row["updated_at"]) if row else None
     latest = store.latest_report(repo_id)
     return ProjectRules(
-        active="repo" if repo_file else "app" if uploaded else None,
+        active=_active(repo_file, uploaded),
         repo=repo_file, uploaded=uploaded, cloned=ws.exists(), commit=latest["commit_sha"] if latest else None,
     )
 
@@ -146,4 +165,112 @@ def template(project_id: str, store: Analyses, user_id: UserId, settings: Config
     return Response(
         reglas.template_for(repo["name"], ws.list_files([])), media_type="application/toml; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{reglas.FILENAME}"'},
+    )
+
+
+# ───────────────────────── Revisión al cargar el repo (Nuevo análisis) ─────────────────────────
+
+
+class PrecheckRequest(BaseModel):
+    url: str = Field(max_length=300)
+    branch: str = Field(default="main", max_length=200)
+    # Reglas escritas en el formulario: se validan contra el árbol del repo (botón Validar del modal)
+    content: str | None = Field(default=None, max_length=reglas.MAX_BYTES)
+
+
+class Precheck(BaseModel):
+    # "owner/repo"
+    repo: str
+    # Archivo del repo: valid | invalid | missing. unavailable = no se pudo leer (sin acceso, rama, GitHub caído)
+    status: Literal["valid", "invalid", "missing", "unavailable"]
+    message: str | None = None
+    file: RepoRulesFile | None = None
+    # El repo ya es un proyecto del equipo: sus reglas cargadas en la app
+    project_id: str | None = None
+    uploaded: UploadedRules | None = None
+    # Lo que usará el análisis si no se cambia nada
+    active: Literal["repo", "app"] | None = None
+    # Plantilla con el nombre del repo y sus carpetas con código
+    template: str
+    # Validación de `content`, si se mandó
+    checked: Validation | None = None
+
+
+async def _github[T](call: Callable[[str | None], Awaitable[T]], token: str | None) -> T:
+    """Con el token del usuario; si GitHub lo rechaza, sin él (repo público)."""
+    try:
+        return await call(token)
+    except GithubAuthError:
+        if not token:
+            raise
+        return await call(None)
+
+
+def _unavailable(exc: Exception) -> str:
+    if isinstance(exc, GithubError) and exc.status == 404:
+        return "No se encontró el repositorio o la rama (o no tienes acceso). Las reglas se revisan al analizar."
+    if isinstance(exc, GithubError) and exc.status in (403, 429):
+        return "GitHub limitó las solicitudes: las reglas se revisan al analizar."
+    return "No se pudo consultar GitHub: las reglas se revisan al analizar."
+
+
+async def _repo_file(client: Client, token: str | None, name: str, branch: str) -> tuple[RepoRulesFile | None, list[str] | None, list[str]]:
+    """(archivo de reglas del repo, archivos para revisar `rutas`, todos los archivos). Lanza si GitHub falla."""
+    tree = await _github(lambda t: client.get_tree(t, name, branch), token)
+    blobs = {e["path"]: e for e in tree.get("tree", []) if e.get("type") == "blob"}
+    files = list(blobs)
+    # Árbol truncado (repos enormes): las rutas no se pueden revisar con certeza
+    check_files = None if tree.get("truncated") else files
+    for path in reglas.LOCATIONS:
+        entry = blobs.get(path)
+        if entry is None:
+            continue
+        if entry.get("size", 0) > reglas.MAX_BYTES:
+            return RepoRulesFile(valid=False, error=f"{path} es demasiado grande (máx. {reglas.MAX_BYTES // 1024} KB)", path=path, content=""), check_files, files
+        raw = await _github(lambda t, p=path: client.get_file(t, name, p, branch), token)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return RepoRulesFile(valid=False, error=f"{path} no está en UTF-8", path=path, content=""), check_files, files
+        return RepoRulesFile(**validate(text, check_files, name).model_dump(), path=path, content=text), check_files, files
+    return None, check_files, files
+
+
+@router.post("/api/reglas/revisar", response_model=Precheck)
+async def precheck(body: PrecheckRequest, user_id: UserId, conn: Db, client: Client, accounts: Store) -> Precheck:
+    """
+    Reglas de negocio de un repo antes de analizarlo: lee su reglas_negocio.toml con la API de GitHub (sin clonar)
+    y lo valida. Si el repo ya es un proyecto del equipo, también dice qué reglas tiene cargadas en la app.
+    """
+    m = REPO_URL.match(body.url.strip())
+    if not m:
+        raise ApiError(422, "invalid_url", "Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)")
+    branch = body.branch.strip() or "main"
+    if not BRANCH.match(branch):
+        raise ApiError(422, "invalid_branch", "El nombre de la rama no es válido")
+    name = f"{m.group(1)}/{m.group(2)}"
+    account = accounts.get(user_id)
+    token = account.token if account else None
+
+    status: Literal["valid", "invalid", "missing", "unavailable"]
+    message: str | None = None
+    repo_file: RepoRulesFile | None = None
+    check_files: list[str] | None = None
+    files: list[str] = []
+    try:
+        repo_file, check_files, files = await _repo_file(client, token, name, branch)
+        status = "missing" if repo_file is None else "valid" if repo_file.valid else "invalid"
+    except (GithubAuthError, GithubError, httpx.HTTPError) as exc:
+        status, message = "unavailable", _unavailable(exc)
+
+    project = conn.execute("SELECT id FROM repos WHERE team_id = ? AND name = ? COLLATE NOCASE", (team_id_of(conn, user_id), name)).fetchone()
+    uploaded: UploadedRules | None = None
+    if project:
+        row = RulesStore(conn).upload(project["id"])
+        if row:
+            uploaded = UploadedRules(**validate(row["content"], check_files, name).model_dump(), content=row["content"], updated_at=row["updated_at"])
+    return Precheck(
+        repo=name, status=status, message=message, file=repo_file, project_id=project["id"] if project else None, uploaded=uploaded,
+        active=_active(repo_file, uploaded), template=reglas.template_for(name, files),
+        checked=validate(body.content, check_files, name) if body.content is not None else None,
     )

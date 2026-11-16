@@ -1,10 +1,12 @@
 /**
  * Reglas de negocio simuladas (backend/app/analyses/reglas.py y app/projects/reglas.py).
  * `r1` (api-pagos) trae su reglas_negocio.toml; los demás repos no tienen y pueden cargarlas desde Configuración.
+ * En la revisión de Nuevo análisis, `ana-lopez/scraper-precios` (aún no es proyecto) trae un archivo con errores.
  */
-import type { BusinessRuleResult, BusinessRules, ProjectRules, RulePreview, RulesValidation } from '@/features/rules/types'
+import type { BusinessRuleResult, BusinessRules, ProjectRules, RulePreview, RulesPrecheck, RulesValidation } from '@/features/rules/types'
 import type { Severity } from '@/shared/types/common'
-import { getRepo } from './db'
+import { findRepoByName, getRepo } from './db'
+import { repos as githubRepos } from './github'
 
 const FILENAME = 'reglas_negocio.toml'
 const APP_SOURCE = 'Configuración (cargadas en la app)'
@@ -223,3 +225,63 @@ export function reportRules(repoId: string, reportId: string): BusinessRules {
   return { ...base, source: APP_SOURCE, origin: 'app', project, tests_ran: false, rules: results, summary: count(results) }
 }
 
+
+// ─── Revisión al cargar el repo (Nuevo análisis) ───
+
+/** Archivo de reglas de repos que todavía no son proyecto (los proyectos usan REPO_RULES). */
+const PRECHECK_FILES: Record<string, string> = {
+  'ana-lopez/scraper-precios': `# reglas_negocio.toml — scraper-precios (con un error a propósito)
+[proyecto]
+nombre = "Scraper de precios"
+
+[[regla]]
+id          = "R1"
+titulo      = "Precios con Decimal"
+descripcion = "Los precios leídos se guardan con Decimal."
+severidad   = "alta"
+rutas       = ["scraper/"]
+prohibido   = 'float\\('
+`,
+}
+
+const REPO_URL = /^https:\/\/(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i
+
+function withPaths(result: RulesValidation, content: string, files: string[], name: string): RulesValidation {
+  if (!result.valid) return result
+  const warnings = parse(content).rules.flatMap((r) => r.paths.filter((p) => !files.some((f) => inPath(f, p))).map((p) => `${r.id}: la ruta \`${p}\` no existe en ${name}`))
+  return { ...result, warnings }
+}
+
+/** null = la URL no es de GitHub (el handler responde 422). */
+export function precheck(url: string, _branch: string, content?: string): RulesPrecheck | null {
+  const m = REPO_URL.exec(url.trim())
+  if (!m) return null
+  const name = `${m[1]}/${m[2]}`
+  const project = findRepoByName(name)
+  const files = project ? Object.keys(project.content) : ['main.py', 'scraper/precios.py']
+  const text = project ? REPO_RULES[project.id] : PRECHECK_FILES[name]
+  const known = Boolean(project || text || githubRepos(null).some((r) => r.full_name.toLowerCase() === name.toLowerCase()))
+  const file = text ? { ...withPaths(validate(text), text, files, name), content: text, path: FILENAME } : null
+  const up = project ? uploads.get(project.id) : undefined
+  const uploaded = project && up ? { ...withPaths(validate(up.content), up.content, files, name), ...up } : null
+  return {
+    repo: name,
+    status: !known ? 'unavailable' : !file ? 'missing' : file.valid ? 'valid' : 'invalid',
+    message: known ? null : 'No se encontró el repositorio o la rama (o no tienes acceso). Las reglas se revisan al analizar.',
+    file,
+    project_id: project?.id ?? null,
+    uploaded,
+    active: file?.valid ? 'repo' : uploaded?.valid ? 'app' : file ? 'repo' : null,
+    template: TEMPLATE.replace('nombre  = "Mi proyecto"', `nombre  = ${JSON.stringify(name)}`),
+    checked: content === undefined ? null : withPaths(validate(content), content, files, name),
+  }
+}
+
+/** Reglas mandadas con /api/analyze: un texto = no son válidas (422); si el repo ya es proyecto, se guardan en él. */
+export function fromAnalyze(url: string, content: string): string | null {
+  const check = validate(content)
+  if (!check.valid) return check.error ?? 'Reglas no válidas'
+  const project = findRepoByName(url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, ''))
+  if (project) uploads.set(project.id, { content, updated_at: new Date().toISOString() })
+  return null
+}

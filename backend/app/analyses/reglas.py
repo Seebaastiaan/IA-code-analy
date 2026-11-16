@@ -3,8 +3,8 @@ Reglas de negocio del proyecto analizado (docs/adr/ADR-003-reglas-de-negocio.md 
 docs/PROPUESTA_REGLAS_NEGOCIO.md).
 
 Cada proyecto declara sus reglas en `reglas_negocio.toml` (raíz del repo o `docs/`) y las liga a algo
-verificable. Si el repo no lo tiene, se usan las cargadas desde Configuración (de apoyo: el del repo siempre
-gana). Dos niveles, combinados en un estado por regla (`combine`):
+verificable. Si el repo no lo tiene, o el suyo no es válido, se usan las cargadas en la app (Configuración o
+Nuevo análisis); un archivo válido del repo siempre gana. Dos niveles, combinados en un estado por regla (`combine`):
 
 - **Patrón** (`run`, en el backend): `prohibido` (regex que no debe aparecer) y `obligatorio` (regex que debe
   aparecer en cada archivo) sobre los `.py` de `rutas`. Como Bandit y Ruff, solo lee el código. Las pruebas
@@ -206,6 +206,8 @@ class RulesCheck:
     error: str | None = None
     results: list[RuleResult] = field(default_factory=list)
     origin: Origin | None = None
+    # Error del archivo del repo cuando en su lugar se usaron las reglas corregidas en la app (origin = "app")
+    repo_error: str | None = None
     # Pruebas que usan reglas que no existen, etc. No detienen nada.
     warnings: list[str] = field(default_factory=list)
     # Las pruebas se ejecutaron (sandbox); False = solo se encontraron leyendo el código
@@ -613,25 +615,27 @@ def run(
 ) -> RulesCheck:
     """
     Paso "Verificando reglas de negocio" sobre el clon. `files` = archivos del repo ya sin las rutas excluidas;
-    `uploaded` = reglas cargadas desde Configuración (solo se usan si el repo no tiene el archivo).
+    `uploaded` = reglas cargadas en la app: se usan si el repo no tiene el archivo o si el suyo no es válido
+    (entonces `repo_error` dice por qué). Un archivo válido del repo siempre gana.
     Las pruebas quedan "sin ejecutar" hasta `with_tests`.
     Nunca lanza por culpa del archivo: un archivo inválido queda en `error` y el análisis sigue.
     """
-    try:
-        found = find(root)
-    except RulesError as exc:
-        return RulesCheck(source=FILENAME, error=str(exc), origin="repo")
+    source, ruleset, repo_error = _repo_rules(root)
     origin: Origin = "repo"
-    if found is not None:
-        source, text = found
-    elif uploaded and uploaded.strip():
-        source, text, origin = APP_SOURCE, uploaded, "app"
-    else:
-        return RulesCheck()
-    try:
-        ruleset = parse(text)
-    except RulesError as exc:
-        return RulesCheck(source=source, error=str(exc), origin=origin)
+    if ruleset is None:
+        app_rules: RuleSet | None = None
+        if uploaded and uploaded.strip():
+            try:
+                app_rules = parse(uploaded)
+            except RulesError as exc:
+                # Se validan al guardarse; si aun así fallan, manda el error del repo (si hay)
+                if repo_error is None:
+                    return RulesCheck(source=APP_SOURCE, error=str(exc), origin="app")
+        if app_rules is None:
+            return RulesCheck(source=source, error=repo_error, origin="repo") if repo_error else RulesCheck()
+        ruleset, origin = app_rules, "app"
+        repo_error = f"{source}: {repo_error}" if repo_error else None
+        source = APP_SOURCE
     cache: dict[str, list[str] | None] = {}
 
     def cached(file: str) -> list[str] | None:
@@ -640,8 +644,23 @@ def run(
         return cache[file]
 
     patterns = [check_rule(r, files, cached) for r in ruleset.rules]
-    check = RulesCheck(source=source, project=ruleset.project, origin=origin, patterns=patterns, declared=declared_tests(files, cached))
+    check = RulesCheck(
+        source=source, project=ruleset.project, origin=origin, repo_error=repo_error, patterns=patterns, declared=declared_tests(files, cached),
+    )
     return _with(check, check.declared, PENDING)
+
+
+def _repo_rules(root: Path) -> tuple[str, RuleSet | None, str | None]:
+    """(archivo, reglas, error) del repo: (FILENAME, None, None) si no tiene el archivo."""
+    source = FILENAME
+    try:
+        found = find(root)
+        if found is None:
+            return source, None, None
+        source, text = found
+        return source, parse(text), None
+    except RulesError as exc:
+        return source, None, str(exc)
 
 
 def summary_line(check: RulesCheck | None) -> str:
@@ -658,6 +677,8 @@ def summary_line(check: RulesCheck | None) -> str:
     )
     if check.tests_total:
         line += f" · {check.tests_total} prueba(s) ligada(s)" + ("" if check.tests_ran else " sin ejecutar")
-    if check.origin == "app":
-        line += "\n  aviso: reglas cargadas en Configuración; súbelas al repositorio como reglas_negocio.toml"
+    if check.repo_error:
+        line += f"\n  aviso: {check.repo_error}\n  se usaron las reglas corregidas en la app; sube el archivo corregido al repositorio"
+    elif check.origin == "app":
+        line += "\n  aviso: reglas cargadas en la app; súbelas al repositorio como reglas_negocio.toml"
     return "\n".join([line, *(f"  aviso: {w}" for w in check.warnings)])

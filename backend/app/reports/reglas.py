@@ -69,11 +69,13 @@ class BusinessRules(BaseModel):
     checked: bool
     # Archivo leído del repo (reglas_negocio.toml o docs/reglas_negocio.toml); None = no declara reglas
     source: str | None
-    # repo | app (cargadas en Configuración, el repo no tiene el archivo)
+    # repo | app (cargadas en la app: el repo no tiene el archivo o el suyo no es válido)
     origin: Literal["repo", "app"] | None
     project: str | None
     # El archivo no es válido: no hay resultados
     error: str | None
+    # El archivo del repo no era válido y se usaron las reglas corregidas en la app (origin = app)
+    repo_error: str | None = None
     # Las pruebas corrieron en el sandbox; False = solo se encontraron leyendo el código
     tests_ran: bool
     warnings: list[str]
@@ -104,6 +106,7 @@ def get_business_rules(report_id: str, store: Analyses, user_id: UserId, repo: s
         origin=(check["origin"] or ("repo" if check["source"] else None)) if check else None,
         project=check["project"] if check else None,
         error=check["error"] if check else None,
+        repo_error=check["repo_error"] if check else None,
         tests_ran=bool(check["tests_ran"]) if check else False,
         warnings=json.loads(check["warnings"] or "[]") if check else [],
         summary=BusinessRulesSummary(total=len(results), cumple=count("cumple"), no_cumple=count("no_cumple"), sin_verificar=count("sin_verificar")),

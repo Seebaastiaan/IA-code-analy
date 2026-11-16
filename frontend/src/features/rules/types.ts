@@ -55,6 +55,8 @@ export interface BusinessRules {
   project: string | null
   /** El archivo no es válido: no hay resultados */
   error: string | null
+  /** El archivo del repo no era válido y se usaron las reglas corregidas en la app (origin = 'app') */
+  repo_error?: string | null
   /** Las pruebas corrieron en el sandbox */
   tests_ran: boolean
   warnings: string[]
@@ -91,4 +93,25 @@ export interface ProjectRules {
   /** El repo ya se clonó (si no, todavía no se sabe si trae el archivo) */
   cloned: boolean
   commit: string | null
+}
+
+/** Archivo de reglas del repo: valid | invalid | missing. unavailable = no se pudo leer sin clonar (acceso, rama, GitHub) */
+export type PrecheckStatus = 'valid' | 'invalid' | 'missing' | 'unavailable'
+
+/** Revisión de las reglas al cargar el repo en Nuevo análisis (POST /api/reglas/revisar), antes de clonar. */
+export interface RulesPrecheck {
+  /** "owner/repo" */
+  repo: string
+  status: PrecheckStatus
+  message: string | null
+  file: (RulesFile & { path: string }) | null
+  /** El repo ya es un proyecto del equipo */
+  project_id: string | null
+  uploaded: (RulesFile & { updated_at: string }) | null
+  /** Lo que usará el análisis si no se cambia nada */
+  active: RulesOrigin | null
+  /** Plantilla con el nombre del repo y sus carpetas con código */
+  template: string
+  /** Validación del contenido enviado (editor del modal) */
+  checked: RulesValidation | null
 }

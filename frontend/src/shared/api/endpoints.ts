@@ -40,6 +40,8 @@ export const EP = {
     /** Las reglas son de cada proyecto: se validan contra su repositorio y la plantilla lleva su nombre */
     validate: (projectId: string) => `/api/projects/${projectId}/reglas/validar`,
     template: (projectId: string) => `/api/projects/${projectId}/reglas/plantilla`,
+    /** Revisa las reglas de un repo antes de analizarlo (Nuevo análisis), sin clonarlo */
+    precheck: '/api/reglas/revisar',
   },
   github: {
     status: '/api/github/status',

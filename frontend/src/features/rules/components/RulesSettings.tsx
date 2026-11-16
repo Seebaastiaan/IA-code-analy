@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState, type ChangeEvent } from 'react'
 import { toast } from '@/shared/hooks/useToast'
-import { Button, Card, Chip, ErrorState, Icon, PageLoader, SeverityBadge, Spinner } from '@/shared/ui'
+import { Button, Card, Chip, ErrorState, Icon, PageLoader, Spinner } from '@/shared/ui'
 import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '../api/rules.api'
 import type { ProjectRules, RulesValidation } from '../types'
 import { saveText } from '../utils/rules'
+import { ValidationResult } from './ValidationResult'
 
 const MAX_BYTES = 256 * 1024
 
@@ -20,6 +21,15 @@ function Origin({ data }: { data: ProjectRules }) {
         {data.commit && <span className="text-xs text-slate-400 font-mono">commit {data.commit.slice(0, 7)}</span>}
       </p>
     )
+  if (data.active === 'app' && data.repo && !data.repo.valid)
+    return (
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone="brand">Corregidas en la app</Chip>
+        <span className="text-sm text-slate-500">
+          El <code className="font-mono">{data.repo.path}</code> del repositorio tiene errores: el análisis usa las reglas corregidas aquí. Descárgalas y súbelas al repositorio.
+        </span>
+      </p>
+    )
   if (data.active === 'app')
     return (
       <p className="flex flex-wrap items-center gap-2">
@@ -32,39 +42,6 @@ function Origin({ data }: { data: ProjectRules }) {
       <Chip>Sin reglas</Chip>
       <span className="text-sm text-slate-500">{data.cloned ? `El repositorio no tiene ${RULES_FILENAME}.` : 'Analiza el repositorio para saber si trae el archivo.'}</span>
     </p>
-  )
-}
-
-function ValidationResult({ result }: { result: RulesValidation }) {
-  if (!result.valid)
-    return (
-      <p role="alert" className="mt-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3.5 py-2.5 text-sm font-mono">
-        {result.error}
-      </p>
-    )
-  return (
-    <div className="mt-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 px-3.5 py-2.5 text-sm" role="status">
-      <p className="font-medium text-emerald-700 dark:text-emerald-300">
-        Válido · {result.project} · {result.rules.length} regla(s)
-      </p>
-      {result.rules.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {result.rules.map((r) => (
-            <li key={r.id} className="flex items-center gap-2 min-w-0">
-              <span className="font-mono text-xs text-slate-500 shrink-0">{r.id}</span>
-              <SeverityBadge sev={r.severity} />
-              <span className="truncate">{r.title}</span>
-              <span className="ml-auto shrink-0 text-xs text-slate-400">{r.pattern ? 'patrón' : 'pruebas'}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {result.warnings?.map((w) => (
-        <p key={w} className="mt-2 text-amber-700 dark:text-amber-300 font-mono text-xs">
-          Aviso: {w}
-        </p>
-      ))}
-    </div>
   )
 }
 
@@ -113,12 +90,15 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   }
 
   const busy = validate.isPending || save.isPending
-  const fromRepo = data.active === 'repo'
+  // El archivo del repo es válido: gana a lo que se guarde aquí
+  const fromRepo = data.active === 'repo' && Boolean(data.repo?.valid)
+  // El archivo del repo tiene errores: lo que se guarde aquí se usa mientras siga así
+  const repoInvalid = Boolean(data.repo && !data.repo.valid)
 
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h2 className="font-semibold">{fromRepo && !data.uploaded ? `Contenido de ${data.repo?.path}` : 'Reglas cargadas en la app'}</h2>
+        <h2 className="font-semibold">{data.uploaded ? 'Reglas cargadas en la app' : `Contenido de ${data.repo?.path ?? RULES_FILENAME}`}</h2>
         <div className="flex flex-wrap gap-1">
           <Button variant="ghost" onClick={() => template.mutate()} disabled={template.isPending}>
             <Icon name="download" className="w-4 h-4" />
@@ -133,7 +113,13 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
       </div>
       {fromRepo && (
         <p className="mb-3 text-sm text-slate-500">
-          El repositorio ya tiene <code className="font-mono">{data.repo?.path}</code>: el análisis usa ese archivo y lo que guardes aquí se ignora. Edítalo en el repositorio o desde el editor.
+          El repositorio ya tiene <code className="font-mono">{data.repo?.path}</code> y es válido: el análisis usa ese archivo y lo que guardes aquí se ignora. Edítalo en el repositorio o desde el editor.
+        </p>
+      )}
+      {repoInvalid && (
+        <p className="mb-3 text-sm text-slate-500">
+          {data.uploaded ? 'Estas son las reglas corregidas que usa el análisis' : 'Corrige aquí el archivo y guárdalo en la app: el análisis usará esta versión'} mientras{' '}
+          <code className="font-mono">{data.repo?.path}</code> del repositorio siga con errores. Después descárgalo y súbelo al repositorio.
         </p>
       )}
       <textarea
@@ -208,7 +194,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
           ))}
         </ol>
         <p className="mt-4 text-xs text-slate-400">
-          Las reglas son de este proyecto: no se comparten con otros repositorios. Si el repositorio tiene el archivo, gana el del repositorio. Las reglas todavía no cuentan en el score.
+          Las reglas son de este proyecto: no se comparten con otros repositorios. Si el repositorio tiene un archivo válido, gana el del repositorio; si el suyo tiene errores, se usan las corregidas aquí. Las reglas todavía no cuentan en el score.
         </p>
       </Card>
     </div>

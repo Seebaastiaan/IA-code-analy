@@ -144,6 +144,9 @@ let jobSeq = 0
 
 export class NotFound extends Error {}
 
+/** Proyecto del equipo con ese "owner/repo" (como el backend, sin distinguir mayúsculas). */
+export const findRepoByName = (name: string) => repos.find((r) => r.name.toLowerCase() === name.toLowerCase())
+
 export const getRepo = (id: string) => {
   const r = repos.find((x) => x.id === id)
   if (!r) throw new NotFound(`Repositorio ${id} no encontrado`)

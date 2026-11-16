@@ -73,6 +73,8 @@ export const handlers = [
   http.post(EP.analyze, route(async ({ request }) => {
     const body = (await request.json()) as AnalyzeRequest
     if (!/^https?:\/\/.+\/.+/.test(body.url)) return fail(422, 'invalid_url', 'La URL del repositorio no es válida')
+    const invalid = body.rules === undefined ? null : rules.fromAnalyze(body.url, body.rules)
+    if (invalid) return fail(422, 'invalid_rules', invalid)
     return json({ job_id: db.startJob(body.url, body.branch || 'main') })
   }, 400)),
   http.get(EP.jobs.get(':jobId'), route(({ params }) => json(db.jobSnapshot(params.jobId as string)))),
@@ -173,6 +175,11 @@ export const handlers = [
   http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
   http.post(EP.rules.validate(':projectId'), route(async ({ request, params }) => json(rules.validateFor(params.projectId as string, ((await request.json()) as { content: string }).content)))),
   http.get(EP.rules.template(':projectId'), route(({ params }) => new HttpResponse(rules.templateFor(params.projectId as string), { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
+  http.post(EP.rules.precheck, route(async ({ request }) => {
+    const body = (await request.json()) as { url: string; branch: string; content?: string }
+    const result = rules.precheck(body.url, body.branch, body.content)
+    return result ? json(result) : fail(422, 'invalid_url', 'Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)')
+  })),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

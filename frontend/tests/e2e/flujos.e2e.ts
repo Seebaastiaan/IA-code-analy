@@ -170,6 +170,40 @@ test('reglas de negocio: matriz del reporte y carga desde configuración', async
   await expect(page.getByText(/Aviso: RN-001: la ruta `no_existe\/` no existe en/)).toBeVisible()
 })
 
+test('reglas de negocio al cargar el repo: revisar y corregir antes de analizar', async ({ page }) => {
+  await page.goto('/analyze')
+  const url = page.getByLabel('URL del repositorio')
+  const rules = page.getByRole('region', { name: 'Reglas de negocio' })
+
+  // Repo con un reglas_negocio.toml válido: se ve antes de clonar
+  await url.fill('https://github.com/equipo/api-pagos')
+  await expect(rules.getByText('5 regla(s) · API de pagos de negocio')).toBeVisible()
+
+  // Repo con un archivo con errores: se ve el error con su línea y se corrige aquí
+  await url.fill('https://github.com/ana-lopez/scraper-precios')
+  await expect(rules.getByText('reglas_negocio.toml no es válido')).toBeVisible()
+  await expect(rules.getByText(/`R1` no cumple el formato `RN-###`/)).toBeVisible()
+  await expect(rules.getByRole('button', { name: 'Analizar sin reglas' })).toBeVisible()
+  await rules.getByRole('button', { name: 'Corregir' }).click()
+
+  const dialog = page.getByRole('dialog')
+  const editor = dialog.getByLabel('Reglas de negocio para este análisis')
+  await expect(editor).toHaveValue(/id {10}= "R1"/)
+  await dialog.getByRole('button', { name: 'Usar en este análisis' }).click()
+  // Con errores no se acepta
+  await expect(dialog.getByRole('alert')).toContainText('no cumple el formato')
+  await editor.fill((await editor.inputValue()).replace('"R1"', '"RN-001"'))
+  await dialog.getByRole('button', { name: 'Validar' }).click()
+  await expect(dialog.getByText('Válido · Scraper de precios · 1 regla(s)')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Usar en este análisis' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(rules.getByText('1 regla(s) · Scraper de precios escritas aquí')).toBeVisible()
+  await expect(rules.getByText(/usará estas reglas corregidas/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Iniciar análisis' }).click()
+  await expect(page).toHaveURL(/\/analyze\/jobs\//)
+})
+
 test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await page.goto('/repos')
   await page.getByRole('navigation').getByRole('link', { name: 'Equipo' }).click()

@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { GithubRepoPicker, useGithubBranches, type GithubRepo } from '@/features/github'
 import { useSelectedRepo } from '@/features/repos/store/selectedRepo.store'
+import { RulesPrecheck, type FormRules } from '@/features/rules'
 import { useConfig } from '@/features/settings'
 import { CAT } from '@/shared/constants/categories'
 import { paths } from '@/shared/constants/paths'
@@ -45,11 +46,18 @@ export function AnalyzeForm() {
   // Repo elegido de la cuenta de GitHub ("owner/repo"); escribir la URL a mano lo descarta
   const [ghRepo, setGhRepo] = useState<string | null>(null)
   const branches = useGithubBranches(ghRepo)
+  // Reglas de negocio escritas o corregidas aquí; son de un repo y rama: cambiar cualquiera las descarta
+  const [rules, setRules] = useState<FormRules | null>(null)
 
+  const changeBranch = (next: string) => {
+    setBranch(next)
+    setRules(null)
+  }
   const pickRepo = (repo: GithubRepo) => {
     setGhRepo(repo.full_name)
     setUrl(repo.html_url)
     setBranch(repo.default_branch)
+    setRules(null)
   }
 
   const start = useMutation({
@@ -68,7 +76,7 @@ export function AnalyzeForm() {
     // Una categoría sin analizadores no tendría score (el backend responde 422)
     const missing = CATEGORIES.filter((k) => !ANALYZERS[k].some((a) => analyzers.includes(a.id))).map((k) => CAT[k].label)
     if (missing.length) return toast(`Elige al menos un analizador de: ${missing.join(', ')}`, { tone: 'err' })
-    start.mutate({ url: url.trim(), branch: branch.trim() || 'main', analyzers, sandbox, index })
+    start.mutate({ url: url.trim(), branch: branch.trim() || 'main', analyzers, sandbox, index, ...(rules && { rules: rules.text }) })
   }
 
   const sum = weights.seg + weights.test + weights.prac || 1
@@ -90,6 +98,7 @@ export function AnalyzeForm() {
                 onChange={(e) => {
                   setUrl(e.target.value)
                   setGhRepo(null)
+                  setRules(null)
                 }}
                 placeholder="https://github.com/equipo/api-pagos"
                 className="font-mono text-[13px]"
@@ -98,7 +107,7 @@ export function AnalyzeForm() {
             <div>
               <Label htmlFor="f-br">Rama</Label>
               {branches.data?.length ? (
-                <Select id="f-br" value={branch} onChange={(e) => setBranch(e.target.value)} className="font-mono text-[13px]">
+                <Select id="f-br" value={branch} onChange={(e) => changeBranch(e.target.value)} className="font-mono text-[13px]">
                   {branches.data.map((b) => (
                     <option key={b.name} value={b.name}>
                       {b.name}
@@ -106,10 +115,12 @@ export function AnalyzeForm() {
                   ))}
                 </Select>
               ) : (
-                <Input id="f-br" value={branch} onChange={(e) => setBranch(e.target.value)} disabled={branches.isFetching} className="font-mono text-[13px]" />
+                <Input id="f-br" value={branch} onChange={(e) => changeBranch(e.target.value)} disabled={branches.isFetching} className="font-mono text-[13px]" />
               )}
             </div>
           </div>
+
+          <RulesPrecheck url={url} branch={branch} rules={rules} onRulesChange={setRules} />
 
           <fieldset>
             <legend className="block text-sm font-medium mb-1.5 text-slate-700 dark:text-slate-300">Analizadores</legend>
