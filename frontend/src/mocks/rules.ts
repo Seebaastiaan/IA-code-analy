@@ -1,57 +1,73 @@
 /**
  * Reglas de negocio simuladas (backend/app/analyses/reglas.py y app/projects/reglas.py).
  * `r1` (api-pagos) trae su reglas_negocio.toml; los demás repos no tienen y pueden cargarlas desde Configuración.
- * En la revisión de Nuevo análisis, `ana-lopez/scraper-precios` (aún no es proyecto) trae un archivo con errores.
+ * En la revisión de Nuevo análisis, `ana-lopez/scraper-precios` (aún no es proyecto) trae un archivo con errores, y
+ * los repos CRUD de prueba (fixtures/crudRules.ts) traen su archivo real.
  */
 import type { BusinessRuleResult, BusinessRules, ProjectRules, RulePreview, RulesPrecheck, RulesValidation } from '@/features/rules/types'
 import type { Severity } from '@/shared/types/common'
 import { findRepoByName, getRepo } from './db'
+import { CRUD_REPOS } from './fixtures/crudRules'
 import { repos as githubRepos } from './github'
 
 const FILENAME = 'reglas_negocio.toml'
 const APP_SOURCE = 'Configuración (cargadas en la app)'
+const MAX_WARNINGS = 20
 
 const REPO_RULES: Record<string, string> = {
-  r1: `# reglas_negocio.toml — reglas de negocio de api-pagos
+  r1: `# reglas_negocio.toml — reglas de negocio de api-pagos (formato de IA VOY)
+#
+# Cada regla dice, en palabras del negocio, qué debe pasar siempre. IA VOY la comprueba de una de dos formas:
+#   - con una PRUEBA marcada @pytest.mark.regla("RN-00X") (o llamada test_rn00X_…) que simula el criterio;
+#   - con un PATRÓN: un texto que NO debe aparecer en el código (prohibido) o que SÍ debe aparecer (obligatorio).
+
 [proyecto]
 nombre  = "API de pagos"
 version = "1.0"
 
 [[regla]]
 id          = "RN-001"
-titulo      = "Montos con Decimal"
-descripcion = "Todo monto de dinero se calcula con Decimal; nunca con float."
+titulo      = "Los cobros salen exactos al centavo"
+descripcion = "Lo que se cobra coincide al centavo con lo calculado: a un pago de $0.10 se le quita 10 % de comisión y quedan exactamente $0.09, ni un centavo más ni menos."
 severidad   = "alta"
 rutas       = ["pagos/"]
+# PATRÓN: en pagos/ no debe aparecer  float(  ; float pierde centavos. El dinero se maneja con Decimal.
 prohibido   = 'float\\('
+criterio    = "Dado un pago de $0.10 con comisión de 10 %, cuando se cobra, entonces el monto es exactamente $0.09"
 
 [[regla]]
 id          = "RN-002"
-titulo      = "Consultas SQL parametrizadas"
-descripcion = "Ninguna consulta SQL se arma concatenando datos del cliente."
+titulo      = "Lo que manda el cliente no puede alterar la consulta de pagos"
+descripcion = "El nombre del cliente que llega en la petición se usa solo como dato. Si se pegara dentro de la consulta, alguien podría mandar ' OR '1'='1 y ver los pagos de todos los clientes."
 severidad   = "alta"
 rutas       = ["api.py"]
+# PATRÓN: no debe aparecer una consulta (SELECT, INSERT…) a la que se le pega texto con +
 prohibido   = '(SELECT|INSERT|UPDATE|DELETE)[^"]*"\\s*\\+'
 
 [[regla]]
 id          = "RN-003"
-titulo      = "La clave de los tokens viene del entorno"
-descripcion = "La clave con la que se firman los tokens se lee de una variable de entorno."
+titulo      = "La clave secreta de los tokens no está escrita en el código"
+descripcion = "La clave con la que se firman las sesiones se lee del servidor (variable de entorno). Si estuviera en el código, cualquiera con acceso al repositorio podría hacerse pasar por un cliente."
 severidad   = "media"
 rutas       = ["auth.py"]
+# PATRÓN: auth.py debe leer la clave con  os.environ  u  os.getenv
 obligatorio = 'os\\.(environ|getenv)'
 
 [[regla]]
 id          = "RN-004"
-titulo      = "Pagos sobre el límite requieren autorización"
-descripcion = "Un pago mayor al límite solo se cobra si lo autorizó alguien de admin o finanzas."
+titulo      = "Un pago mayor al límite necesita autorización de admin o finanzas"
+descripcion = "Un pago que pasa el límite del cliente solo se cobra si lo autorizó alguien de administración o de finanzas; si lo autorizó otra área, se rechaza."
 severidad   = "alta"
+criterio    = "Dado un pago de $5,000 con límite de $1,000 autorizado por «ventas», cuando se procesa, entonces se rechaza con motivo «autorizador»"
+# Se verifica con la prueba test_rn004_pago_sobre_el_limite_requiere_autorizador_valido
 
 [[regla]]
 id          = "RN-005"
-titulo      = "Reembolsos solo de pagos cobrados"
-descripcion = "Un reembolso solo procede si el pago está en estado cobrado."
+titulo      = "Solo se reembolsa un pago que ya se cobró"
+descripcion = "Un pago pendiente o rechazado no se puede reembolsar: no hay dinero que regresar."
 severidad   = "media"
+criterio    = "Dado un pago pendiente de $300, cuando se pide su reembolso, entonces se rechaza"
+# Todavía sin prueba ni patrón: queda "sin verificar"
 `,
 }
 
@@ -60,33 +76,37 @@ const TEMPLATE = REPO_RULES.r1.replace('API de pagos', 'Mi proyecto')
 /** Resultado del último análisis de r1: patrones y pruebas (como si hubiera corrido en el sandbox). */
 const R1_RESULTS: BusinessRuleResult[] = [
   {
-    id: 'RN-001', title: 'Montos con Decimal', description: 'Todo monto de dinero se calcula con Decimal; nunca con float.', severity: 'alta',
+    id: 'RN-001', title: 'Los cobros salen exactos al centavo',
+    description: 'Lo que se cobra coincide al centavo con lo calculado: a un pago de $0.10 se le quita 10 % de comisión y quedan exactamente $0.09, ni un centavo más ni menos.', severity: 'alta',
     paths: ['pagos/'], forbidden: 'float\\(', required: null, story: 'HU-02', owner: 'Equipo backend',
     criterion: 'Dado un pago de $0.10 con comisión de 10 %, cuando se cobra, entonces el monto es exactamente $0.09',
     status: 'cumple', level: 'patron', detail: '`prohibido` no aparece (2 archivo(s) revisado(s))', evidence: [], evidence_total: 0, tests: [],
   },
   {
-    id: 'RN-002', title: 'Consultas SQL parametrizadas', description: 'Ninguna consulta SQL se arma concatenando datos del cliente.', severity: 'alta',
+    id: 'RN-002', title: 'Lo que manda el cliente no puede alterar la consulta de pagos',
+    description: "El nombre del cliente que llega en la petición se usa solo como dato. Si se pegara dentro de la consulta, alguien podría mandar ' OR '1'='1 y ver los pagos de todos los clientes.", severity: 'alta',
     paths: ['api.py'], forbidden: '(SELECT|INSERT|UPDATE|DELETE)[^"]*"\\s*\\+', required: null, story: 'HU-05', owner: 'Equipo backend', criterion: null,
     status: 'no_cumple', level: 'patron', detail: '`prohibido` aparece en 1 línea(s)',
-    evidence: [{ file: 'api.py', line: 17, text: 'query = "SELECT * FROM pagos WHERE id = " + pago_id' }], evidence_total: 1, tests: [],
+    evidence: [{ file: 'api.py', line: 17, text: `consulta = "SELECT * FROM pagos WHERE cliente = '" + cliente + "'"` }], evidence_total: 1, tests: [],
   },
   {
-    id: 'RN-003', title: 'La clave de los tokens viene del entorno', description: 'La clave con la que se firman los tokens se lee de una variable de entorno.', severity: 'media',
+    id: 'RN-003', title: 'La clave secreta de los tokens no está escrita en el código',
+    description: 'La clave con la que se firman las sesiones se lee del servidor (variable de entorno). Si estuviera en el código, cualquiera con acceso al repositorio podría hacerse pasar por un cliente.', severity: 'media',
     paths: ['auth.py'], forbidden: null, required: 'os\\.(environ|getenv)', story: 'HU-01', owner: null, criterion: null,
     status: 'no_cumple', level: 'patron', detail: 'falta `obligatorio` en 1 de 1 archivo(s) con código',
     evidence: [{ file: 'auth.py', line: 1, text: 'no aparece `os\\.(environ|getenv)`' }], evidence_total: 1, tests: [],
   },
   {
-    id: 'RN-004', title: 'Pagos sobre el límite requieren autorización', description: 'Un pago mayor al límite solo se cobra si lo autorizó alguien de admin o finanzas.', severity: 'alta',
+    id: 'RN-004', title: 'Un pago mayor al límite necesita autorización de admin o finanzas',
+    description: 'Un pago que pasa el límite del cliente solo se cobra si lo autorizó alguien de administración o de finanzas; si lo autorizó otra área, se rechaza.', severity: 'alta',
     paths: [], forbidden: null, required: null, story: 'HU-03', owner: null,
     criterion: 'Dado un pago de $5,000 con límite de $1,000 autorizado por «ventas», cuando se procesa, entonces se rechaza con motivo «autorizador»',
     status: 'cumple', level: 'pruebas', detail: '1 prueba(s) pasan', evidence: [], evidence_total: 0,
     tests: [{ name: 'tests/test_procesador.py::test_rn004_pago_sobre_el_limite_requiere_autorizador_valido', file: 'tests/test_procesador.py', line: 15, outcome: 'passed', message: '' }],
   },
   {
-    id: 'RN-005', title: 'Reembolsos solo de pagos cobrados', description: 'Un reembolso solo procede si el pago está en estado cobrado.', severity: 'media',
-    paths: [], forbidden: null, required: null, story: null, owner: null, criterion: null,
+    id: 'RN-005', title: 'Solo se reembolsa un pago que ya se cobró', description: 'Un pago pendiente o rechazado no se puede reembolsar: no hay dinero que regresar.', severity: 'media',
+    paths: [], forbidden: null, required: null, story: null, owner: null, criterion: 'Dado un pago pendiente de $300, cuando se pide su reembolso, entonces se rechaza',
     status: 'sin_verificar', level: 'ninguno',
     detail: 'Sin patrón ni pruebas: agrega `prohibido` u `obligatorio`, o una prueba con @pytest.mark.regla("RN-005") (o llamada test_rn005_…).',
     evidence: [], evidence_total: 0, tests: [],
@@ -95,52 +115,88 @@ const R1_RESULTS: BusinessRuleResult[] = [
 
 const uploads = new Map<string, { content: string; updated_at: string }>()
 
-// ─── Validación (la del backend es la real; esta cubre los errores comunes) ───
+// ─── Validación (la del backend es la real; esta sigue su orden y sus mensajes en los errores comunes) ───
 
 interface ParsedRule extends RulePreview {
   description: string
   paths: string[]
+  forbidden: string | null
+  required: string | null
 }
 
 class RulesError extends Error {}
 
+const PROJECT_FIELDS = ['nombre', 'version']
+const RULE_FIELDS = ['criterio', 'descripcion', 'historia', 'ia', 'id', 'obligatorio', 'prohibido', 'responsable', 'rutas', 'severidad', 'titulo']
+
 const value = (block: string, key: string) => new RegExp(`^\\s*${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'm').exec(block)?.slice(1).find((v) => v !== undefined)
+const keys = (block: string) => [...block.matchAll(/^\s*([A-Za-z_]+)\s*=/gm)].map((m) => m[1])
+
+function pattern(block: string, key: string, where: string): string | null {
+  const p = value(block, key)?.trim()
+  if (!p) return null
+  try {
+    // Las banderas de Python al inicio ((?i)…) no las entiende todo navegador
+    new RegExp(p.replace(/^\(\?[aiLmsux]+\)/, ''))
+  } catch {
+    throw new RulesError(`${where}: \`${key}\` no es una expresión regular válida`)
+  }
+  return p
+}
 
 function parse(text: string): { project: string; rules: ParsedRule[] } {
   const lines = text.split('\n')
   const starts = lines.flatMap((l, i) => (/^\s*\[\[\s*regla\s*\]\]/.test(l) ? [i] : []))
   const head = lines.slice(0, starts[0] ?? lines.length).join('\n')
   if (!/^\s*\[proyecto\]/m.test(head)) throw new RulesError(`${FILENAME}: falta la sección [proyecto] con su \`nombre\``)
+  const extra = keys(head).filter((k) => !PROJECT_FIELDS.includes(k)).sort()
+  if (extra.length) throw new RulesError(`[proyecto]: campo desconocido \`${extra[0]}\` (campos válidos: nombre, version)`)
   const project = value(head, 'nombre')
   if (!project) throw new RulesError('[proyecto]: falta `nombre`')
   const seen = new Set<string>()
   const rules = starts.map((start, i) => {
     const block = lines.slice(start + 1, starts[i + 1] ?? lines.length).join('\n')
     const where = `línea ${start + 1}`
-    for (const key of ['id', 'titulo', 'descripcion', 'severidad']) if (!value(block, key)) throw new RulesError(`${where}: falta \`${key}\``)
-    const id = value(block, 'id')!
+    const unknown = keys(block).filter((k) => !RULE_FIELDS.includes(k)).sort()
+    if (unknown.length) throw new RulesError(`${where}: campo desconocido \`${unknown[0]}\` (campos válidos: ${RULE_FIELDS.join(', ')})`)
+    const id = value(block, 'id')
+    if (!id) throw new RulesError(`${where}: falta \`id\``)
     if (!/^RN-\d{3}$/.test(id)) throw new RulesError(`${where}: \`${id}\` no cumple el formato \`RN-###\` (p. ej. RN-001)`)
+    const ruleWhere = `${where} · ${id}`
+    const severity = value(block, 'severidad')
+    if (!severity) throw new RulesError(`${ruleWhere}: falta \`severidad\``)
+    if (!['alta', 'media', 'baja'].includes(severity)) throw new RulesError(`${ruleWhere}: \`severidad\` debe ser alta, media o baja (no «${severity}»)`)
+    if (/^\s*rutas\s*=\s*[^[\s]/m.test(block)) throw new RulesError(`${ruleWhere}: \`rutas\` debe ser una lista, p. ej. ["app/pagos/"]`)
+    for (const key of ['titulo', 'descripcion']) if (!value(block, key)) throw new RulesError(`${ruleWhere}: falta \`${key}\``)
+    const forbidden = pattern(block, 'prohibido', ruleWhere)
+    const required = pattern(block, 'obligatorio', ruleWhere)
     if (seen.has(id)) throw new RulesError(`${where}: ${id} está repetida`)
     seen.add(id)
-    const severity = value(block, 'severidad')!
-    if (!['alta', 'media', 'baja'].includes(severity)) throw new RulesError(`${where} · ${id}: \`severidad\` debe ser alta, media o baja (no «${severity}»)`)
     return {
       id, title: value(block, 'titulo')!, description: value(block, 'descripcion')!, severity: severity as Severity,
-      pattern: Boolean(value(block, 'prohibido') ?? value(block, 'obligatorio')),
-      paths: [...(/^\s*rutas\s*=\s*\[([^\]]*)\]/m.exec(block)?.[1] ?? '').matchAll(/["']([^"']+)["']/g)].map((m) => m[1]),
+      pattern: Boolean(forbidden ?? required), forbidden, required,
+      paths: [...(/^\s*rutas\s*=\s*\[([^\]]*)\]/m.exec(block)?.[1] ?? '').matchAll(/["']([^"']+)["']/g)].map((m) => m[1].replace(/^\.?\/+/, '')),
     }
   })
   return { project, rules }
 }
 
-export function validate(content: string): RulesValidation {
-  try {
-    const { project, rules } = parse(content)
-    return { valid: true, error: null, project, rules: rules.map(({ id, title, severity, pattern }) => ({ id, title, severity, pattern })) }
-  } catch (e) {
-    if (e instanceof RulesError) return { valid: false, error: e.message, project: null, rules: [] }
-    throw e
+// ─── Contradicciones y duplicados (reglas.conflicts del backend) ───
+
+const REGEX_META = new Set('.^$*+?{}[]|()')
+
+/** Texto fijo que busca `pattern` (p. ej. `@requiere_admin`, `os\.getenv`); null si usa regex de verdad. */
+function literal(pattern: string): string | null {
+  let out = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]
+    if (c === '\\') {
+      if (i + 1 >= pattern.length || /[A-Za-z0-9]/.test(pattern[i + 1])) return null
+      out += pattern[++i]
+    } else if (REGEX_META.has(c)) return null
+    else out += c
   }
+  return out || null
 }
 
 const inPath = (file: string, path: string) => {
@@ -148,14 +204,69 @@ const inPath = (file: string, path: string) => {
   return file === p || file.startsWith(`${p}/`)
 }
 
-/** Validación de las reglas de un proyecto: además de la sintaxis, que sus `rutas` existan en el repo. */
+const overlap = (a: string[], b: string[]) =>
+  !a.length || !b.length || a.some((x) => b.some((y) => inPath(x.replace(/\/+$/, ''), y) || inPath(y.replace(/\/+$/, ''), x)))
+
+const norm = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean).join(' ').replace(/[.;:]+$/, '')
+
+function forcesForbidden(forbidden: string, required: string): boolean {
+  if (forbidden === required) return true
+  const lit = literal(required)
+  if (lit === null) return false
+  try {
+    const re = new RegExp(forbidden.replace(/^\(\?[aiLmsux]+\)/, ''))
+    return re.test(lit) && re.test(` ${lit} `)
+  } catch {
+    return false
+  }
+}
+
+/** Avisos de reglas que se contradicen o que parecen duplicadas. No invalidan el archivo. */
+export function conflicts(rules: ParsedRule[]): string[] {
+  const out: string[] = []
+  for (const a of rules)
+    for (const b of rules) {
+      if (!a.forbidden || !b.required || !overlap(a.paths, b.paths) || !forcesForbidden(a.forbidden, b.required)) continue
+      out.push(a === b
+        ? `${a.id} se contradice: \`obligatorio\` (\`${a.required}\`) siempre incluye lo \`prohibido\` (\`${a.forbidden}\`); nunca puede cumplirse`
+        : `${a.id} y ${b.id} se contradicen: ${b.id} exige \`${b.required}\` y ${a.id} prohíbe \`${a.forbidden}\` en las mismas rutas; no pueden cumplirse las dos`)
+    }
+  rules.forEach((a, i) =>
+    rules.slice(i + 1).forEach((b) => {
+      const same: string[] = []
+      const paths = (r: ParsedRule) => [...new Set(r.paths)].sort().join('\n')
+      if ((a.forbidden || a.required) && a.forbidden === b.forbidden && a.required === b.required && paths(a) === paths(b)) same.push('el mismo patrón y rutas')
+      if (norm(a.title) === norm(b.title)) same.push('el mismo título')
+      if (norm(a.description) === norm(b.description)) same.push('la misma descripción')
+      if (same.length) out.push(`${b.id} parece duplicada de ${a.id}: tiene ${same.join(' y ')}`)
+    }),
+  )
+  return [...new Set(out)].slice(0, MAX_WARNINGS)
+}
+
+export function validate(content: string): RulesValidation {
+  try {
+    const { project, rules } = parse(content)
+    return { valid: true, error: null, project, rules: rules.map(({ id, title, severity, pattern }) => ({ id, title, severity, pattern })), warnings: conflicts(rules) }
+  } catch (e) {
+    if (e instanceof RulesError) return { valid: false, error: e.message, project: null, rules: [] }
+    throw e
+  }
+}
+
+/** Validación contra los archivos de un repositorio: además de la sintaxis, que sus `rutas` existan en él. */
+function withPaths(content: string, files: string[] | null, name: string): RulesValidation {
+  const result = validate(content)
+  // Sin los archivos del repo (no se pudo leer) las rutas no se revisan, como en el backend
+  if (!result.valid || files === null) return result
+  const missing = parse(content).rules.flatMap((r) => r.paths.filter((p) => !files.some((f) => inPath(f, p))).map((p) => `${r.id}: la ruta \`${p}\` no existe en ${name}`))
+  return { ...result, warnings: [...(result.warnings ?? []), ...missing].slice(0, MAX_WARNINGS) }
+}
+
+/** Validación de las reglas de un proyecto: además de la sintaxis, que sus `rutas` existan en el repo (si ya se clonó). */
 export function validateFor(repoId: string, content: string): RulesValidation {
   const repo = getRepo(repoId)
-  const result = validate(content)
-  if (!result.valid || repo.reports.length === 0) return result
-  const files = Object.keys(repo.content)
-  const warnings = parse(content).rules.flatMap((r) => r.paths.filter((p) => !files.some((f) => inPath(f, p))).map((p) => `${r.id}: la ruta \`${p}\` no existe en ${repo.name}`))
-  return { ...result, warnings }
+  return repo.reports.length === 0 ? validate(content) : withPaths(content, Object.keys(repo.content), repo.name)
 }
 
 /** Plantilla del proyecto: su nombre y una carpeta con código que existe en su repositorio. */
@@ -219,38 +330,37 @@ export function reportRules(repoId: string, reportId: string): BusinessRules {
   if (!up) return { ...base, source: null, origin: null, project: null, tests_ran: false, rules: [], summary: count([]) }
   const { project, rules } = parse(up.content)
   const results: BusinessRuleResult[] = rules.map((r) => ({
-    id: r.id, title: r.title, description: r.description, severity: r.severity, paths: [], forbidden: null, required: null, story: null, owner: null, criterion: null,
+    id: r.id, title: r.title, description: r.description, severity: r.severity, paths: r.paths, forbidden: r.forbidden, required: r.required,
+    story: null, owner: null, criterion: null,
     status: 'sin_verificar', level: 'ninguno', detail: 'Se verifica en el siguiente análisis.', evidence: [], evidence_total: 0, tests: [],
   }))
-  return { ...base, source: APP_SOURCE, origin: 'app', project, tests_ran: false, rules: results, summary: count(results) }
+  return { ...base, source: APP_SOURCE, origin: 'app', project, tests_ran: false, rules: results, summary: count(results), warnings: conflicts(rules) }
 }
 
 
 // ─── Revisión al cargar el repo (Nuevo análisis) ───
 
-/** Archivo de reglas de repos que todavía no son proyecto (los proyectos usan REPO_RULES). */
-const PRECHECK_FILES: Record<string, string> = {
-  'ana-lopez/scraper-precios': `# reglas_negocio.toml — scraper-precios (con un error a propósito)
+/** Archivo de reglas (y archivos) de repos que todavía no son proyecto (los proyectos usan REPO_RULES). */
+const PRECHECK_FILES: Record<string, { content: string; files: string[] }> = {
+  'ana-lopez/scraper-precios': {
+    content: `# reglas_negocio.toml — scraper-precios (con un error a propósito)
 [proyecto]
 nombre = "Scraper de precios"
 
 [[regla]]
 id          = "R1"
-titulo      = "Precios con Decimal"
-descripcion = "Los precios leídos se guardan con Decimal."
+titulo      = "Los precios se guardan exactos al centavo"
+descripcion = "El precio leído de la tienda se guarda tal cual, al centavo: $19.99 se guarda como $19.99, no como $19.989999."
 severidad   = "alta"
 rutas       = ["scraper/"]
 prohibido   = 'float\\('
 `,
+    files: ['main.py', 'scraper/precios.py'],
+  },
+  ...CRUD_REPOS,
 }
 
 const REPO_URL = /^https:\/\/(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i
-
-function withPaths(result: RulesValidation, content: string, files: string[], name: string): RulesValidation {
-  if (!result.valid) return result
-  const warnings = parse(content).rules.flatMap((r) => r.paths.filter((p) => !files.some((f) => inPath(f, p))).map((p) => `${r.id}: la ruta \`${p}\` no existe en ${name}`))
-  return { ...result, warnings }
-}
 
 /** null = la URL no es de GitHub (el handler responde 422). */
 export function precheck(url: string, _branch: string, content?: string): RulesPrecheck | null {
@@ -258,22 +368,23 @@ export function precheck(url: string, _branch: string, content?: string): RulesP
   if (!m) return null
   const name = `${m[1]}/${m[2]}`
   const project = findRepoByName(name)
-  const files = project ? Object.keys(project.content) : ['main.py', 'scraper/precios.py']
-  const text = project ? REPO_RULES[project.id] : PRECHECK_FILES[name]
-  const known = Boolean(project || text || githubRepos(null).some((r) => r.full_name.toLowerCase() === name.toLowerCase()))
-  const file = text ? { ...withPaths(validate(text), text, files, name), content: text, path: FILENAME } : null
+  const known = project ? undefined : Object.entries(PRECHECK_FILES).find(([n]) => n.toLowerCase() === name.toLowerCase())?.[1]
+  const files = project ? Object.keys(project.content) : known?.files ?? null
+  const text = project ? REPO_RULES[project.id] : known?.content
+  const reachable = Boolean(project || text || githubRepos(null).some((r) => r.full_name.toLowerCase() === name.toLowerCase()))
+  const file = text ? { ...withPaths(text, files, name), content: text, path: FILENAME } : null
   const up = project ? uploads.get(project.id) : undefined
-  const uploaded = project && up ? { ...withPaths(validate(up.content), up.content, files, name), ...up } : null
+  const uploaded = project && up ? { ...withPaths(up.content, files, name), ...up } : null
   return {
     repo: name,
-    status: !known ? 'unavailable' : !file ? 'missing' : file.valid ? 'valid' : 'invalid',
-    message: known ? null : 'No se encontró el repositorio o la rama (o no tienes acceso). Las reglas se revisan al analizar.',
+    status: !reachable ? 'unavailable' : !file ? 'missing' : file.valid ? 'valid' : 'invalid',
+    message: reachable ? null : 'No se encontró el repositorio o la rama (o no tienes acceso). Las reglas se revisan al analizar.',
     file,
     project_id: project?.id ?? null,
     uploaded,
     active: file?.valid ? 'repo' : uploaded?.valid ? 'app' : file ? 'repo' : null,
     template: TEMPLATE.replace('nombre  = "Mi proyecto"', `nombre  = ${JSON.stringify(name)}`),
-    checked: content === undefined ? null : withPaths(validate(content), content, files, name),
+    checked: content === undefined ? null : withPaths(content, files, name),
   }
 }
 

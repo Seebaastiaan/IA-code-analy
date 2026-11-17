@@ -36,12 +36,32 @@ describe('validación simulada de reglas_negocio.toml', () => {
   const base = '[proyecto]\nnombre = "Tienda"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n'
 
   it('acepta un archivo válido', () => {
-    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false }] })
+    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false }], warnings: [] })
   })
 
   it('indica la línea del error, como el backend', () => {
     expect(validate(base.replace('RN-001', 'RN-1')).error).toBe('línea 4: `RN-1` no cumple el formato `RN-###` (p. ej. RN-001)')
     expect(validate(base.replace('[proyecto]', '')).valid).toBe(false)
+    expect(validate(base.replace('nombre = "Tienda"', 'nombre = "Tienda"\nautor = "X"')).error).toBe('[proyecto]: campo desconocido `autor` (campos válidos: nombre, version)')
+    expect(validate(`${base}rutas = "app/"\n`).error).toContain('`rutas` debe ser una lista')
+    expect(validate(`${base}prohibido = 'round('\n`).error).toBe('línea 4 · RN-001: `prohibido` no es una expresión regular válida')
+  })
+
+  const dos = (a: string, b: string) =>
+    `[proyecto]\nnombre = "P"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T1"\ndescripcion = "D1"\nseveridad = "alta"\n${a}\n\n[[regla]]\nid = "RN-002"\ntitulo = "T2"\ndescripcion = "D2"\nseveridad = "alta"\n${b}\n`
+
+  it('avisa reglas que se contradicen, como el backend', () => {
+    const r = validate(dos("prohibido = 'print'\nrutas = [\"app/\"]", "obligatorio = 'print'\nrutas = [\"app/pagos/cobro.py\"]"))
+    expect(r.valid).toBe(true)
+    expect(r.warnings).toEqual(['RN-001 y RN-002 se contradicen: RN-002 exige `print` y RN-001 prohíbe `print` en las mismas rutas; no pueden cumplirse las dos'])
+    // Rutas distintas, o un obligatorio que es regex de verdad: no se contradicen
+    expect(validate(dos("prohibido = 'print'\nrutas = [\"app/a/\"]", "obligatorio = 'print'\nrutas = [\"app/b/\"]")).warnings).toEqual([])
+    expect(validate(dos("prohibido = 'float'", "obligatorio = 'float|Decimal'")).warnings).toEqual([])
+  })
+
+  it('avisa reglas duplicadas', () => {
+    const r = validate(dos("prohibido = 'x'\nrutas = [\"a/\", \"b/\"]", "prohibido = 'x'\nrutas = [\"b/\", \"./a/\"]").replace('"T2"', '" t1. "'))
+    expect(r.warnings).toEqual(['RN-002 parece duplicada de RN-001: tiene el mismo patrón y rutas y el mismo título'])
   })
 })
 
@@ -108,5 +128,46 @@ describe('revisión de reglas en Nuevo análisis', () => {
     expect(precheck('https://github.com/nadie/nada', 'main')!.status).toBe('unavailable')
     expect(precheck('https://gitlab.com/a/b', 'main')).toBeNull()
     expect(fromAnalyze('https://github.com/ana-lopez/scraper-precios', scraper.file!.content)).toContain('RN-###')
+  })
+
+  it('simulada: los repos CRUD de prueba traen sus reglas reales', () => {
+    const biblioteca = precheck('https://github.com/urielbatizzzzzzzz/crud-biblioteca', 'main')!
+    expect(biblioteca).toMatchObject({ status: 'valid', active: 'repo' })
+    expect(biblioteca.file).toMatchObject({ project: 'Biblioteca escolar', warnings: [] })
+    expect(biblioteca.file!.rules.map((r) => r.id)).toEqual(['RN-001', 'RN-002', 'RN-003', 'RN-004', 'RN-005'])
+    const cafeteria = precheck('https://github.com/urielbatizzzzzzzz/crud-cafeteria', 'main')!
+    expect(cafeteria.file).toMatchObject({ valid: true, project: 'Cafetería escolar', warnings: [] })
+    expect(cafeteria.file!.rules.filter((r) => r.pattern).map((r) => r.id)).toEqual(['RN-001', 'RN-003'])
+
+    // Papelería: sus 8 errores de formato salen en orden, como en el backend (ver su README)
+    const papeleria = precheck('https://github.com/urielbatizzzzzzzz/crud-papeleria', 'main')!
+    expect(papeleria.status).toBe('invalid')
+    let text = papeleria.file!.content
+    const fixes: [string, string][] = [
+      ['autor   = "Equipo 11"', ''],
+      ['"R1"', '"RN-001"'],
+      ['"critica"', '"alta"'],
+      ['titulo      = "Ningún artículo cuesta $0 o menos"', 'titulo      = "Ningún artículo cuesta $0 o menos"\ndescripcion = "x"'],
+      ['rutas       = "papeleria/ventas.py"', 'rutas       = ["papeleria/ventas.py"]'],
+      ['prioridad   = 1', ''],
+      ["'round('", "'round\\('"],
+      ['id          = "RN-006"                     # ERROR 8', 'id          = "RN-007"'],
+    ]
+    const errors = fixes.map(([from, to]) => {
+      const error = validate(text).error
+      text = text.replace(from, to)
+      return error
+    })
+    expect(errors.map((e) => e?.replace(/ \(.*$/, ''))).toEqual([
+      '[proyecto]: campo desconocido `autor`',
+      'línea 11: `R1` no cumple el formato `RN-###`',
+      'línea 20 · RN-002: `severidad` debe ser alta, media o baja',
+      'línea 27 · RN-003: falta `descripcion`',
+      'línea 34 · RN-004: `rutas` debe ser una lista, p. ej. ["app/pagos/"]',
+      'línea 42: campo desconocido `prioridad`',
+      'línea 50 · RN-006: `prohibido` no es una expresión regular válida',
+      'línea 58: RN-006 está repetida',
+    ])
+    expect(validate(text)).toMatchObject({ valid: true, project: 'Papelería escolar', warnings: [] })
   })
 })

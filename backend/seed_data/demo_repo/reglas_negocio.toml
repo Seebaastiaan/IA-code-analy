@@ -1,5 +1,8 @@
 # reglas_negocio.toml — reglas de negocio de api-pagos (formato: docs/PROPUESTA_REGLAS_NEGOCIO.md)
-# IA voy las lee al analizar el repo y verifica cada una con su patrón (prohibido / obligatorio) y sus pruebas.
+#
+# Cada regla dice, en palabras del negocio, qué debe pasar siempre. IA voy la comprueba de una de dos formas:
+#   - con una PRUEBA marcada @pytest.mark.regla("RN-00X") (o llamada test_rn00X_…) que simula el criterio;
+#   - con un PATRÓN: un texto que NO debe aparecer en el código (prohibido) o que SÍ debe aparecer (obligatorio).
 
 [proyecto]
 nombre  = "API de pagos"
@@ -7,10 +10,11 @@ version = "1.0"
 
 [[regla]]
 id          = "RN-001"
-titulo      = "Montos con Decimal"
-descripcion = "Todo monto de dinero se calcula con Decimal; nunca con float."
+titulo      = "Los cobros salen exactos al centavo"
+descripcion = "Lo que se cobra coincide al centavo con lo calculado: a un pago de $0.10 se le quita 10 % de comisión y quedan exactamente $0.09, ni un centavo más ni menos."
 severidad   = "alta"
 rutas       = ["pagos/"]
+# PATRÓN: en pagos/ no debe aparecer  float(  ; float pierde centavos. El dinero se maneja con Decimal.
 prohibido   = 'float\('
 historia    = "HU-02"
 responsable = "Equipo backend"
@@ -18,28 +22,30 @@ criterio    = "Dado un pago de $0.10 con comisión de 10 %, cuando se cobra, ent
 
 [[regla]]
 id          = "RN-002"
-titulo      = "Consultas SQL parametrizadas"
-descripcion = "Ninguna consulta SQL se arma concatenando datos del cliente; se usan parámetros (?)."
+titulo      = "Lo que manda el cliente no puede alterar la consulta de pagos"
+descripcion = "El nombre del cliente que llega en la petición se usa solo como dato. Si se pegara dentro de la consulta, alguien podría mandar ' OR '1'='1 y ver los pagos de todos los clientes."
 severidad   = "alta"
 rutas       = ["api.py"]
+# PATRÓN: no debe aparecer una consulta (SELECT, INSERT…) a la que se le pega texto con +
 prohibido   = '(SELECT|INSERT|UPDATE|DELETE)[^"]*"\s*\+'
 historia    = "HU-05"
 responsable = "Equipo backend"
 
 [[regla]]
 id          = "RN-003"
-titulo      = "La clave de los tokens viene del entorno"
-descripcion = "La clave con la que se firman los tokens se lee de una variable de entorno; nunca va en el código."
+titulo      = "La clave secreta de los tokens no está escrita en el código"
+descripcion = "La clave con la que se firman las sesiones se lee del servidor (variable de entorno). Si estuviera en el código, cualquiera con acceso al repositorio podría hacerse pasar por un cliente."
 severidad   = "media"
 rutas       = ["auth.py"]
+# PATRÓN: auth.py debe leer la clave con  os.environ  u  os.getenv
 obligatorio = 'os\.(environ|getenv)'
 historia    = "HU-01"
 
 [[regla]]
 id          = "RN-004"
-titulo      = "Pagos sobre el límite requieren autorización"
-descripcion = "Un pago mayor al límite solo se cobra si lo autorizó alguien de admin o finanzas."
+titulo      = "Un pago mayor al límite necesita autorización de admin o finanzas"
+descripcion = "Un pago que pasa el límite del cliente solo se cobra si lo autorizó alguien de administración o de finanzas; si lo autorizó otra área, se rechaza."
 severidad   = "alta"
 historia    = "HU-03"
 criterio    = "Dado un pago de $5,000 con límite de $1,000 autorizado por «ventas», cuando se procesa, entonces se rechaza con motivo «autorizador»"
-# Sin patrón: la verifica tests/test_procesador.py::test_rn004_… (o una prueba marcada @pytest.mark.regla("RN-004"))
+# Se verifica con la prueba tests/test_procesador.py::test_rn004_… (o una prueba marcada @pytest.mark.regla("RN-004"))
