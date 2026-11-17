@@ -13,6 +13,10 @@ Nuevo análisis); un archivo válido del repo siempre gana. Dos niveles, combina
   En el sandbox las corre pytest con el plugin app.analysis.ia_voy_reglas; sin sandbox se encuentran leyendo
   las pruebas (`declared_tests`, con `ast`) y la regla queda "sin verificar" con el motivo.
 
+Un `id` repetido invalida el archivo. Las reglas que se contradicen (una prohíbe lo que otra exige en las mismas
+rutas) o que parecen duplicadas (mismo patrón y rutas, o mismo título o descripción) solo dan avisos (`conflicts`), al
+validar y en el reporte; se siguen verificando todas.
+
 Los resultados se guardan aparte de los hallazgos (app.analyses.reglas_store) y todavía no entran al score.
 """
 
@@ -137,6 +141,85 @@ def missing_paths(ruleset: "RuleSet", files: list[str], project: str) -> list[st
         for p in r.paths
         if not any(is_excluded(f, [p]) for f in files)
     ][:MAX_WARNINGS]
+
+
+# Caracteres con significado en una regex: un patrón sin ellos (o con ellos escapados) busca un texto fijo
+_REGEX_META = frozenset(".^$*+?{}[]|()")
+
+
+def _literal(pattern: str) -> str | None:
+    """Texto fijo que busca `pattern` (p. ej. `@requiere_admin`, `os\\.getenv`); None si usa regex de verdad."""
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\":
+            # \d, \w, \b…: ya no es un texto fijo
+            if i + 1 >= len(pattern) or pattern[i + 1].isalnum():
+                return None
+            out.append(pattern[i + 1])
+            i += 2
+            continue
+        if c in _REGEX_META:
+            return None
+        out.append(c)
+        i += 1
+    return "".join(out) or None
+
+
+def _overlap(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
+    """Las `rutas` de dos reglas comparten archivos (vacío = todo el repo)."""
+    if not a or not b:
+        return True
+    return any(is_excluded(x.rstrip("/"), [y]) or is_excluded(y.rstrip("/"), [x]) for x in a for y in b)
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.casefold().split()).rstrip(".;:")
+
+
+def _forces_forbidden(forbidden: re.Pattern, required: str) -> bool:
+    """Todo archivo que cumple `required` contiene `forbidden`: el mismo patrón, o `required` es un texto fijo que lo incluye."""
+    if forbidden.pattern == required:
+        return True
+    lit = _literal(required)
+    # Con espacios alrededor, como en una línea real: `^float` o `float$` no cuentan
+    return lit is not None and forbidden.search(lit) is not None and forbidden.search(f" {lit} ") is not None
+
+
+def conflicts(rules: list["BusinessRule"]) -> list[str]:
+    """
+    Avisos de reglas que se contradicen (nadie puede cumplir las dos) o que están duplicadas (mismo patrón y rutas,
+    o mismo título o descripción con otro `id`). No invalidan el archivo: cada regla se sigue verificando.
+    """
+    out: list[str] = []
+    forbidden = {r.id: re.compile(r.forbidden) for r in rules if r.forbidden}
+    # Una regla consigo misma también puede contradecirse (prohibido y obligatorio a la vez)
+    for a in rules:
+        for b in rules:
+            if a.id not in forbidden or not b.required or not _overlap(a.paths, b.paths):
+                continue
+            if not _forces_forbidden(forbidden[a.id], b.required):
+                continue
+            if a is b:
+                out.append(f"{a.id} se contradice: `obligatorio` (`{a.required}`) siempre incluye lo `prohibido` (`{a.forbidden}`); nunca puede cumplirse")
+            else:
+                out.append(
+                    f"{a.id} y {b.id} se contradicen: {b.id} exige `{b.required}` y {a.id} prohíbe `{a.forbidden}` en las mismas rutas; "
+                    "no pueden cumplirse las dos"
+                )
+    for i, a in enumerate(rules):
+        for b in rules[i + 1:]:
+            same: list[str] = []
+            if (a.forbidden or a.required) and (a.forbidden, a.required, set(a.paths)) == (b.forbidden, b.required, set(b.paths)):
+                same.append("el mismo patrón y rutas")
+            if _norm(a.title) == _norm(b.title):
+                same.append("el mismo título")
+            if _norm(a.description) == _norm(b.description):
+                same.append("la misma descripción")
+            if same:
+                out.append(f"{b.id} parece duplicada de {a.id}: tiene {' y '.join(same)}")
+    return list(dict.fromkeys(out))[:MAX_WARNINGS]
 
 
 class RulesError(ValueError):
@@ -588,7 +671,8 @@ def _warnings(source: str, rule_ids: set[str], tests: list[LinkedTest]) -> list[
 def _with(check: RulesCheck, tests: list[LinkedTest], reason: str | None) -> RulesCheck:
     results = [combine(p, [t for t in tests if p.rule.id in t.rules], reason) for p in check.patterns]
     ids = {p.rule.id for p in check.patterns}
-    return replace(check, results=results, warnings=_warnings(check.source or FILENAME, ids, tests), tests_ran=reason is None)
+    warnings = conflicts([p.rule for p in check.patterns]) + _warnings(check.source or FILENAME, ids, tests)
+    return replace(check, results=results, warnings=warnings[:MAX_WARNINGS], tests_ran=reason is None)
 
 
 # Sin sandbox (o sin que pytest corra) las pruebas ligadas se encuentran leyendo el código

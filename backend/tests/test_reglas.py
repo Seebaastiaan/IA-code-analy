@@ -304,3 +304,85 @@ def test_datos_de_demostracion_traen_reglas(client, settings):
     assert body["checked"] is True and body["project"] == "API de pagos"
     assert body["summary"] == {"total": 4, "cumple": 1, "no_cumple": 2, "sin_verificar": 1}
     assert body["rules"][1]["evidence"][0]["file"] == "api.py" and body["rules"][1]["story"] == "HU-05"
+
+
+# ─── Contradicciones y duplicados (avisos, no invalidan el archivo) ───
+
+
+def _reglas(*cuerpos: str) -> str:
+    texto = '[proyecto]\nnombre = "P"\n'
+    for n, cuerpo in enumerate(cuerpos, start=1):
+        texto += f'\n[[regla]]\nid = "RN-{n:03d}"\ntitulo = "T{n}"\ndescripcion = "D{n}"\nseveridad = "alta"\n{cuerpo}\n'
+    return texto
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        # El mismo patrón prohibido en una y obligatorio en la otra
+        ("prohibido = '@requiere_admin'", "obligatorio = '@requiere_admin'"),
+        # Lo obligatorio es un texto fijo que contiene lo prohibido
+        (r"prohibido = 'float\('", r"obligatorio = 'total = float\(x\)'"),
+        # Rutas que se cruzan (carpeta y archivo dentro de ella; vacío = todo el repo)
+        ("prohibido = 'print'\nrutas = [\"app/\"]", "obligatorio = 'print'\nrutas = [\"app/pagos/cobro.py\"]"),
+        ("prohibido = 'print'", "obligatorio = 'print'\nrutas = [\"app/\"]"),
+    ],
+)
+def test_detecta_reglas_que_se_contradicen(a, b):
+    avisos = reglas.conflicts(parse(_reglas(a, b)).rules)
+    assert len(avisos) == 1
+    assert avisos[0].startswith("RN-001 y RN-002 se contradicen: RN-002 exige") and avisos[0].endswith("no pueden cumplirse las dos")
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        # Rutas distintas: cada una manda en su carpeta
+        ("prohibido = 'print'\nrutas = [\"app/pagos/\"]", "obligatorio = 'print'\nrutas = [\"app/admin/\"]"),
+        # Un archivo con nombre parecido no está dentro de la carpeta
+        ("prohibido = 'x'\nrutas = [\"app/pagos/\"]", "obligatorio = 'x'\nrutas = [\"app/pagos.py\"]"),
+        # Lo obligatorio usa regex de verdad: no se adivina
+        ("prohibido = 'float'", "obligatorio = 'float|Decimal'"),
+        # Prohibido anclado al inicio de la línea: no se cumple por fuerza
+        ("prohibido = '^import os'", "obligatorio = 'import os'"),
+        (r"prohibido = 'float\('", r"obligatorio = 'Decimal\('"),
+    ],
+)
+def test_no_avisa_si_no_se_contradicen(a, b):
+    assert reglas.conflicts(parse(_reglas(a, b)).rules) == []
+
+
+def test_regla_que_se_contradice_a_si_misma():
+    avisos = reglas.conflicts(parse(_reglas("prohibido = 'float'\nobligatorio = 'float'")).rules)
+    assert avisos == ["RN-001 se contradice: `obligatorio` (`float`) siempre incluye lo `prohibido` (`float`); nunca puede cumplirse"]
+
+
+def test_detecta_reglas_duplicadas():
+    texto = _reglas(
+        "prohibido = 'float\\('\nrutas = [\"app/\", \"lib/\"]",
+        "prohibido = 'float\\('\nrutas = [\"lib/\", \"./app/\"]",
+        "",
+    ).replace('titulo = "T3"', 'titulo = "  t1. "').replace('descripcion = "D3"', 'descripcion = "d1"')
+    assert reglas.conflicts(parse(texto).rules) == [
+        "RN-002 parece duplicada de RN-001: tiene el mismo patrón y rutas",
+        "RN-003 parece duplicada de RN-001: tiene el mismo título y la misma descripción",
+    ]
+    # Mismo patrón en otras rutas, o dos reglas sin patrón: no son duplicadas
+    assert reglas.conflicts(parse(_reglas("prohibido = 'x'\nrutas = [\"a/\"]", "prohibido = 'x'\nrutas = [\"b/\"]", "", "")).rules) == []
+
+
+def test_contradicciones_en_el_analisis_y_al_validar(tmp_path):
+    texto = _reglas("prohibido = 'print'", "obligatorio = 'print'")
+    (tmp_path / "reglas_negocio.toml").write_text(texto, encoding="utf-8")
+    (tmp_path / "app.py").write_text("print('hola')\n", encoding="utf-8")
+    check = reglas.run(tmp_path, ["app.py"], lambda f: (tmp_path / f).read_text(encoding="utf-8").splitlines())
+    # Se siguen verificando las dos; el aviso explica por qué una siempre falla
+    assert [r.status for r in check.results] == ["no_cumple", "cumple"]
+    assert len(check.warnings) == 1 and "se contradicen" in check.warnings[0]
+    assert "se contradicen" in reglas.summary_line(check)
+    # Sigue con el aviso después de agregar las pruebas
+    assert reglas.with_tests(check, None, "sin sandbox").warnings == check.warnings
+
+    from app.projects.reglas import validate
+    v = validate(texto)
+    assert v.valid and v.warnings == check.warnings

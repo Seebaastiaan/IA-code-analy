@@ -48,7 +48,8 @@ class Validation(BaseModel):
     error: str | None = None
     project: str | None = None
     rules: list[RulePreview] = Field(default_factory=list)
-    # Revisadas contra el repositorio del proyecto: `rutas` que no existen en él (no bloquean el guardado)
+    # Reglas que se contradicen o están duplicadas, y (revisadas contra el repositorio del proyecto) `rutas` que no
+    # existen en él. No bloquean el guardado
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -85,7 +86,7 @@ def validate(text: str, files: list[str] | None = None, project: str = "") -> Va
     return Validation(
         valid=True, project=rs.project,
         rules=[RulePreview(id=r.id, title=r.title, severity=r.severity, pattern=bool(r.forbidden or r.required)) for r in rs.rules],
-        warnings=reglas.missing_paths(rs, files, project) if files is not None else [],
+        warnings=(reglas.conflicts(rs.rules) + (reglas.missing_paths(rs, files, project) if files is not None else []))[: reglas.MAX_WARNINGS],
     )
 
 
