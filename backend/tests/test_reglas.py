@@ -302,7 +302,7 @@ def test_paso_de_reglas_en_el_analisis_y_api(client):
 
     body = client.get(f"/api/report/{job['report_id']}/reglas").json()
     assert body["checked"] is True and body["source"] == "reglas_negocio.toml" and body["project"] == "Tienda"
-    assert body["summary"] == {"total": 4, "cumple": 0, "no_cumple": 1, "sin_verificar": 3}
+    assert body["summary"] == {"total": 4, "cumple": 0, "no_cumple": 1, "sin_verificar": 3, "prueba_rota": 0, "no_implementada": 0, "fuera_del_codigo": 0}
     r1 = body["rules"][0]
     assert r1["id"] == "RN-001" and r1["status"] == "no_cumple" and r1["paths"] == ["app/pagos/"]
     assert r1["evidence"] == [{"file": "app/pagos/cobro.py", "line": 2, "text": "return float(m)"}]
@@ -342,7 +342,7 @@ def test_datos_de_demostracion_traen_reglas(client, settings):
     repo_id = seed("ana", settings)
     body = client.get("/api/report/latest/reglas", params={"repo": repo_id}).json()
     assert body["checked"] is True and body["project"] == "API de pagos"
-    assert body["summary"] == {"total": 4, "cumple": 1, "no_cumple": 2, "sin_verificar": 1}
+    assert body["summary"] == {"total": 4, "cumple": 1, "no_cumple": 2, "sin_verificar": 1, "prueba_rota": 0, "no_implementada": 0, "fuera_del_codigo": 0}
     assert body["rules"][1]["evidence"][0]["file"] == "api.py" and body["rules"][1]["story"] == "HU-05"
 
 

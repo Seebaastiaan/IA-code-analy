@@ -306,3 +306,72 @@ test('reglas de negocio: mapa del proyecto y arnés de pruebas (proponer, probar
   await expect(card.getByText('La prueba de humo falló')).toBeVisible()
   await expect(card.getByText(/como\('cliente'\): AssertionError: como\('cliente'\): GET \/pagos respondió 401/)).toBeVisible()
 })
+
+test('reglas de negocio: pruebas generadas por IA voy (generar, correr, aprobar)', async ({ page }) => {
+  test.slow()
+  await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  const harnessCard = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Mapa y arnés de pruebas' }) }).last()
+  const card = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Pruebas de las reglas' }) }).last()
+  await expect(card.getByText('Aprueba el arnés de pruebas (arriba)')).toBeVisible()
+
+  // Primero el arnés: proponer, prueba de humo y aprobar
+  await harnessCard.getByRole('button', { name: 'Proponer con IA' }).click()
+  await harnessCard.getByRole('button', { name: 'Correr prueba de humo' }).click()
+  await expect(harnessCard.getByText('La prueba de humo pasó')).toBeVisible()
+  await harnessCard.getByRole('button', { name: 'Aprobar arnés' }).click()
+
+  const generate = card.getByRole('button', { name: /^Generar pruebas \(\d+\)$/ })
+  await expect(generate).toBeEnabled()
+  await generate.click()
+  await expect(card.getByText(/La IA está escribiendo la prueba/)).toBeVisible()
+  await expect(card.getByRole('button', { name: /^Correr borradores \([1-9]\d*\)$/ })).toBeEnabled({ timeout: 20_000 })
+  await card.getByRole('button', { name: /^Correr borradores/ }).click()
+  await expect(card.getByText(/Corriendo \d+ prueba\(s\) en el sandbox/)).toBeVisible()
+  await expect(card.getByRole('button', { name: /^Aprobar las listas \([1-9]\d*\)$/ })).toBeEnabled({ timeout: 20_000 })
+
+  // El detalle de una regla: código, supuestos y la primera corrida
+  await card.getByRole('button', { name: /RN-001/ }).first().click()
+  await expect(card.getByText('Primera corrida:')).toBeVisible()
+  await expect(card.getByText('Un pago se cobra con POST /pagos/{id}/cobrar')).toBeVisible()
+
+  await card.getByRole('button', { name: /^Aprobar las listas/ }).click()
+  await expect(page.getByText('Pruebas aprobadas: cuentan desde el siguiente análisis')).toBeVisible()
+  await expect(card.getByLabel('Resumen de pruebas').getByText(/^[1-9]\d* aprobada\(s\)$/)).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Exportar para el repo' })).toBeEnabled()
+})
+
+test('reglas de negocio: matriz de permisos, evidencia y prueba de fuerza (fase 5)', async ({ page }) => {
+  test.slow()
+  await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  const harnessCard = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Mapa y arnés de pruebas' }) }).last()
+  const card = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Pruebas de las reglas' }) }).last()
+  await harnessCard.getByRole('button', { name: 'Proponer con IA' }).click()
+  await harnessCard.getByRole('button', { name: 'Correr prueba de humo' }).click()
+  await expect(harnessCard.getByText('La prueba de humo pasó')).toBeVisible()
+  await harnessCard.getByRole('button', { name: 'Aprobar arnés' }).click()
+
+  // RN-004 habla de autorización: la matriz se marca y la prueba sale de la tabla, sin IA
+  await card.getByRole('button', { name: /RN-004/ }).first().click()
+  await card.getByRole('button', { name: 'Matriz de permisos' }).click()
+  const save = card.getByRole('button', { name: /^Guardar y escribir la prueba/ })
+  await expect(save).toBeDisabled()
+  await card.getByRole('button', { name: 'POST /pagos/{pago_id}/reembolsar como cliente: fuera de la matriz' }).click()
+  await expect(card.getByRole('button', { name: 'POST /pagos/{pago_id}/reembolsar como cliente: permitido' })).toBeVisible()
+  await card.getByRole('button', { name: 'Usar lo que hace el código' }).click()
+  await save.click()
+  await expect(page.getByText('Prueba escrita desde la matriz: córrela y apruébala')).toBeVisible()
+  await expect(card.getByText(/de la matriz de permisos \(sin IA\)/)).toBeVisible()
+
+  // Evidencia de apoyo: dónde parece estar implementada (no cambia el resultado)
+  await card.getByRole('button', { name: 'Dónde está en el código' }).click()
+  await expect(card.getByText('Evidencia de apoyo:')).toBeVisible()
+  await expect(card.getByText(/pagos\/servicio\.py:\d+-\d+/)).toBeVisible()
+
+  // Prueba de fuerza: solo después de correrla y si pasa
+  await expect(card.getByRole('button', { name: 'Prueba de fuerza', exact: true })).toBeDisabled()
+  await card.getByRole('button', { name: /^Correr borradores/ }).click()
+  await expect(card.getByRole('button', { name: /^Prueba de fuerza \([1-9]\d*\)$/ })).toBeEnabled({ timeout: 20_000 })
+  await card.getByRole('button', { name: /^Prueba de fuerza \(/ }).click()
+  await expect(card.getByText(/Prueba de fuerza de \d+ prueba\(s\)/)).toBeVisible()
+  await expect(card.getByText(/cambios detectados/)).toBeVisible({ timeout: 20_000 })
+})

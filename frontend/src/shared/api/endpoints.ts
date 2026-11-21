@@ -51,6 +51,20 @@ export const EP = {
     harnessFromRepo: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/repo`,
     harnessSmoke: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/humo`,
     harnessApprove: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/aprobar`,
+    /** Pruebas de las reglas generadas por IA voy: GET (lista) / POST (generar) */
+    tests: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas`,
+    testsRun: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/correr`,
+    testsApprove: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/aprobar`,
+    /** PUT (editar) / DELETE de la prueba de una regla */
+    test: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}`,
+    /** GET / PUT de la matriz de permisos de una regla (la prueba sale de la tabla, sin IA) */
+    testMatrix: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/matriz`,
+    /** POST: dónde parece estar implementada la regla (IA, no cuenta) */
+    testEvidence: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/evidencia`,
+    /** POST: prueba de fuerza con mutación dirigida (en segundo plano) */
+    testsStrength: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/fuerza`,
+    /** Zip con reglas_negocio.toml, el arnés y las pruebas aprobadas */
+    export: (projectId: string) => `/api/projects/${projectId}/reglas/exportar`,
   },
   github: {
     status: '/api/github/status',

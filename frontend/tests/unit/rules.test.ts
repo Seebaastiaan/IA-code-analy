@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { BusinessRuleResult, HarnessView, MapSummary, RulesPrecheck, RuleStatus, RulesValidation } from '@/features/rules/types'
-import { baseName, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, precheckView, smokeLabel, testFunction, testName } from '@/features/rules/utils/rules'
+import type { BusinessRuleResult, HarnessView, MapSummary, PermissionMatrix, RulesPrecheck, RuleStatus, RulesValidation, RuleTestsView } from '@/features/rules/types'
+import {
+  baseName, EVIDENCE, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, markedCells, matrixFromCode, matrixPayload, nextCell, OUTCOME,
+  precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
+} from '@/features/rules/utils/rules'
+import * as ruleTests from '@/mocks/ruleTests'
 import * as harness from '@/mocks/harness'
 import { fromAnalyze, importDocument, precheck, templateFor, validate, validateFor } from '@/mocks/rules'
 
@@ -276,6 +280,136 @@ describe('mapa y arnés de pruebas', () => {
       // Con errores de validación no corre
       harness.editHarness(repo, 'import subprocess\n')
       expect(harness.runSmoke(repo)).toMatch(/^Corrige el arnés antes de probarlo: Falta el fixture `api`/)
+      harness.removeHarness(repo)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('pruebas de las reglas (simuladas)', () => {
+  it('generar, correr y aprobar: las rotas no se aprueban y el resumen cuenta cada estado', () => {
+    vi.useFakeTimers()
+    try {
+      const repo = 'r1'
+      harness.removeHarness(repo)
+      expect(ruleTests.generateTests(repo, null)).toMatch(/Aprueba el arnés/)
+      harness.proposeHarness(repo)
+      harness.runSmoke(repo)
+      vi.runAllTimers()
+      harness.approveHarness(repo, 'Ana')
+
+      const start = ruleTests.ruleTestsView(repo)
+      expect(start.harness_ready && start.can_generate).toBe(true)
+      const total = start.rules.length
+      expect(testsSummary(start)).toMatchObject({ missing: total, approved: 0, runnable: 0, approvable: [] })
+
+      expect((ruleTests.generateTests(repo, null) as RuleTestsView).busy?.kind).toBe('generando')
+      vi.runAllTimers()
+      const drafts = ruleTests.ruleTestsView(repo)
+      expect(drafts.busy).toBeNull()
+      expect(testsSummary(drafts)).toMatchObject({ missing: 0, drafts: total, runnable: total, approvable: [] })
+      expect(drafts.rules[0].test?.blocked).toBe('Córrela primero en el sandbox')
+
+      // Una prueba editada que usa preparar sin pedirlo sale rota y no se puede aprobar
+      const first = drafts.rules[0]
+      ruleTests.editTest(repo, first.id, first.test!.code.replace(', preparar)', ')'))
+      ruleTests.runTests(repo, null)
+      vi.runAllTimers()
+      const ran = ruleTests.ruleTestsView(repo)
+      expect(ran.rules[0].test?.run?.verdict).toBe('prueba_rota')
+      expect(ran.rules[1].test?.run?.verdict).toBe('no_cumple')
+      const ok = testsSummary(ran).approvable
+      expect(ok).not.toContain(first.id)
+      expect(ok).toHaveLength(total - 1)
+
+      const approved = ruleTests.approveTests(repo, ran.rules.map((r) => r.id), 'Ana')
+      expect(approved.messages).toEqual([`${first.id}: La prueba está rota: corrígela o vuelve a generarla`])
+      expect(testsSummary(approved)).toMatchObject({ approved: total - 1, drafts: 1 })
+      expect(RULE_TEST_STATE[approved.rules[1].state].label).toBe('Aprobada')
+      for (const r of approved.rules) ruleTests.removeTest(repo, r.id)
+      harness.removeHarness(repo)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('los estados nuevos del reporte se ordenan después de no cumple', () => {
+    const order = (['no_cumple', 'no_implementada', 'prueba_rota', 'sin_verificar', 'cumple', 'fuera_del_codigo'] as const).map((s) => STATUS[s].order)
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+    expect(OUTCOME.broken.label).toBe('Rota')
+  })
+})
+
+describe('matriz de permisos, evidencia y prueba de fuerza (fase 5)', () => {
+  const matrix = (): PermissionMatrix => ({
+    rule_id: 'RN-001', roles: ['cliente', 'admin'], saved: false,
+    actions: [
+      { id: 'POST /servicios', method: 'POST', path: '/servicios', function: 'app:crear', suggested: ['admin'], cells: {} },
+      { id: 'POST /citas', method: 'POST', path: '/citas', function: 'app:reservar', suggested: [], cells: { cliente: 'permitido' } },
+    ],
+  })
+
+  it('las celdas van de vacía a permitido, prohibido y otra vez vacía', () => {
+    expect([nextCell(undefined), nextCell('permitido'), nextCell('prohibido')]).toEqual(['permitido', 'prohibido', undefined])
+  })
+
+  it('lo que se guarda lleva todas las celdas (null = fuera de la matriz) y se cuentan las marcadas', () => {
+    const m = matrix()
+    expect(matrixPayload(m)).toEqual({ 'POST /servicios': { cliente: null, admin: null }, 'POST /citas': { cliente: 'permitido', admin: null } })
+    expect(markedCells(m)).toBe(1)
+    // «Usar lo que hace el código» solo llena las acciones de las que el mapa sabe los roles
+    const fromCode = matrixFromCode(m)
+    expect(fromCode.actions[0].cells).toEqual({ cliente: 'prohibido', admin: 'permitido' })
+    expect(fromCode.actions[1].cells).toEqual({ cliente: 'permitido' })
+    expect(markedCells(fromCode)).toBe(3)
+  })
+
+  it('matriz → prueba sin IA, evidencia y prueba de fuerza en los mocks', () => {
+    vi.useFakeTimers()
+    try {
+      const repo = 'r1'
+      harness.proposeHarness(repo)
+      harness.runSmoke(repo)
+      vi.runAllTimers()
+      harness.approveHarness(repo, 'Ana')
+      const ruleId = ruleTests.ruleTestsView(repo).rules[0].id
+
+      const m = ruleTests.getMatrix(repo, ruleId)
+      expect(m.saved).toBe(false)
+      expect(ruleTests.saveMatrix(repo, ruleId, matrixPayload(m))).toMatch(/Marca al menos una celda/)
+      const view = ruleTests.saveMatrix(repo, ruleId, matrixPayload(matrixFromCode(m))) as RuleTestsView
+      const test = view.rules[0].test!
+      expect([test.origin, test.tipo, test.has_matrix, view.rules[0].permissions]).toEqual(['matriz', 'permisos', true, true])
+      expect(test.code).toContain(`@pytest.mark.regla("${ruleId}")`)
+      expect(ruleTests.getMatrix(repo, ruleId).saved).toBe(true)
+      // La fuerza solo aplica a pruebas que pasan
+      expect(test.strength_blocked).toBe('Córrela primero en el sandbox')
+      expect(ruleTests.strengthTests(repo, null)).toMatch(/No hay pruebas que pasen/)
+
+      ruleTests.runTests(repo, null)
+      vi.runAllTimers()
+      expect(testsSummary(ruleTests.ruleTestsView(repo)).measurable).toBe(1)
+      expect((ruleTests.strengthTests(repo, null) as RuleTestsView).busy?.kind).toBe('fuerza')
+      vi.runAllTimers()
+      const measured = ruleTests.ruleTestsView(repo)
+      expect(measured.rules[0].test?.strength?.status).toBe('fuerte')
+      expect(STRENGTH.debil.label).toBe('Prueba débil')
+
+      // Una prueba que solo revisa que no haya un 500 sale débil
+      ruleTests.editTest(repo, ruleId, test.code.replace('assert r.status_code not in (401, 403)', 'assert r.status_code < 500'))
+      ruleTests.runTests(repo, [ruleId])
+      vi.runAllTimers()
+      ruleTests.strengthTests(repo, [ruleId])
+      vi.runAllTimers()
+      const weak = ruleTests.ruleTestsView(repo)
+      expect(weak.rules[0].test?.strength?.status).toBe('debil')
+      expect(testsSummary(weak).weak).toBe(1)
+
+      const explained = ruleTests.explainRule(repo, ruleId)
+      expect(explained.rules[0].evidence?.verdict).toBe('implementada')
+      expect(EVIDENCE[explained.rules[0].evidence!.verdict].label).toBe('Parece implementada')
+      ruleTests.removeTest(repo, ruleId)
       harness.removeHarness(repo)
     } finally {
       vi.useRealTimers()

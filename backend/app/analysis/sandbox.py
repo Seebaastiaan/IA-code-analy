@@ -38,6 +38,8 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 LOG_TAIL_LINES = 12
 # Plugin de pytest de las reglas de negocio: se copia a OUT/plugins y pytest lo carga con -p ia_voy_reglas
 PLUGIN = Path(__file__).with_name("ia_voy_reglas.py")
+# Ejecutor de la prueba de fuerza (mutantes), también en OUT/plugins
+STRENGTH = Path(__file__).with_name("ia_voy_fuerza.py")
 
 SCRIPT = r"""#!/usr/bin/env bash
 # Sandbox de IA voy (app/analysis/sandbox.py). Uso: sandbox.sh SRC OUT
@@ -92,13 +94,34 @@ phase install 600 bash -c '
   fi
   exit 0'
 
-# Prueba de humo del arnés (app.projects.reglas_arnes): solo pytest sobre tests/_ia_voy_reglas, sin auditoría ni cobertura.
-# httpx: el TestClient de FastAPI / Starlette lo necesita y muchos proyectos no lo declaran
-if [ "$MODE" = arnes ]; then
+# Librerías de las pruebas de reglas (PROPUESTA_REGLAS_VERIFICABLES.md §7.3), solo dentro del sandbox: hora controlada
+# (time-machine, freezegun), HTTP a terceros simulado (respx, responses) y SQLAlchemy async (aiosqlite); pytest-django si
+# el proyecto es Django. Opcionales: si alguna no instala, las pruebas corren igual. httpx: el TestClient de FastAPI /
+# Starlette lo necesita y muchos proyectos no lo declaran
+rule_tools() {
+  uv pip install -q pytest httpx >> "$OUT/tools.log" 2>&1
+  uv pip install -q time-machine freezegun respx responses aiosqlite >> "$OUT/tools.log" 2>&1 || echo "aviso: no se instalaron todas las librerías de pruebas" >> "$OUT/tools.log"
+  if grep -qiE "^[[:space:]]*django" requirements.txt pyproject.toml 2>/dev/null; then
+    uv pip install -q pytest-django >> "$OUT/tools.log" 2>&1 || true
+  fi
+}
+
+# Prueba de humo del arnés (app.projects.reglas_arnes), primera corrida de las pruebas generadas
+# (app.projects.reglas_pruebas) o prueba de fuerza (app.projects.reglas_fuerza): solo pytest sobre tests/_ia_voy_reglas,
+# sin auditoría ni cobertura, y sin red (IA_VOY_SIN_RED: el plugin la bloquea)
+if [ "$MODE" = arnes ] || [ "$MODE" = pruebas ] || [ "$MODE" = fuerza ]; then
   skip audit coverage
-  uv pip install -q pytest httpx > "$OUT/tools.log" 2>&1
-  phase tests 300 python -m pytest -q -p no:cacheprovider -o addopts= --junitxml="$OUT/junit.xml" -o junit_family=xunit1 \
-    tests/_ia_voy_reglas/test_humo_arnes.py
+  rule_tools
+  if [ "$MODE" = fuerza ]; then
+    # Cada mutante: escribir el archivo, correr la prueba de la regla y restaurar (app/analysis/ia_voy_fuerza.py)
+    phase tests 900 env IA_VOY_SIN_RED=1 PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" \
+      python "$OUT/plugins/ia_voy_fuerza.py" .ia_voy_mutantes.json "$OUT/fuerza.json"
+    exit 0
+  fi
+  TARGET=tests/_ia_voy_reglas/test_humo_arnes.py
+  [ "$MODE" = pruebas ] && TARGET=tests/_ia_voy_reglas
+  phase tests 300 env IA_VOY_SIN_RED=1 PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas.json" \
+    python -m pytest -q -p no:cacheprovider -o addopts= -p ia_voy_reglas --junitxml="$OUT/junit.xml" -o junit_family=xunit1 "$TARGET"
   exit 0
 fi
 
@@ -107,10 +130,25 @@ SITE="$(echo "$VIRTUAL_ENV"/lib/python3*/site-packages)"
 phase audit 300 env -u VIRTUAL_ENV uvx pip-audit --path "$SITE" -f json -o "$OUT/audit.json" --progress-spinner off
 
 uv pip install -q pytest coverage > "$OUT/tools.log" 2>&1
-# -p ia_voy_reglas (app/analysis/ia_voy_reglas.py, copiado a OUT/plugins): pruebas ligadas a reglas de negocio
-phase tests 600 env PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas.json" \
-  coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider -p ia_voy_reglas \
-  --junitxml="$OUT/junit.xml" -o junit_family=xunit1
+# Pruebas de reglas generadas por IA voy y aprobadas en la app (overlay en tests/_ia_voy_reglas): corren aparte, después
+# de las del repo, para no contar en sus fallas ni en la cobertura; su resultado va a reglas_app.json
+APP_TESTS=""
+if [ -d tests/_ia_voy_reglas ]; then APP_TESTS=1; rule_tools; fi
+export OUT APP_TESTS
+run_tests() {
+  # -p ia_voy_reglas (app/analysis/ia_voy_reglas.py, copiado a OUT/plugins): pruebas ligadas a reglas de negocio
+  env PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas.json" \
+    coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider -p ia_voy_reglas \
+    --junitxml="$OUT/junit.xml" -o junit_family=xunit1 ${APP_TESTS:+--ignore=tests/_ia_voy_reglas}
+  local code=$?
+  if [ -n "$APP_TESTS" ]; then
+    env IA_VOY_SIN_RED=1 PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas_app.json" \
+      python -m pytest -q -p no:cacheprovider -o addopts= -p ia_voy_reglas tests/_ia_voy_reglas > "$OUT/reglas_app.log" 2>&1
+  fi
+  return $code
+}
+export -f run_tests
+phase tests 600 bash -c run_tests
 phase coverage 120 coverage json -q -o "$OUT/coverage.json"
 """
 
@@ -135,6 +173,10 @@ class SandboxOutput:
     coverage: dict | None = None
     # Pruebas ligadas a reglas de negocio (plugin ia_voy_reglas); None = pytest no llegó a escribirlo
     reglas: dict | None = None
+    # Las pruebas de reglas generadas y aprobadas en la app (corrida aparte sobre tests/_ia_voy_reglas)
+    reglas_app: dict | None = None
+    # Prueba de fuerza (modo `fuerza`): resultado de cada mutante
+    fuerza: dict | None = None
 
     @property
     def usable(self) -> bool:
@@ -236,6 +278,8 @@ class SandboxRun:
             junit=(self.out / "junit.xml").read_text(encoding="utf-8", errors="replace") if (self.out / "junit.xml").is_file() else None,
             coverage=_load_json(self.out / "coverage.json"),
             reglas=_load_json(self.out / "reglas.json"),
+            reglas_app=_load_json(self.out / "reglas_app.json"),
+            fuerza=_load_json(self.out / "fuerza.json"),
         )
 
     def _kill_inside(self) -> None:
@@ -280,7 +324,8 @@ def _load_json(path: Path) -> dict | None:
 def start(settings: Settings, repo_id: str, mode: str = "analisis", overlay: dict[str, str] | None = None) -> tuple[SandboxRun | None, str | None]:
     """
     (sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se simula.
-    `mode="arnes"` corre solo la prueba de humo del arnés de reglas de negocio; `overlay` = archivos (ruta relativa →
+    `mode="arnes"` corre solo la prueba de humo del arnés de reglas de negocio, `"pruebas"` las pruebas generadas y
+    `"fuerza"` la prueba de fuerza (mutantes); `overlay` = archivos (ruta relativa →
     texto) que se escriben sobre la copia temporal del repo antes de instalar.
     """
     if settings.sandbox == "off":
@@ -303,7 +348,8 @@ def start(settings: Settings, repo_id: str, mode: str = "analisis", overlay: dic
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8", newline="\n")
     (out / "plugins").mkdir()
-    (out / "plugins" / PLUGIN.name).write_text(PLUGIN.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+    for script in (PLUGIN, STRENGTH):
+        (out / "plugins" / script.name).write_text(script.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     # Entorno mínimo: el código analizado no hereda las claves del backend (.env ya cargado en os.environ)
     env = {k: v for k, v in os.environ.items() if k.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "LOCALAPPDATA", "PROGRAMDATA", "DOCKER_HOST"}}
     # Que wsl.exe escriba sus errores (p. ej. distro no encontrada) en UTF-8 y no en UTF-16

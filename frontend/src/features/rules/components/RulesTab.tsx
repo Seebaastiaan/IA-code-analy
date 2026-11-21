@@ -10,6 +10,7 @@ import { filterRules, LEVEL, OUTCOME, STATUS, testFunction, testName, type Statu
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'todas', label: 'Todas' },
   { value: 'no_cumple', label: 'No cumple' },
+  { value: 'prueba_rota', label: 'Prueba rota' },
   { value: 'sin_verificar', label: 'Sin verificar' },
   { value: 'cumple', label: 'Cumple' },
 ]
@@ -180,7 +181,10 @@ export function RulesTab({ repoId, reportId }: { repoId: string; reportId: strin
         <div className="flex flex-wrap items-center gap-2" aria-label="Resumen de reglas">
           <Chip tone="success">{summary.cumple} cumplen</Chip>
           <Chip tone="danger">{summary.no_cumple} no cumplen</Chip>
+          {summary.no_implementada > 0 && <Chip tone="danger">{summary.no_implementada} no implementada(s)</Chip>}
+          {summary.prueba_rota > 0 && <Chip tone="brand">{summary.prueba_rota} con la prueba rota</Chip>}
           <Chip>{summary.sin_verificar} sin verificar</Chip>
+          {summary.fuera_del_codigo > 0 && <Chip>{summary.fuera_del_codigo} fuera del código</Chip>}
         </div>
       </div>
       <Notices data={data} repoId={repoId} />

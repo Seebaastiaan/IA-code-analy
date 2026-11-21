@@ -108,6 +108,7 @@ function Editor({ repoId, view, harness }: { repoId: string; view: HarnessView; 
     onSuccess: (v) => {
       set(v)
       toast('Arnés aprobado: ya se pueden generar las pruebas de las reglas')
+      void queryClient.invalidateQueries({ queryKey: ['rules', repoId, 'pruebas'] })
     },
     onError: fail,
   })

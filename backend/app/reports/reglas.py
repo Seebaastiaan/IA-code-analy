@@ -45,7 +45,7 @@ class BusinessRuleResult(BaseModel):
     story: str | None
     owner: str | None
     criterion: str | None
-    status: Literal["cumple", "no_cumple", "sin_verificar"]
+    status: Literal["cumple", "no_cumple", "prueba_rota", "no_implementada", "sin_verificar", "fuera_del_codigo"]
     # Cómo se verificó: pruebas, patron (prohibido/obligatorio), pruebas_y_patron o ninguno
     level: str
     detail: str
@@ -61,6 +61,10 @@ class BusinessRulesSummary(BaseModel):
     cumple: int
     no_cumple: int
     sin_verificar: int
+    # PROPUESTA_REGLAS_VERIFICABLES.md §9 (pruebas generadas): 0 en los reportes anteriores
+    prueba_rota: int = 0
+    no_implementada: int = 0
+    fuera_del_codigo: int = 0
 
 
 class BusinessRules(BaseModel):
@@ -109,6 +113,8 @@ def get_business_rules(report_id: str, store: Analyses, user_id: UserId, repo: s
         repo_error=check["repo_error"] if check else None,
         tests_ran=bool(check["tests_ran"]) if check else False,
         warnings=json.loads(check["warnings"] or "[]") if check else [],
-        summary=BusinessRulesSummary(total=len(results), cumple=count("cumple"), no_cumple=count("no_cumple"), sin_verificar=count("sin_verificar")),
+        summary=BusinessRulesSummary(total=len(results), cumple=count("cumple"), no_cumple=count("no_cumple"), sin_verificar=count("sin_verificar"),
+            prueba_rota=count("prueba_rota"), no_implementada=count("no_implementada"), fuera_del_codigo=count("fuera_del_codigo"),
+        ),
         rules=results,
     )

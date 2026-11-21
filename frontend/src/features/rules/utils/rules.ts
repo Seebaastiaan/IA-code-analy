@@ -1,12 +1,18 @@
 import type { CHIP_TONES } from '@/shared/ui/styles'
-import type { BusinessRuleResult, Harness, HarnessOrigin, MapSummary, RuleLevel, RulesPrecheck, RuleStatus, RulesValidation, SmokeStatus, TestOutcome } from '../types'
+import type {
+  BusinessRuleResult, Harness, HarnessOrigin, MapSummary, MatrixCell, PermissionMatrix, RuleLevel, RulesPrecheck, RuleStatus, RuleTestState,
+  RuleTestsView, RulesValidation, SmokeStatus, StrengthStatus, SupportEvidence, TestOutcome,
+} from '../types'
 
 type Tone = keyof typeof CHIP_TONES
 
 export const STATUS: Record<RuleStatus, { label: string; tone: Tone; order: number }> = {
   no_cumple: { label: 'No cumple', tone: 'danger', order: 0 },
-  sin_verificar: { label: 'Sin verificar', tone: 'neutral', order: 1 },
-  cumple: { label: 'Cumple', tone: 'success', order: 2 },
+  no_implementada: { label: 'No implementada', tone: 'danger', order: 1 },
+  prueba_rota: { label: 'Prueba rota', tone: 'brand', order: 2 },
+  sin_verificar: { label: 'Sin verificar', tone: 'neutral', order: 3 },
+  cumple: { label: 'Cumple', tone: 'success', order: 4 },
+  fuera_del_codigo: { label: 'Fuera del código', tone: 'neutral', order: 5 },
 }
 
 export const LEVEL: Record<RuleLevel, string> = {
@@ -19,6 +25,7 @@ export const LEVEL: Record<RuleLevel, string> = {
 export const OUTCOME: Record<TestOutcome, { label: string; tone: Tone }> = {
   passed: { label: 'Pasa', tone: 'success' },
   failed: { label: 'Falla', tone: 'danger' },
+  broken: { label: 'Rota', tone: 'brand' },
   error: { label: 'Error', tone: 'danger' },
   skipped: { label: 'Omitida', tone: 'neutral' },
   not_run: { label: 'No corrió', tone: 'neutral' },
@@ -164,4 +171,70 @@ export function smokeLabel(name: string): string {
   if (kind === 'crear') return `${param}()`
   if (kind === 'extras') return param ?? kind
   return kind
+}
+
+// ─── Pruebas generadas ───
+
+export const RULE_TEST_STATE: Record<RuleTestState, { label: string; tone: Tone }> = {
+  sin_prueba: { label: 'Sin prueba', tone: 'neutral' },
+  borrador: { label: 'Borrador', tone: 'brand' },
+  aprobada: { label: 'Aprobada', tone: 'success' },
+  desactualizada: { label: 'Desactualizada', tone: 'danger' },
+}
+
+/** Cuántas hay en cada estado y cuáles se pueden correr o aprobar ya (los botones de la tarjeta). */
+export function testsSummary(view: RuleTestsView) {
+  const count = (state: RuleTestState) => view.rules.filter((r) => r.state === state).length
+  return {
+    approved: count('aprobada'),
+    drafts: count('borrador'),
+    missing: count('sin_prueba'),
+    outdated: count('desactualizada'),
+    runnable: view.rules.filter((r) => r.test?.kind === 'prueba' && !r.test.errors.length && !r.test.outdated && r.test.run_status === 'pendiente').length,
+    approvable: view.rules.filter((r) => r.test && !r.test.approved && !r.test.blocked).map((r) => r.id),
+    /** Pasan y todavía no tienen prueba de fuerza */
+    measurable: view.rules.filter((r) => r.test && !r.test.strength_blocked && r.test.strength_status === 'pendiente').length,
+    /** Con prueba de fuerza débil: pasan pero no verifican la regla */
+    weak: view.rules.filter((r) => r.test?.strength?.status === 'debil').length,
+  }
+}
+
+// ─── Fase 5: prueba de fuerza, evidencia y matriz de permisos ───
+
+export const STRENGTH: Record<StrengthStatus, { label: string; tone: Tone }> = {
+  fuerte: { label: 'Prueba fuerte', tone: 'success' },
+  parcial: { label: 'Prueba parcial', tone: 'brand' },
+  debil: { label: 'Prueba débil', tone: 'danger' },
+  no_aplica: { label: 'Fuerza: no aplica', tone: 'neutral' },
+}
+
+export const EVIDENCE: Record<SupportEvidence['verdict'], { label: string; tone: Tone }> = {
+  implementada: { label: 'Parece implementada', tone: 'success' },
+  parcial: { label: 'Parcial', tone: 'brand' },
+  no_encontrada: { label: 'No encontrada', tone: 'neutral' },
+}
+
+/** Siguiente valor de una celda al hacer clic: vacía → permitido → prohibido → vacía. */
+export function nextCell(cell: MatrixCell | undefined): MatrixCell | undefined {
+  return cell === undefined ? 'permitido' : cell === 'permitido' ? 'prohibido' : undefined
+}
+
+/** Lo que se manda al guardar: todas las acciones, con null en las celdas vacías (quedan fuera de la matriz). */
+export function matrixPayload(matrix: PermissionMatrix): Record<string, Record<string, MatrixCell | null>> {
+  return Object.fromEntries(matrix.actions.map((a) => [a.id, Object.fromEntries(matrix.roles.map((r) => [r, a.cells[r] ?? null]))]))
+}
+
+/** Celdas marcadas (las que entran a la prueba). */
+export function markedCells(matrix: PermissionMatrix): number {
+  return matrix.actions.reduce((n, a) => n + matrix.roles.filter((r) => a.cells[r]).length, 0)
+}
+
+/** Marca la matriz con lo que hace el código hoy (el equipo lo revisa: el oráculo es la regla, no el código). */
+export function matrixFromCode(matrix: PermissionMatrix): PermissionMatrix {
+  return {
+    ...matrix,
+    actions: matrix.actions.map((a) =>
+      a.suggested.length ? { ...a, cells: Object.fromEntries(matrix.roles.map((r) => [r, a.suggested.includes(r) ? 'permitido' : 'prohibido'])) } : a,
+    ),
+  }
 }

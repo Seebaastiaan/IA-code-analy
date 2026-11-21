@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { download, http } from '@/shared/api/http'
-import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, ProjectRules, RulesPrecheck, RulesValidation } from '../types'
+import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, MatrixCell, PermissionMatrix, ProjectRules, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
 
 export const RULES_FILENAME = 'reglas_negocio.toml'
 
@@ -25,6 +25,23 @@ export const rulesApi = {
   /** Corre la prueba de humo en el sandbox; responde enseguida con `smoke = corriendo` */
   runSmoke: (repoId: string) => http.post<HarnessView>(EP.rules.harnessSmoke(repoId)),
   approveHarness: (repoId: string) => http.post<HarnessView>(EP.rules.harnessApprove(repoId)),
+  tests: (repoId: string) => http.get<RuleTestsView>(EP.rules.tests(repoId)),
+  /** Genera en segundo plano las de `ids` (sin `ids`: las reglas sin prueba o desactualizadas) */
+  generateTests: (repoId: string, ids?: string[]) => http.post<RuleTestsView>(EP.rules.tests(repoId), { ids: ids ?? null }),
+  /** Primera corrida en el sandbox (sin `ids`: las válidas sin correr) */
+  runTests: (repoId: string, ids?: string[]) => http.post<RuleTestsView>(EP.rules.testsRun(repoId), { ids: ids ?? null }),
+  approveTests: (repoId: string, ids: string[]) => http.post<RuleTestsView>(EP.rules.testsApprove(repoId), { ids }),
+  editTest: (repoId: string, ruleId: string, code: string) => http.put<RuleTestsView>(EP.rules.test(repoId, ruleId), { code }),
+  removeTest: (repoId: string, ruleId: string) => http.delete<RuleTestsView>(EP.rules.test(repoId, ruleId)),
+  exportTests: (repoId: string, name: string) => download(EP.rules.export(repoId), {}, name),
+  matrix: (repoId: string, ruleId: string) => http.get<PermissionMatrix>(EP.rules.testMatrix(repoId, ruleId)),
+  /** Guarda la matriz y escribe su prueba (sin IA); `cells` = acción → rol → permitido | prohibido | null */
+  saveMatrix: (repoId: string, ruleId: string, cells: Record<string, Record<string, MatrixCell | null>>) =>
+    http.put<RuleTestsView>(EP.rules.testMatrix(repoId, ruleId), { cells }),
+  /** La IA dice dónde parece estar implementada la regla (no cambia su estado) */
+  explainRule: (repoId: string, ruleId: string) => http.post<RuleTestsView>(EP.rules.testEvidence(repoId, ruleId)),
+  /** Prueba de fuerza en segundo plano (sin `ids`: las que pasan y no la tienen) */
+  strengthTests: (repoId: string, ids?: string[]) => http.post<RuleTestsView>(EP.rules.testsStrength(repoId), { ids: ids ?? null }),
 }
 
 /** Bajo la clave del reporte: se refresca junto con él (re-analizar, guardar en el editor). */
@@ -42,3 +59,9 @@ export const harnessQuery = (repoId: string) => queryOptions({ queryKey: ['rules
 /** Mientras corre la prueba de humo se consulta cada 2 s. */
 export const useHarness = (repoId: string) =>
   useQuery({ ...harnessQuery(repoId), enabled: Boolean(repoId), refetchInterval: (q) => (q.state.data?.harness?.smoke === 'corriendo' ? 2000 : false) })
+
+export const ruleTestsQuery = (repoId: string) => queryOptions({ queryKey: ['rules', repoId, 'pruebas'], queryFn: () => rulesApi.tests(repoId) })
+
+/** Mientras genera o corre en segundo plano se consulta cada 2 s. */
+export const useRuleTests = (repoId: string, enabled = true) =>
+  useQuery({ ...ruleTestsQuery(repoId), enabled: Boolean(repoId) && enabled, refetchInterval: (q) => (q.state.data?.busy ? 2000 : false) })

@@ -30,6 +30,21 @@ sandbox: **11 cumple · 4 no cumple · 0 pruebas que fallan al preparar**.
 Lo comprueba [backend/tests/test_demos_reglas.py](../../../tests/test_demos_reglas.py)
 (`uv run --with sqlalchemy --with flask pytest tests/test_demos_reglas.py`).
 
+### 1.1 Prueba débil sembrada (prueba de fuerza, fase 5)
+
+[pruebas_debiles/test_rn004_debil.py](pruebas_debiles/test_rn004_debil.py) pasa, pero no verifica RN-004: reserva con
+1 h 30 min de anticipación y solo revisa que el servidor no responda 500. **No está en `tests/`**: no cuenta en el
+veredicto de arriba.
+
+| Prueba de RN-004 | Cambios a `citas.py:51-52` (anticipación mínima) | Esperado |
+|---|---|---|
+| La débil sembrada | `<` → `<=`, condición invertida, `raise` quitado | **débil**: no nota ninguno (0 de 3) |
+| La buena ([test_agenda.py](../tests/reglas/test_agenda.py)) | los mismos | **fuerte**: nota los 3 |
+
+La matriz de RN-015 marcada como dice la regla (7 acciones × 3 roles, 21 celdas) da **cumple**.
+
+Lo comprueba [backend/tests/test_reglas_calidad.py](../../../tests/test_reglas_calidad.py).
+
 ## 2. Lo que debe proponer el importador
 
 Desde [docs/Requisitos.pdf](../docs/Requisitos.pdf), que genera

@@ -127,6 +127,10 @@ Escribe el cuerpo de un `conftest.py` de pytest con estos fixtures de NOMBRE FIJ
   `reloj.ahora`.
 - Si el mapa tiene correo, SMS o push: `buzon`, una lista donde `monkeypatch` guarda lo que la app "envió" (sustituye la
   función del proyecto que entrega el mensaje). Nunca se envía nada de verdad.
+- Si el mapa tiene pagos o HTTP a terceros: `pagos`, una lista donde se guardan los cobros y reembolsos que la app pidió
+  (con `monkeypatch` sobre la función del proyecto que llama a la pasarela). Para HTTP con httpx usa `respx` y con
+  requests `responses` (están instalados en el sandbox), con respuestas de éxito por defecto. La red real está
+  BLOQUEADA en el sandbox: una llamada sin simular deja la prueba rota.
 - Base de datos: una base SQLite temporal y vacía POR PRUEBA, con las tablas creadas desde los modelos
   (`Base.metadata.create_all`, `SQLModel.metadata.create_all`, `create_app("sqlite://")`, o `@pytest.mark.django_db` /
   fixture `db` de pytest-django). En memoria usa `StaticPool` y `check_same_thread=False`. Sustituye la dependencia de
@@ -228,33 +232,14 @@ def fixtures_of(code: str) -> list[str]:
         return []
 
 
-def validate(code: str, project_map: mapa.ProjectMap, allowed: set[str] = frozenset()) -> HarnessCheck:
+def code_checks(tree: ast.Module, project_map: mapa.ProjectMap, allowed: set[str] = frozenset(), who: str = "el arnés") -> tuple[list[str], list[str]]:
     """
-    Revisa el conftest.py del arnés sin ejecutarlo. `allowed` = imports extra permitidos (dependencias del repo).
-    Error = no se puede correr la prueba de humo; aviso = conviene revisarlo.
+    Revisiones que valen para el arnés y para las pruebas generadas (app.projects.reglas_pruebas), sin ejecutar:
+    imports y llamadas prohibidos, imports fuera de lo permitido, nombres que tapan un import, nombres que no existen en
+    los módulos del proyecto y uso de la base real (aviso). Devuelve (errores, avisos).
     """
     errors: list[str] = []
     warnings: list[str] = []
-    if len(code) > MAX_CODE:
-        return HarnessCheck(False, [f"El arnés es demasiado largo (máx. {MAX_CODE // 1000} mil caracteres)"])
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as exc:
-        return HarnessCheck(False, [f"línea {exc.lineno}: error de sintaxis: {exc.msg}"])
-    fixtures = _fixtures(tree)
-    defined = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
-    for name in REQUIRED:
-        if name not in fixtures:
-            errors.append(f"Falta el fixture `{name}`")
-    if "preparar" not in defined:
-        errors.append("Falta la función `preparar(condicion, motivo)`")
-    if not any(f.startswith("crear_") for f in fixtures):
-        warnings.append("No hay ningún fixture `crear_<modelo>`: las pruebas tendrán que crear sus datos a mano")
-    if project_map.time and "reloj" not in fixtures:
-        warnings.append("El proyecto usa la hora (datetime.now…) y el arnés no tiene `reloj`: las reglas con plazos no serán deterministas")
-    if any(i.kind in ("correo", "sms", "push") for i in project_map.integrations) and "buzon" not in fixtures:
-        warnings.append("El proyecto envía correos o mensajes y el arnés no tiene `buzon`: las pruebas podrían intentar enviarlos")
-
     # Un fixture con el nombre de algo importado lo tapa: `from reservas import reloj` + `def reloj(...)` hace que
     # `reloj.ahora` sea el fixture, no el módulo
     imported = {}
@@ -312,7 +297,7 @@ def validate(code: str, project_map: mapa.ProjectMap, allowed: set[str] = frozen
         for mod in modules:
             root = mod.split(".")[0]
             if any(mod == d or mod.startswith(d + ".") for d in DENIED_MODULES):
-                errors.append(f"línea {node.lineno}: el arnés no puede importar `{mod}`")
+                errors.append(f"línea {node.lineno}: {who} no puede importar `{mod}`")
                 break
             if isinstance(node, ast.ImportFrom) and mod != (node.module or ""):
                 continue
@@ -322,7 +307,44 @@ def validate(code: str, project_map: mapa.ProjectMap, allowed: set[str] = frozen
         if isinstance(node, ast.Call):
             name = mapa._name(node.func)
             if name in DENIED_CALLS:
-                errors.append(f"línea {node.lineno}: el arnés no puede llamar a `{name}()`")
+                errors.append(f"línea {node.lineno}: {who} no puede llamar a `{name}()`")
+    return errors, warnings
+
+
+def validate(code: str, project_map: mapa.ProjectMap, allowed: set[str] = frozenset()) -> HarnessCheck:
+    """
+    Revisa el conftest.py del arnés sin ejecutarlo. `allowed` = imports extra permitidos (dependencias del repo).
+    Error = no se puede correr la prueba de humo; aviso = conviene revisarlo.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    if len(code) > MAX_CODE:
+        return HarnessCheck(False, [f"El arnés es demasiado largo (máx. {MAX_CODE // 1000} mil caracteres)"])
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return HarnessCheck(False, [f"línea {exc.lineno}: error de sintaxis: {exc.msg}"])
+    fixtures = _fixtures(tree)
+    defined = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    for name in REQUIRED:
+        if name not in fixtures:
+            errors.append(f"Falta el fixture `{name}`")
+    if "preparar" not in defined:
+        errors.append("Falta la función `preparar(condicion, motivo)`")
+    if not any(f.startswith("crear_") for f in fixtures):
+        warnings.append("No hay ningún fixture `crear_<modelo>`: las pruebas tendrán que crear sus datos a mano")
+    if project_map.time and "reloj" not in fixtures:
+        warnings.append("El proyecto usa la hora (datetime.now…) y el arnés no tiene `reloj`: las reglas con plazos no serán deterministas")
+    if any(i.kind in ("correo", "sms", "push") for i in project_map.integrations) and "buzon" not in fixtures:
+        warnings.append("El proyecto envía correos o mensajes y el arnés no tiene `buzon`: las pruebas podrían intentar enviarlos")
+    if any(i.kind == "pagos" for i in project_map.integrations) and "pagos" not in fixtures:
+        warnings.append("El proyecto cobra con una pasarela y el arnés no tiene `pagos`: las pruebas que cobran saldrán rotas (la red está bloqueada)")
+    elif any(i.kind == "http" for i in project_map.integrations) and not re.search(r"\b(respx|responses)\b", code):
+        warnings.append("El proyecto llama a servicios HTTP y el arnés no usa `respx` ni `responses`: esas llamadas dejarán la prueba rota (la red está bloqueada)")
+
+    more_errors, more_warnings = code_checks(tree, project_map, allowed)
+    errors += more_errors
+    warnings += more_warnings
     return HarnessCheck(not errors, list(dict.fromkeys(errors))[:20], warnings, fixtures)
 
 

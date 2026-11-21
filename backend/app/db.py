@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS business_rule_checks (
     repo_error  TEXT
 );
 
--- Una fila por regla. status: cumple | no_cumple | sin_verificar; level: pruebas | patron | pruebas_y_patron | ninguno.
+-- Una fila por regla. status: cumple | no_cumple | prueba_rota | no_implementada | sin_verificar | fuera_del_codigo; level: pruebas | patron | pruebas_y_patron | ninguno.
 -- Sin CHECK en status/level para agregar niveles sin reconstruir la tabla. paths, evidence y tests son JSON.
 CREATE TABLE IF NOT EXISTS business_rule_results (
     report_id       TEXT NOT NULL REFERENCES reports (id) ON DELETE CASCADE,
@@ -222,6 +222,54 @@ CREATE TABLE IF NOT EXISTS business_rule_harness (
     approved_hash  TEXT,
     updated_at     TEXT NOT NULL,
     updated_by     TEXT
+);
+
+-- Pruebas de reglas generadas por IA voy (app.projects.reglas_pruebas, PROPUESTA_REGLAS_VERIFICABLES.md §6.3): una por
+-- regla y repo. kind = prueba | no_implementada | fuera_del_codigo; origin = ia | manual. rule_hash = la versión de la
+-- regla (si cambia, la prueba queda desactualizada). La corrida y la aprobación valen para el código con ese hash.
+CREATE TABLE IF NOT EXISTS business_rule_tests (
+    repo_id        TEXT NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    rule_id        TEXT NOT NULL,
+    rule_hash      TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    tipo           TEXT NOT NULL,
+    file           TEXT NOT NULL,
+    code           TEXT NOT NULL,
+    origin         TEXT NOT NULL,
+    assumptions    TEXT NOT NULL DEFAULT '[]',
+    endpoints      TEXT NOT NULL DEFAULT '[]',
+    reason         TEXT,
+    model          TEXT,
+    run_status     TEXT NOT NULL DEFAULT 'pendiente',
+    run_result     TEXT,
+    run_hash       TEXT,
+    run_at         TEXT,
+    approved_by    TEXT,
+    approved_at    TEXT,
+    approved_hash  TEXT,
+    updated_at     TEXT NOT NULL,
+    updated_by     TEXT,
+    -- Fase 5: matriz de permisos marcada por el equipo (JSON; origin = matriz) y prueba de fuerza (mutantes) del código
+    -- con strength_hash
+    matrix          TEXT,
+    strength_status TEXT,
+    strength_result TEXT,
+    strength_hash   TEXT,
+    strength_at     TEXT,
+    PRIMARY KEY (repo_id, rule_id)
+);
+
+-- Evidencia de apoyo de una regla (app.projects.reglas_evidencia, PROPUESTA §8): dónde parece estar implementada, según
+-- la IA. No cambia el estado ni el score. La última por regla; vale para la versión de la regla y el commit con que se pidió.
+CREATE TABLE IF NOT EXISTS business_rule_evidence (
+    repo_id     TEXT NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    rule_id     TEXT NOT NULL,
+    rule_hash   TEXT NOT NULL,
+    commit_sha  TEXT,
+    data        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    created_by  TEXT,
+    PRIMARY KEY (repo_id, rule_id)
 );
 
 -- Índice del asistente (app.assistant): fragmentos del código con su embedding (float32, normalizado)
@@ -292,6 +340,14 @@ MIGRATIONS = {
     # Correcciones con IA para lo que Ruff no corrige (Bandit, pruebas que fallan…); NULL = reportes anteriores
     "findings": {
         "fix_kind": "TEXT",
+    },
+    # Sprint 9, fase 5 de las reglas verificables: matriz de permisos y prueba de fuerza
+    "business_rule_tests": {
+        "matrix": "TEXT",
+        "strength_status": "TEXT",
+        "strength_result": "TEXT",
+        "strength_hash": "TEXT",
+        "strength_at": "TEXT",
     },
 }
 

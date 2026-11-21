@@ -332,6 +332,11 @@ class JobManager:
         self._finish_step(job, f"  commit {result.commit} · {py} archivos .py · {result.seconds} s\n{found}")
         return True
 
+    @staticmethod
+    def _app_tests(settings: Settings, repo_id: str) -> dict[str, str] | None:
+        with session(settings.database_path) as conn:
+            return pipeline.app_rule_tests(conn, settings, repo_id)[0]
+
     async def _analyze(self, settings: Settings, job: Job) -> bool:
         """
         Pasos 2-7. Ruff, Bandit y Radon corren en un hilo mientras el sandbox crea el entorno, instala las
@@ -340,7 +345,10 @@ class JobManager:
         """
         chosen = set(job.analyzers)
         needs_sandbox = bool(chosen & pipeline.SANDBOX_ANALYZERS)
-        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id) if job.sandbox and needs_sandbox else (None, None)
+        # Pruebas de reglas generadas y aprobadas en la app: van al sandbox sobre la copia del repo (tests/_ia_voy_reglas)
+        overlay = await asyncio.to_thread(self._app_tests, settings, job.repo_id) if job.sandbox and needs_sandbox else None
+        extra = ("analisis", overlay) if overlay else ()
+        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id, *extra) if job.sandbox and needs_sandbox else (None, None)
         if reason:
             self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); pytest, coverage y pip-audit se simulan"})
         static_task = asyncio.create_task(asyncio.to_thread(pipeline.analyze_static, settings, job.repo_id, job.analyzers))

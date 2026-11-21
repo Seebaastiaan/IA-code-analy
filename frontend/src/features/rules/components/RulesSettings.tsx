@@ -8,6 +8,7 @@ import { baseName, DOCUMENT_EXTENSIONS, isDocument, saveText } from '../utils/ru
 import { useImportRules } from '../hooks/useImportRules'
 import { HarnessCard } from './HarnessCard'
 import { ImportNotice } from './ImportNotice'
+import { RuleTestsCard } from './RuleTestsCard'
 import { ValidationResult } from './ValidationResult'
 
 const MAX_BYTES = 256 * 1024
@@ -235,6 +236,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
         <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
         <HarnessCard repoId={repoId} />
+        <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
       </div>
       <Card className="p-5 h-fit">
         <h2 className="font-semibold mb-3">Cómo se verifican</h2>

@@ -5,7 +5,7 @@
 - Reemplaza en parte: [PROPUESTA_REGLAS_NEGOCIO.md](PROPUESTA_REGLAS_NEGOCIO.md) (formato y niveles) y amplía
   [PLAN_IMPORTAR_REGLAS_DOCUMENTO.md](PLAN_IMPORTAR_REGLAS_DOCUMENTO.md)
 - Relacionado: [ADR-001](adr/ADR-001-motor-determinista.md) · [ADR-002](adr/ADR-002-sandbox.md) ·
-  [ADR-003](adr/ADR-003-reglas-de-negocio.md) · ADR-004 (por escribir, §13)
+  [ADR-003](adr/ADR-003-reglas-de-negocio.md) · [ADR-004](adr/ADR-004-pruebas-generadas.md)
 
 ---
 
@@ -296,6 +296,46 @@ el mapa una tabla editable (filas = acciones sensibles detectadas, columnas = ro
 Total: 15 reglas del documento → 18 atómicas, todas verificables con escenario, con 7 dudas que se deben resolver
 antes de aprobar.
 
+### 6.6 Cómo quedó y qué se midió (fase 4)
+
+- **Código:**
+  - [reglas_pruebas.py](../backend/app/projects/reglas_pruebas.py): generación, validación, corrida y exportación.
+  - [pruebas.py](../backend/app/projects/pruebas.py): endpoints `…/reglas/pruebas` (+ `/correr`, `/aprobar`, `/{rule_id}`) y
+    `…/reglas/exportar`.
+  - El plugin guarda el tipo de excepción (versión 2 de `reglas.json`).
+  - Estados nuevos en [reglas.py](../backend/app/analyses/reglas.py) (`prueba_rota`, `no_implementada`,
+    `fuera_del_codigo`, prioridad no cumple > rota > no implementada > sin verificar > cumple).
+  - Sandbox:
+    - modo `pruebas`;
+    - en el análisis, segunda corrida sobre `tests/_ia_voy_reglas/` (`--ignore` en la del repo);
+    - `reglas_app.json`, que se une a las del repo, con prioridad para el repo.
+  - Tarjeta «Pruebas de las reglas» en Configuración. El reporte muestra los estados nuevos.
+- **Funciona sin el formato v2 (fase 1):** con reglas v1, la IA elige el tipo y usa el `criterio` como escenario.
+- **Lo que se aprendió con Gemini real.** Cada error se ataja en el prompt, en la validación o con una reparación sin IA:
+
+  | Error de la IA | Cómo se ataja |
+  |---|---|
+  | Escribe `def_test_…` | Reparación automática |
+  | Olvida los imports de `pytest` o `Decimal` | Se agregan solos |
+  | Usa `preparar` sin pedirlo como fixture | Validación de nombres sin definir + una ronda de corrección |
+  | Manda datos inválidos | Los esquemas van en el contexto |
+  | Inventa fórmulas (impuestos) que la regla no da | Instrucción de comprobar solo lo que dice la regla |
+  | Revisa el *Cuando* con `preparar` (convierte un «no cumple» en «prueba rota») | Instrucción |
+  | Espera un solo código de rechazo | Instrucción + aviso |
+  | Cuenta los correos de la preparación | Instrucción: `buzon.clear()` |
+  | Prueba solo el caso idéntico en reglas de empalme | Instrucción: probar el traslape parcial y el límite exacto |
+  | Usa `como(rol)` dos veces para «otro» usuario | Instrucción |
+- **Medición** (una corrida por demo con el prompt final, en el sandbox WSL, sin las pruebas escritas a mano):
+
+  | Métrica (§2) | Meta | `inventario_demo` | `reservas_demo` |
+  |---|---|---|---|
+  | Pruebas que se aprueban sin editar o con una edición pequeña | ≥ 80 % | 17/18 sin editar (RN-008 sale rota: manda fecha con hora a un campo de fecha) | 15/15 |
+  | Reglas rotas a propósito que salen «no cumple» | 5 de 5 | 5/5 | 4/4 |
+  | Falsos positivos con prueba aprobada | 0 | 0 | 0 |
+  | Pruebas rotas en la primera generación | ≤ 20 % | 1/18 (6 %) | 0/15 |
+
+  Las instrucciones se ajustaron mirando estos dos demos; falta medir con código ajeno (§11.2, pendiente de permiso).
+
 ### 6.5 Nivel patrón (se queda, avanzado)
 
 `prohibido` con `rutas` sigue funcionando como hoy (`check_rule` en
@@ -543,7 +583,7 @@ Literatura que respalda dos decisiones:
 | [backend/app/analysis/ia_voy_reglas.py](../backend/app/analysis/ia_voy_reglas.py) | Clasificar «no cumple» vs. «prueba rota» |
 | [backend/app/analysis/sandbox.py](../backend/app/analysis/sandbox.py) | Copiar las pruebas aprobadas de la app a `tests/_ia_voy_reglas/` en la copia temporal (salvo que el repo traiga `tests/reglas/`); instalar `time-machine`, `respx`, `responses`, `aiosqlite` y, en Django, `pytest-django` junto al plugin |
 | [backend/app/analyses/reglas_store.py](../backend/app/analyses/reglas_store.py) + migración | Tablas `business_rule_tests` (repo, regla, hash de la regla, código, estado, modelo, commit) y `business_rule_harness`; mapa por commit |
-| Endpoints | Arnés (hecho, §7.5): `…/reglas/mapa`, `…/reglas/arnes` (+ `/repo`, `/humo`, `/aprobar`). Pendientes: `POST /api/reglas/pruebas` (generar para una lista de ids), `PUT /api/reglas/pruebas/{rule_id}` (editar o aprobar), `GET /api/projects/{id}/reglas/exportar` (zip con TOML + `tests/reglas/`) |
+| Endpoints | Arnés (hecho, §7.5): `…/reglas/mapa`, `…/reglas/arnes` (+ `/repo`, `/humo`, `/aprobar`). Pruebas (hecho, §6.6): `…/reglas/pruebas` (+ `/correr`, `/aprobar`, `/{rule_id}`) y `…/reglas/exportar`. Fase 5 (hecho, §14.1): `…/pruebas/{rule_id}/matriz`, `…/pruebas/{rule_id}/evidencia` y `…/pruebas/fuerza` |
 | Frontend `features/rules` | Tabla de reglas con estado y dudas; vista de prueba (código, supuestos, último resultado); editor de la matriz de permisos; aviso del arnés; exportar |
 | `docs/adr/ADR-004-pruebas-generadas.md` (nuevo) | Deja constancia de que la IA genera pruebas, que solo cuentan las aprobadas y que el veredicto sale de ejecutarlas |
 
@@ -558,13 +598,84 @@ resultado se guarda por hash de la regla y commit; el análisis **nunca** llama 
 | **1 · Importador v2** | Formato v2, reglas atómicas, `tipo`, escenarios, `estado` y `dudas`; tabla de aprobación | Con el `.docx` del inventario: 18 reglas, ≥ 5 de las 7 dudas; un TOML v1 sigue validando |
 | **2 · Repos demo** (**hecho**) | `inventario_demo` y `reservas_demo` con sus documentos, pruebas manuales de referencia y tabla de resultados esperados | Con las pruebas **escritas a mano** y el plugin actual, el reporte da 13/5 (inventario) y 11/4 (reservas) ([test_demos_reglas.py](../backend/tests/test_demos_reglas.py)). Es la referencia para todo lo que sigue |
 | **3 · Mapa y arnés** (**hecho**, falta la parte de repos públicos) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno. **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en esos repos quedan pendientes (código ajeno: correrlo en Docker) |
-| **4 · Pruebas generadas** | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo` |
-| **5 · Servicios con clientes y calidad** | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada |
+| **4 · Pruebas generadas** (**hecho**, §6.6) | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo`. **Resultado** con Gemini 3.5 Flash Lite: 17 de 18 sin editar, 5 de 5 rotas detectadas, 0 falsos positivos tras aprobar y 1 prueba rota (6 %). En `reservas_demo`: 15 de 15 y 4 de 4 rotas detectadas |
+| **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (sin Gemini ni WSL, con un modelo falso y pytest local): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más |
 | **6 · Score** | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |
 | Después | Pruebas HTTP de caja negra con docker-compose (otros lenguajes); PostgreSQL efímero | — |
 
 La fase 2 va antes que la 3 a propósito: sin un repo con resultados conocidos no hay forma de saber si las pruebas
 generadas aciertan.
+
+### 14.1 Cómo quedó (fase 5)
+
+- **Red bloqueada y librerías (§7.3):**
+  - El sandbox instala `time-machine`, `freezegun`, `respx`, `responses`, `aiosqlite` y, en Django, `pytest-django`
+    (opcionales: si no instalan, las pruebas corren igual).
+  - Con `IA_VOY_SIN_RED=1` (prueba de humo, pruebas generadas, prueba de fuerza y las aprobadas en el análisis), el
+    plugin [ia_voy_reglas.py](../backend/app/analysis/ia_voy_reglas.py) bloquea las conexiones y el DNS a hosts que no
+    son locales. La prueba queda **rota** (`RedBloqueada`), también si el código atrapó el error y la prueba pasó.
+  - El arnés ya pedía `reloj` y `buzon`. Ahora también pide `pagos`, y `respx` o `responses` si el mapa ve pagos o
+    HTTP a terceros, y avisa si faltan.
+- **Matriz de permisos (§6.3)** ([reglas_matriz.py](../backend/app/projects/reglas_matriz.py)):
+  - Filas = acciones sensibles del mapa: endpoints con usuario que escriben, o que solo algunos roles pueden usar
+    (sin login ni registro). Columnas = roles del mapa.
+  - Las celdas empiezan vacías. Lo que hace el código hoy se muestra como sugerencia y hay un botón para copiarlo,
+    pero no se copia solo: el oráculo es la regla.
+  - Al guardar, la prueba sale de la tabla sin IA: una prueba parametrizada (rol × acción).
+    - «permitido» = ni 401 ni 403.
+    - «prohibido» = 403 o 401.
+    - Las rutas apuntan a un id que no existe (`999999`), porque el permiso se revisa antes de buscar el registro. Si
+      un rol prohibido recibe 404, el código buscó el registro primero y no se puede saber: la prueba queda **rota**,
+      no «no cumple».
+  - Se corre y se aprueba como cualquier otra prueba (`origin = "matriz"`).
+- **Evidencia de apoyo (§8)** ([reglas_evidencia.py](../backend/app/projects/reglas_evidencia.py)):
+  - Busca los fragmentos con el índice RAG del asistente (si existe) y por palabras en todo el código del proyecto
+    (no solo en los archivos de endpoints: la lógica suele estar en otro módulo).
+  - Gemini da una lectura («implementada», «parcial» o «no encontrada») con los lugares `archivo:línea`. Solo se
+    aceptan líneas dentro de los fragmentos que recibió; sin lugares válidos no puede decir que está implementada.
+  - Se guarda por regla, con su versión y el commit. Si cambian, se marca «de otra versión». No cambia el estado.
+- **Prueba de fuerza** ([reglas_fuerza.py](../backend/app/projects/reglas_fuerza.py) +
+  [ia_voy_fuerza.py](../backend/app/analysis/ia_voy_fuerza.py)):
+  - **Qué se muta:**
+    - las líneas de la evidencia, si la hay;
+    - si no, las funciones de los endpoints que llama la prueba y, un nivel más abajo, las del proyecto que esas
+      funciones llaman. De ahí solo las líneas que comparten al menos 2 palabras con la regla.
+  - **Cómo se muta** (con `ast`, sin IA, hasta 10 mutantes por regla):
+    - comparaciones (`<` ↔ `<=`, `==` ↔ `!=`, `in` ↔ `not in`…);
+    - condiciones invertidas;
+    - `raise` quitados;
+    - `and` ↔ `or`;
+    - números de comparaciones o cuentas (no los códigos de respuesta).
+  - **Dónde:** en el sandbox (modo `fuerza`). Primero la prueba con el código original y luego con cada mutante,
+    restaurando el archivo.
+  - **Resultado:**
+    - «fuerte» = notó todos los cambios;
+    - «parcial» = notó algunos (se listan los que no notó);
+    - «débil» = no notó ninguno;
+    - «no aplica» = la prueba no pasa, o no hay líneas que se parezcan a la regla.
+  - No bloquea la aprobación ni cambia el estado de la regla.
+- **Endpoints:**
+  - `GET|PUT …/reglas/pruebas/{id}/matriz`;
+  - `POST …/reglas/pruebas/{id}/evidencia`;
+  - `POST …/reglas/pruebas/fuerza` (en segundo plano).
+- **Frontend:** en la tarjeta «Pruebas de las reglas»:
+  - el editor de la matriz;
+  - «Dónde está en el código»;
+  - «Prueba de fuerza», por regla y para todas las que pasan;
+  - un chip de prueba débil en la fila y en el resumen.
+- **Medición** ([test_reglas_calidad.py](../backend/tests/test_reglas_calidad.py), con un modelo falso y pytest
+  local, no con Gemini ni con el sandbox WSL):
+
+  | Qué | Resultado |
+  |---|---|
+  | Prueba débil sembrada de RN-004 ([referencia/pruebas_debiles](../backend/seed_data/reservas_demo/referencia/pruebas_debiles/test_rn004_debil.py)) | **débil**: 0 de 3 cambios a `citas.py:51-52` |
+  | Prueba buena de RN-004 (la escrita a mano del demo) | **fuerte**: 3 de 3 |
+  | Matriz de RN-015 marcada como dice la regla | cumple (21 celdas) |
+  | La misma matriz con «el cliente puede crear servicios» | no cumple |
+  | Rol prohibido que recibe 404 | prueba rota, no «no cumple» |
+  | Prueba que sale a internet, aunque el código atrape el error | prueba rota |
+
+  Falta medirlo con Gemini real en el sandbox WSL, como en la fase 4.
 
 ## 15. Riesgos
 

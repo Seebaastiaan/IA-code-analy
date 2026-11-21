@@ -14,7 +14,7 @@ Pasos 2-11 del análisis sobre el clon:
 import logging
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.analyses import reglas
 from app.analyses.analyzers import complexity, is_test_path, static_findings_dir
@@ -65,6 +65,8 @@ class StaticResult:
     code_lines: int = 0
     # Reglas de negocio del repo (paso 10)
     rules: reglas.RulesCheck | None = None
+    # Lo que la app ya sabe de reglas con prueba generada y aprobada (no implementada, fuera del código)
+    rule_notes: dict[str, reglas.AppNote] = field(default_factory=dict)
 
 
 @dataclass
@@ -145,14 +147,26 @@ def analyze_static(settings: Settings, repo_id: str, analyzers: list[str] | tupl
         import_repo_config(store, ws, repo_id)
         cfg = store.config(repo_id)
         uploaded = RulesStore(conn).uploaded_text(repo_id)
+        _, notes, app_declared = app_rule_tests(conn, settings, repo_id)
     files = ws.list_files(cfg.excluded)
     py = [f for f in files if f.endswith(".py")]
     findings = static_findings_dir(ws.root, files, ruff_on="ruff" in analyzers, bandit_on="bandit" in analyzers)
     lines = sum(len(lines) for f in py if (lines := ws.read_lines(f)))
     return StaticResult(
         files=files, py=py, findings=findings, complexity=complexity(ws.root, py) if "radon" in analyzers else [], cfg=cfg, code_lines=lines,
-        rules=reglas.run(ws.root, files, ws.read_lines, uploaded),
+        rules=reglas.with_app(reglas.run(ws.root, files, ws.read_lines, uploaded), app_declared, notes), rule_notes=notes,
     )
+
+
+def app_rule_tests(conn, settings: Settings, repo_id: str) -> tuple[dict[str, str] | None, dict[str, reglas.AppNote], list[reglas.LinkedTest]]:
+    """Pruebas de reglas aprobadas en la app (app.projects.reglas_pruebas). Nunca detiene el análisis."""
+    from app.projects import reglas_pruebas
+
+    try:
+        return reglas_pruebas.analysis_inputs(conn, settings, repo_id)
+    except Exception:  # un problema con las pruebas de la app no debe tumbar el análisis
+        log.exception("No se pudieron leer las pruebas de reglas aprobadas de %s", repo_id)
+        return None, {}, []
 
 
 # ───────────────────────── Resultados del sandbox ─────────────────────────
@@ -283,7 +297,9 @@ def build(
         not_run = "sin sandbox las pruebas no se ejecutan (SANDBOX=wsl o docker)"
     else:
         not_run = None
-    rules = reglas.with_tests(static.rules, out.reglas if out is not None else None, not_run)
+    # Las del repo y, aparte, las generadas y aprobadas en la app (las del repo tienen prioridad)
+    data = reglas.merge_app_tests(out.reglas, out.reglas_app) if out is not None else None
+    rules = reglas.with_tests(static.rules, data, not_run, static.rule_notes)
     if "pytest" not in analyzers:
         failed, passed = 0, 0
         test_findings = [f for f in test_findings if f.tool != "pytest"]

@@ -337,6 +337,9 @@ export function reportRules(repoId: string, reportId: string): BusinessRules {
     cumple: rules.filter((r) => r.status === 'cumple').length,
     no_cumple: rules.filter((r) => r.status === 'no_cumple').length,
     sin_verificar: rules.filter((r) => r.status === 'sin_verificar').length,
+    prueba_rota: rules.filter((r) => r.status === 'prueba_rota').length,
+    no_implementada: rules.filter((r) => r.status === 'no_implementada').length,
+    fuera_del_codigo: rules.filter((r) => r.status === 'fuera_del_codigo').length,
   })
   if (REPO_RULES[repoId])
     return {

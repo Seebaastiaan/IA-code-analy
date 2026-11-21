@@ -2,11 +2,13 @@ import type { Severity } from '@/shared/types/common'
 
 /** Reglas de negocio del proyecto (backend/app/analyses/reglas.py, docs/adr/ADR-003-reglas-de-negocio.md). */
 
-export type RuleStatus = 'cumple' | 'no_cumple' | 'sin_verificar'
+/** docs/PROPUESTA_REGLAS_VERIFICABLES.md §9 */
+export type RuleStatus = 'cumple' | 'no_cumple' | 'prueba_rota' | 'no_implementada' | 'sin_verificar' | 'fuera_del_codigo'
 /** Cómo se verificó la regla */
 export type RuleLevel = 'pruebas' | 'patron' | 'pruebas_y_patron' | 'ninguno'
 /** passed…not_run: corrió en el sandbox (plugin ia_voy_reglas); sin_ejecutar: se encontró leyendo el código */
-export type TestOutcome = 'passed' | 'failed' | 'error' | 'skipped' | 'not_run' | 'sin_ejecutar'
+/** broken = falló por otra cosa que un assert (preparar, un fixture, un import): la prueba está rota, no el código */
+export type TestOutcome = 'passed' | 'failed' | 'broken' | 'error' | 'skipped' | 'not_run' | 'sin_ejecutar'
 export type RulesOrigin = 'repo' | 'app'
 
 export interface RuleEvidence {
@@ -60,7 +62,7 @@ export interface BusinessRules {
   /** Las pruebas corrieron en el sandbox */
   tests_ran: boolean
   warnings: string[]
-  summary: { total: number; cumple: number; no_cumple: number; sin_verificar: number }
+  summary: { total: number; cumple: number; no_cumple: number; sin_verificar: number; prueba_rota: number; no_implementada: number; fuera_del_codigo: number }
   rules: BusinessRuleResult[]
 }
 
@@ -216,4 +218,130 @@ export interface HarnessView {
   sandbox: boolean
   /** Aprobado con el código actual: ya se pueden generar las pruebas de las reglas */
   ready: boolean
+}
+
+// ─── Pruebas de las reglas generadas por IA voy (docs/PROPUESTA_REGLAS_VERIFICABLES.md §6.3, fase 4) ───
+
+export type RuleTestKind = 'prueba' | 'no_implementada' | 'fuera_del_codigo'
+export type RuleTestState = 'sin_prueba' | 'borrador' | 'aprobada' | 'desactualizada'
+export type RunVerdict = 'cumple' | 'no_cumple' | 'prueba_rota' | 'sin_verificar'
+
+export interface RuleTestRun {
+  verdict: RunVerdict
+  detail: string
+  tests: { name: string; outcome: TestOutcome; message: string }[]
+}
+
+// ─── Fase 5: prueba de fuerza, evidencia de apoyo y matriz de permisos ───
+
+/** fuerte = notó todos los cambios a las líneas de la regla; débil = ninguno (la prueba no verifica la regla) */
+export type StrengthStatus = 'fuerte' | 'parcial' | 'debil' | 'no_aplica'
+
+export interface StrengthResult {
+  status: StrengthStatus
+  detail: string
+  killed: number
+  total: number
+  /** Cambios que la prueba no notó */
+  survivors: { file: string; line: number; description: string }[]
+  /** Qué se mutó: las líneas de la evidencia o las de los endpoints que llama la prueba */
+  source: string
+}
+
+/** Dónde parece estar implementada la regla, según la IA. No cambia su estado ni el score. */
+export interface SupportEvidence {
+  verdict: 'implementada' | 'parcial' | 'no_encontrada'
+  summary: string
+  places: { file: string; start: number; end: number; why: string }[]
+  model: string
+  /** De dónde salieron los fragmentos: indice (RAG) y/o palabras */
+  search: string[]
+  created_at: string
+  /** De otra versión de la regla o de otro commit */
+  stale: boolean
+}
+
+export type MatrixCell = 'permitido' | 'prohibido'
+
+export interface MatrixAction {
+  /** "PATCH /servicios/{servicio_id}" */
+  id: string
+  method: string
+  path: string
+  function: string
+  /** Roles que el código deja pasar hoy (sugerencia, no oráculo) */
+  suggested: string[]
+  cells: Partial<Record<string, MatrixCell>>
+}
+
+export interface PermissionMatrix {
+  rule_id: string
+  roles: string[]
+  actions: MatrixAction[]
+  saved: boolean
+}
+
+export interface GeneratedTest {
+  kind: RuleTestKind
+  /** datos | flujo | calculo | permisos | auditoria | integracion | proceso */
+  tipo: string
+  file: string
+  code: string
+  /** matriz = salió de la matriz de permisos, sin IA */
+  origin: 'ia' | 'manual' | 'matriz'
+  assumptions: string[]
+  endpoints: string[]
+  /** Por qué no está implementada o está fuera del código */
+  reason: string | null
+  model: string | null
+  errors: string[]
+  warnings: string[]
+  tests: string[]
+  /** La regla cambió desde que se generó la prueba */
+  outdated: boolean
+  run_status: 'pendiente' | 'corriendo' | 'hecho'
+  run: RuleTestRun | null
+  approved: boolean
+  approved_by: string | null
+  approved_at: string | null
+  /** Por qué no se puede aprobar todavía (null = se puede) */
+  blocked: string | null
+  updated_at: string
+  /** Prueba de fuerza del código actual de la prueba */
+  strength_status: 'pendiente' | 'corriendo' | 'hecho'
+  strength: StrengthResult | null
+  /** Por qué no se puede hacer la prueba de fuerza (null = se puede: la prueba pasa) */
+  strength_blocked: string | null
+  has_matrix: boolean
+}
+
+export interface RuleTestRow {
+  id: string
+  title: string
+  description: string
+  severity: Severity
+  criterion: string | null
+  /** Pruebas del repo que ya la verifican: tienen prioridad sobre la generada */
+  repo_tests: number
+  state: RuleTestState
+  test: GeneratedTest | null
+  /** La regla habla de permisos o roles: se le ofrece la matriz */
+  permissions: boolean
+  evidence: SupportEvidence | null
+}
+
+export interface RuleTestsView {
+  cloned: boolean
+  source: string | null
+  error: string | null
+  harness_ready: boolean
+  can_generate: boolean
+  /** Hay IA para pedir la evidencia de apoyo */
+  can_explain: boolean
+  sandbox: boolean
+  rules: RuleTestRow[]
+  /** Generando, corriendo o haciendo la prueba de fuerza en segundo plano */
+  busy: { kind: 'generando' | 'corriendo' | 'fuerza'; total: number; done: number; current: string | null } | null
+  /** Avisos del último trabajo (reglas que la IA no pudo generar, las que no se aprobaron y por qué) */
+  messages: string[]
 }

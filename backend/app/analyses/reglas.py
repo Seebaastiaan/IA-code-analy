@@ -61,7 +61,11 @@ OPTIONAL_TEXT = ("historia", "responsable", "criterio")
 RULE_FIELDS = {*REQUIRED, *OPTIONAL_TEXT, "rutas", "prohibido", "obligatorio", "ia"}
 PROJECT_FIELDS = {"nombre", "version"}
 
-Status = Literal["cumple", "no_cumple", "sin_verificar"]
+# PROPUESTA_REGLAS_VERIFICABLES.md §9. prueba_rota = falló la prueba o su arnés, no el código (no se culpa al código);
+# no_implementada = la acción del escenario no existe en el código; fuera_del_codigo = regla de proceso (no se verifica)
+Status = Literal["cumple", "no_cumple", "prueba_rota", "no_implementada", "sin_verificar", "fuera_del_codigo"]
+# Excepciones que cuentan como «el código no cumple»: un assert del *Entonces* o pytest.fail / pytest.raises
+ASSERT_EXCEPTIONS = {"AssertionError", "Failed"}
 Level = Literal["pruebas", "patron", "pruebas_y_patron", "ninguno"]
 Origin = Literal["repo", "app"]
 # Texto que ve el usuario como origen de las reglas cargadas en la app
@@ -265,7 +269,8 @@ class LinkedTest:
     file: str
     line: int
     rules: tuple[str, ...]
-    # passed | failed | error | skipped | not_run (del plugin) o sin_ejecutar (encontrada leyendo el código)
+    # passed | failed | broken | error | skipped | not_run (del plugin) o sin_ejecutar (encontrada leyendo el código).
+    # broken = falló por otra cosa que un assert (preparar, un fixture, un import): la prueba está rota
     outcome: str = "sin_ejecutar"
     message: str = ""
 
@@ -639,34 +644,68 @@ def plugin_tests(data: dict | None) -> list[LinkedTest] | None:
             file=str(t.get("file") or "").replace("\\", "/")[:300],
             line=line if isinstance(line, int) and line > 0 else 1,
             rules=tuple(dict.fromkeys(str(r).strip().upper()[:32] for r in t["rules"] if str(r).strip())),
-            outcome=str(t.get("outcome") or "not_run"),
+            outcome=_outcome(t),
             message=str(t.get("message") or "")[:300],
         ))
     return out
+
+
+def _outcome(test: dict) -> str:
+    """
+    Resultado de la prueba según el plugin. Desde la versión 2 trae el tipo de la excepción: un `error` (falló al
+    preparar) o una falla que no es un assert es una prueba rota. Sin `exception` (versión 1) una falla cuenta como falla.
+    """
+    outcome = str(test.get("outcome") or "not_run")
+    exception = str(test.get("exception") or "")
+    if outcome == "error" and "exception" in test:
+        return "broken"
+    if outcome == "failed" and exception and exception not in ASSERT_EXCEPTIONS:
+        return "broken"
+    return outcome
 
 
 def hint_for(rule_id: str) -> str:
     return f'@pytest.mark.regla("{rule_id}") (o llamada test_{rule_id.replace("-", "").lower()}_…)'
 
 
-def combine(pattern: RuleResult, tests: list[LinkedTest], reason: str | None) -> RuleResult:
+# Si una regla tiene varias pruebas (o prueba y patrón), manda el estado más grave
+PRIORITY = ("no_cumple", "prueba_rota", "no_implementada", "sin_verificar", "cumple")
+
+
+@dataclass(frozen=True)
+class AppNote:
+    """Estado que la app ya sabe sin ejecutar (prueba generada y aprobada): no implementada o fuera del código."""
+
+    status: Status
+    detail: str
+
+
+def combine(pattern: RuleResult, tests: list[LinkedTest], reason: str | None, note: AppNote | None = None) -> RuleResult:
     """
     Estado de la regla con su patrón y sus pruebas (`reason` = por qué no se ejecutaron; None = sí corrieron):
-    no cumple si falla una prueba o aparece el patrón; cumple si todo lo que la verifica pasó; si no, sin verificar.
+    no cumple si una prueba falla en un assert o aparece el patrón; prueba rota si falla por otra cosa (preparar, un
+    fixture, un import); cumple si todo lo que la verifica pasó; si no, sin verificar. `note` = lo que la app sabe sin
+    ejecutar (no implementada, fuera del código); solo se usa si la regla no tiene pruebas ni patrón.
     """
     rule = pattern.rule
+    if note is not None and not tests and pattern.level == "ninguno":
+        return RuleResult(rule, note.status, "ninguno", note.detail, pattern.evidence, pattern.evidence_total)
     has_pattern = pattern.level != "ninguno"
     statuses: list[str] = [pattern.status] if has_pattern else []
     parts = [pattern.detail] if has_pattern else []
     n = len(tests)
     failing = [t for t in tests if t.outcome in ("failed", "error")]
+    broken = [t for t in tests if t.outcome == "broken"]
     if tests:
         if reason:
             statuses.append("sin_verificar")
             parts.append(f"{n} prueba(s) sin ejecutar: {reason}")
         elif failing:
             statuses.append("no_cumple")
-            parts.append(f"{len(failing)} de {n} prueba(s) falla(n)")
+            parts.append(f"{len(failing)} de {n} prueba(s) falla(n)" + (f"; {len(broken)} rota(s)" if broken else ""))
+        elif broken:
+            statuses.append("prueba_rota")
+            parts.append(f"{len(broken)} de {n} prueba(s) rota(s): fallan al preparar el escenario, no por el código. Revisa la prueba")
         elif passed := sum(t.outcome == "passed" for t in tests):
             statuses.append("cumple")
             parts.append(f"{passed} prueba(s) pasan" + (f" ({n - passed} omitida(s))" if passed < n else ""))
@@ -677,10 +716,10 @@ def combine(pattern: RuleResult, tests: list[LinkedTest], reason: str | None) ->
         status: Status = "sin_verificar"
         detail = f"Sin patrón ni pruebas: agrega `prohibido` u `obligatorio`, o una prueba con {hint_for(rule.id)}."
     else:
-        status = "no_cumple" if "no_cumple" in statuses else "sin_verificar" if "sin_verificar" in statuses else "cumple"
+        status = next(s for s in PRIORITY if s in statuses)
         detail = "; ".join(parts)
     level: Level = ("pruebas_y_patron" if tests else "patron") if has_pattern else ("pruebas" if tests else "ninguno")
-    ordered = failing + [t for t in tests if t not in failing]
+    ordered = failing + broken + [t for t in tests if t not in failing and t not in broken]
     return RuleResult(rule, status, level, detail, pattern.evidence, pattern.evidence_total, ordered[:MAX_TESTS])
 
 
@@ -695,8 +734,9 @@ def _warnings(source: str, rule_ids: set[str], tests: list[LinkedTest]) -> list[
     return list(dict.fromkeys(out))[:MAX_WARNINGS]
 
 
-def _with(check: RulesCheck, tests: list[LinkedTest], reason: str | None) -> RulesCheck:
-    results = [combine(p, [t for t in tests if p.rule.id in t.rules], reason) for p in check.patterns]
+def _with(check: RulesCheck, tests: list[LinkedTest], reason: str | None, notes: dict[str, AppNote] | None = None) -> RulesCheck:
+    notes = notes or {}
+    results = [combine(p, [t for t in tests if p.rule.id in t.rules], reason, notes.get(p.rule.id)) for p in check.patterns]
     ids = {p.rule.id for p in check.patterns}
     warnings = conflicts([p.rule for p in check.patterns]) + _warnings(check.source or FILENAME, ids, tests)
     return replace(check, results=results, warnings=warnings[:MAX_WARNINGS], tests_ran=reason is None)
@@ -706,19 +746,51 @@ def _with(check: RulesCheck, tests: list[LinkedTest], reason: str | None) -> Rul
 PENDING = "se ejecutan en el sandbox"
 
 
-def with_tests(check: RulesCheck | None, data: dict | None, reason: str | None) -> RulesCheck | None:
+def merge_app_tests(repo: dict | None, app: dict | None) -> dict | None:
+    """
+    reglas.json de las pruebas del repo + el de las pruebas generadas por IA voy y aprobadas en la app (otra corrida
+    de pytest sobre tests/_ia_voy_reglas/). Las del repo tienen prioridad: de la app solo cuentan las de reglas que el
+    repo no prueba.
+    """
+    app_tests = app.get("tests") if isinstance(app, dict) else None
+    if not isinstance(app_tests, list) or not app_tests:
+        return repo
+    repo_tests = plugin_tests(repo)
+    covered = {r for t in repo_tests or [] for r in t.rules}
+    extra = [
+        t for t in app_tests
+        if isinstance(t, dict) and isinstance(t.get("rules"), list) and not covered & {str(r).strip().upper() for r in t["rules"]}
+    ]
+    base = repo if repo_tests is not None else {"version": 2, "tests": []}
+    return {**base, "tests": [*base["tests"], *extra]}
+
+
+def with_app(check: RulesCheck, declared: list[LinkedTest], notes: dict[str, AppNote]) -> RulesCheck:
+    """
+    Suma lo aprobado en la app (app.projects.reglas_pruebas.analysis_inputs): sus pruebas como «declaradas» (para cuando
+    no corren) en las reglas que el repo no prueba, y los estados que se saben sin ejecutar.
+    """
+    if check.error or not check.patterns or not (declared or notes):
+        return check
+    covered = {r for t in check.declared for r in t.rules}
+    check = replace(check, declared=check.declared + [t for t in declared if not covered & set(t.rules)])
+    return _with(check, check.declared, PENDING, notes)
+
+
+def with_tests(check: RulesCheck | None, data: dict | None, reason: str | None, notes: dict[str, AppNote] | None = None) -> RulesCheck | None:
     """
     Agrega el resultado de las pruebas: las del plugin (`data`, de reglas.json) si corrieron en el sandbox
-    (`reason` = None), o las encontradas leyendo el código con `reason` = por qué no se ejecutaron.
+    (`reason` = None), o las encontradas leyendo el código con `reason` = por qué no se ejecutaron. `notes` = lo que la
+    app ya sabe de reglas sin prueba (no implementada, fuera del código).
     """
     if check is None or check.error or not check.patterns:
         return check
     if reason is None:
         ran = plugin_tests(data)
         if ran is not None:
-            return _with(check, ran, None)
+            return _with(check, ran, None, notes)
         reason = "pytest no pudo correr las pruebas"
-    return _with(check, check.declared, reason)
+    return _with(check, check.declared, reason, notes)
 
 
 def run(
@@ -786,6 +858,10 @@ def summary_line(check: RulesCheck | None) -> str:
         f"  {len(check.results)} regla(s) · {check.count('cumple')} cumplen · "
         f"{check.count('no_cumple')} no cumplen · {check.count('sin_verificar')} sin verificar"
     )
+    labels = (("prueba_rota", "con la prueba rota"), ("no_implementada", "no implementada(s)"), ("fuera_del_codigo", "fuera del código"))
+    extra = [f"{check.count(s)} {label}" for s, label in labels if check.count(s)]
+    if extra:
+        line += " · " + " · ".join(extra)
     if check.tests_total:
         line += f" · {check.tests_total} prueba(s) ligada(s)" + ("" if check.tests_ran else " sin ejecutar")
     if check.repo_error:
