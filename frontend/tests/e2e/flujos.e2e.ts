@@ -17,6 +17,8 @@ async function openReport(page: Page) {
 }
 
 test('1 · analizar un repositorio y abrir su reporte', async ({ page }) => {
+  // Recorre varias páginas diferidas: con Vite en frío y varios navegadores a la vez se acerca a los 30 s
+  test.slow()
   await page.goto('/dashboard')
   await expect(page.getByRole('heading', { name: 'Resumen del equipo' })).toBeVisible()
   await page.getByRole('main').getByRole('link', { name: 'Nuevo análisis' }).click()
