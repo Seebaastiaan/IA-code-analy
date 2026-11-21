@@ -4,8 +4,10 @@ import { toast } from '@/shared/hooks/useToast'
 import { Button, Icon, Modal, Spinner, type IconName } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { rulesApi, RULES_FILENAME } from '../api/rules.api'
-import type { RulesValidation } from '../types'
-import { githubRepo, precheckView, saveText, type PrecheckTone } from '../utils/rules'
+import type { ImportedRules, RulesValidation } from '../types'
+import { baseName, DOCUMENT_EXTENSIONS, githubRepo, isDocument, precheckView, saveText, type PrecheckTone } from '../utils/rules'
+import { useImportRules } from '../hooks/useImportRules'
+import { ImportNotice } from './ImportNotice'
 import { ValidationResult } from './ValidationResult'
 
 /** Reglas escritas o corregidas en el formulario (ya validadas): viajan con el análisis. */
@@ -34,17 +36,27 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced
 }
 
-function RulesModal({ url, branch, initial, title, onUse, onClose }: {
+function RulesModal({ url, branch, initial, title, canImport, imported, onUse, onClose }: {
   url: string
   branch: string
   initial: string
   title: string
+  /** Hay IA para sacar las reglas de un PDF, Word o Markdown subido */
+  canImport: boolean
+  /** El contenido inicial lo propuso la IA desde un documento */
+  imported?: ImportedRules
   onUse: (rules: FormRules) => void
   onClose: () => void
 }) {
   const [text, setText] = useState(initial)
-  const [result, setResult] = useState<RulesValidation | null>(null)
+  const [result, setResult] = useState<RulesValidation | null>(imported?.validation ?? null)
+  const [notice, setNotice] = useState<ImportedRules | null>(imported ?? null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const importRules = useImportRules((done) => {
+    setText(done.content)
+    setResult(done.validation)
+    setNotice(done)
+  })
   // El backend valida con el parser real y revisa `rutas` contra el árbol de la rama
   const check = useMutation({
     mutationFn: async (content: string) => (await rulesApi.precheck(url, branch, content)).checked!,
@@ -59,8 +71,11 @@ function RulesModal({ url, branch, initial, title, onUse, onClose }: {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    // PDF, Word o Markdown: la IA saca las reglas; un .toml se carga tal cual
+    if (canImport && isDocument(file.name)) return importRules.mutate({ file, extra: { url, branch } })
     if (file.size > MAX_BYTES) return toast(`El archivo pesa más de ${MAX_BYTES / 1024} KB`, { tone: 'err' })
     update(await file.text())
+    setNotice(null)
   }
   const use = () =>
     check.mutate(text, {
@@ -83,7 +98,15 @@ function RulesModal({ url, branch, initial, title, onUse, onClose }: {
         </div>
         <p className="text-sm text-slate-500 mb-3">
           Se guardan en el proyecto (cargadas en la app) al iniciar el análisis y se usan mientras el repositorio no tenga un {RULES_FILENAME} válido. Descárgalas para subirlas al repo.
+          {canImport && ' También puedes subir el documento de requisitos (PDF, Word o Markdown) y la IA saca las reglas.'}
         </p>
+        {importRules.isPending && (
+          <p className="mb-3 flex items-center gap-2 text-sm text-slate-500">
+            <Spinner className="w-4 h-4" />
+            Leyendo el documento con IA… puede tardar hasta 30 segundos.
+          </p>
+        )}
+        {notice && <ImportNotice imported={notice} />}
         <textarea
           value={text}
           onChange={(e) => update(e.target.value)}
@@ -93,11 +116,11 @@ function RulesModal({ url, branch, initial, title, onUse, onClose }: {
         />
         {result && <ValidationResult result={result} />}
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => check.mutate(text, { onSuccess: setResult })} disabled={!text.trim() || check.isPending}>
+          <Button variant="secondary" onClick={() => check.mutate(text, { onSuccess: setResult })} disabled={!text.trim() || check.isPending || importRules.isPending}>
             {check.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="check" className="w-4 h-4" />}
             Validar
           </Button>
-          <Button onClick={use} disabled={!text.trim() || check.isPending}>
+          <Button onClick={use} disabled={!text.trim() || check.isPending || importRules.isPending}>
             <Icon name="play" className="w-4 h-4" />
             Usar en este análisis
           </Button>
@@ -105,11 +128,18 @@ function RulesModal({ url, branch, initial, title, onUse, onClose }: {
             <Icon name="download" className="w-4 h-4" />
             Descargar para el repo
           </Button>
-          <Button variant="ghost" onClick={() => fileInput.current?.click()}>
+          <Button variant="ghost" onClick={() => fileInput.current?.click()} disabled={importRules.isPending}>
             <Icon name="file" className="w-4 h-4" />
-            Subir archivo
+            {canImport ? 'Subir archivo o documento' : 'Subir archivo'}
           </Button>
-          <input ref={fileInput} type="file" accept=".toml,text/plain" className="hidden" aria-label="Archivo de reglas" onChange={(e) => void upload(e)} />
+          <input
+            ref={fileInput}
+            type="file"
+            accept={canImport ? ['.toml', ...DOCUMENT_EXTENSIONS].join(',') : '.toml,text/plain'}
+            className="hidden"
+            aria-label="Archivo de reglas"
+            onChange={(e) => void upload(e)}
+          />
         </div>
       </div>
     </Modal>
@@ -128,7 +158,9 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
 }) {
   const [debouncedUrl, debouncedBranch] = useDebounced(`${url.trim()}\n${branch.trim() || 'main'}`, DEBOUNCE_MS).split('\n')
   const target = { repo: githubRepo(debouncedUrl), url: debouncedUrl, branch: debouncedBranch }
-  const [editing, setEditing] = useState<{ initial: string; title: string } | null>(null)
+  const [editing, setEditing] = useState<{ initial: string; title: string; imported?: ImportedRules } | null>(null)
+  const [reading, setReading] = useState<string | null>(null)
+  const importRules = useImportRules((imported) => setEditing({ initial: imported.content, title: `Reglas sacadas de ${imported.source}`, imported }))
   const { data, error, isFetching } = useQuery({
     queryKey: ['rules-precheck', target.repo, target.branch],
     queryFn: () => rulesApi.precheck(target.url, target.branch),
@@ -163,6 +195,12 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
   const warnings = rules ? rules.validation.warnings : view.uses === 'repo' ? data.file?.warnings : undefined
   const open = (initial: string, title: string) => setEditing({ initial, title })
   const appRules = data.uploaded?.valid ? data.uploaded.content : null
+  // Documentos de requisitos del repo: la IA saca las reglas al hacer clic (nunca sola)
+  const documents = data.can_import && !rules && data.status !== 'valid' ? data.documents.slice(0, 3) : []
+  const fromDocument = (path: string) => {
+    setReading(path)
+    importRules.mutate({ request: { url: target.url, branch: target.branch, path } }, { onSettled: () => setReading(null) })
+  }
 
   return (
     <div>
@@ -178,7 +216,19 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
                 Aviso: {w}
               </p>
             ))}
+            {reading && (
+              <p className="mt-1.5 flex items-center gap-2 text-slate-500">
+                <Spinner className="w-4 h-4" />
+                Leyendo {reading} con IA… puede tardar hasta 30 segundos.
+              </p>
+            )}
             <div className="mt-2.5 flex flex-wrap gap-2">
+              {documents.map((path) => (
+                <Button key={path} variant="secondary" title={path} onClick={() => fromDocument(path)} disabled={importRules.isPending}>
+                  {reading === path ? <Spinner className="w-4 h-4" /> : <Icon name="wand" className="w-4 h-4" />}
+                  Sacar reglas de {baseName(path)}
+                </Button>
+              ))}
               {rules ? (
                 <>
                   <Button variant="secondary" onClick={() => open(rules.text, 'Editar reglas de este análisis')}>
@@ -222,7 +272,16 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
         </div>
       </section>
       {editing && (
-        <RulesModal url={target.url} branch={target.branch} initial={editing.initial} title={editing.title} onUse={onRulesChange} onClose={() => setEditing(null)} />
+        <RulesModal
+          url={target.url}
+          branch={target.branch}
+          initial={editing.initial}
+          title={editing.title}
+          canImport={data.can_import}
+          imported={editing.imported}
+          onUse={onRulesChange}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   )

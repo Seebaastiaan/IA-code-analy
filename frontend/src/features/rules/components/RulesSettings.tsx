@@ -3,8 +3,10 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, ErrorState, Icon, PageLoader, Spinner } from '@/shared/ui'
 import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '../api/rules.api'
-import type { ProjectRules, RulesValidation } from '../types'
-import { saveText } from '../utils/rules'
+import type { ImportedRules, ProjectRules, RulesValidation } from '../types'
+import { baseName, DOCUMENT_EXTENSIONS, isDocument, saveText } from '../utils/rules'
+import { useImportRules } from '../hooks/useImportRules'
+import { ImportNotice } from './ImportNotice'
 import { ValidationResult } from './ValidationResult'
 
 const MAX_BYTES = 256 * 1024
@@ -50,7 +52,19 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   const initial = data.uploaded?.content ?? data.repo?.content ?? ''
   const [text, setText] = useState(initial)
   const [result, setResult] = useState<RulesValidation | null>(null)
+  const [notice, setNotice] = useState<ImportedRules | null>(null)
+  const [reading, setReading] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  // Reemplaza el contenido del editor: no se guarda hasta "Guardar en la app"
+  const importRules = useImportRules((done) => {
+    setText(done.content)
+    setResult(done.validation)
+    setNotice(done)
+  })
+  const fromDocument = (path: string) => {
+    setReading(path)
+    importRules.mutate({ request: { project_id: repoId, path } }, { onSettled: () => setReading(null) })
+  }
 
   const update = (next: string) => {
     setText(next)
@@ -82,14 +96,21 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    // PDF, Word o Markdown: la IA saca las reglas; un .toml se carga tal cual
+    if (data.can_import && isDocument(file.name)) {
+      setReading(file.name)
+      importRules.mutate({ file, extra: { project_id: repoId } }, { onSettled: () => setReading(null) })
+      return
+    }
     if (file.size > MAX_BYTES) {
       toast(`El archivo pesa más de ${MAX_BYTES / 1024} KB`, { tone: 'err' })
       return
     }
     update(await file.text())
+    setNotice(null)
   }
 
-  const busy = validate.isPending || save.isPending
+  const busy = validate.isPending || save.isPending || importRules.isPending
   // El archivo del repo es válido: gana a lo que se guarde aquí
   const fromRepo = data.active === 'repo' && Boolean(data.repo?.valid)
   // El archivo del repo tiene errores: lo que se guarde aquí se usa mientras siga así
@@ -104,13 +125,42 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
             <Icon name="download" className="w-4 h-4" />
             Descargar plantilla
           </Button>
-          <Button variant="ghost" onClick={() => fileInput.current?.click()}>
+          <Button variant="ghost" onClick={() => fileInput.current?.click()} disabled={importRules.isPending}>
             <Icon name="file" className="w-4 h-4" />
-            Subir archivo
+            {data.can_import ? 'Subir archivo o documento' : 'Subir archivo'}
           </Button>
-          <input ref={fileInput} type="file" accept=".toml,text/plain" className="hidden" aria-label="Archivo de reglas" onChange={(e) => void upload(e)} />
+          <input
+            ref={fileInput}
+            type="file"
+            accept={data.can_import ? ['.toml', ...DOCUMENT_EXTENSIONS].join(',') : '.toml,text/plain'}
+            className="hidden"
+            aria-label="Archivo de reglas"
+            onChange={(e) => void upload(e)}
+          />
         </div>
       </div>
+      {data.can_import && !fromRepo && data.documents.length > 0 && (
+        <div className="mb-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 text-sm">
+          <p className="text-slate-600 dark:text-slate-300">
+            Encontré {data.documents.length === 1 ? 'un documento' : 'documentos'} de requisitos en el repositorio: la IA puede sacar las reglas para que las revises aquí.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {data.documents.map((path) => (
+              <Button key={path} variant="secondary" title={path} onClick={() => fromDocument(path)} disabled={importRules.isPending}>
+                {reading === path ? <Spinner className="w-4 h-4" /> : <Icon name="wand" className="w-4 h-4" />}
+                Sacar reglas de {baseName(path)}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+      {reading && (
+        <p className="mb-3 flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="w-4 h-4" />
+          Leyendo {reading} con IA… puede tardar hasta 30 segundos.
+        </p>
+      )}
+      {notice && <ImportNotice imported={notice} />}
       {fromRepo && (
         <p className="mb-3 text-sm text-slate-500">
           El repositorio ya tiene <code className="font-mono">{data.repo?.path}</code> y es válido: el análisis usa ese archivo y lo que guardes aquí se ignora. Edítalo en el repositorio o desde el editor.
@@ -155,7 +205,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
 }
 
 const STEPS = [
-  'Descarga la plantilla (o escribe las reglas aquí).',
+  'Descarga la plantilla, escribe las reglas aquí o sube el documento de requisitos (PDF, Word o Markdown) para que la IA las saque.',
   'Escribe las reglas del negocio: salen de los requerimientos y criterios de aceptación.',
   'Por cada regla, una prueba con @pytest.mark.regla("RN-###") (o llamada test_rn###_…) o un patrón prohibido / obligatorio.',
   'Haz commit de reglas_negocio.toml y las pruebas en la raíz del repositorio.',

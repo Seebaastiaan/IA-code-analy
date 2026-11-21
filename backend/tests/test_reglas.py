@@ -216,6 +216,46 @@ def test_sin_archivo_y_archivo_invalido(tmp_path):
     assert reglas.summary_line(check).startswith("  ERROR en reglas_negocio.toml")
 
 
+DOS_REGLAS = """
+[proyecto]
+nombre = "Reservas"
+
+{marca}
+[[regla]]
+id = "RN-001"
+titulo = "Cancelar 24 h antes es gratis"
+descripcion = "Con 24 h o más se reembolsa todo."
+severidad = "alta"
+
+[[regla]]
+id = "RN-002"
+titulo = "Cancelar con menos de 48 h cobra"
+descripcion = "Con menos de 48 h se cobra la mitad."
+severidad = "alta"
+"""
+
+
+@pytest.mark.parametrize("marca", [
+    "# CONTRADICCIÓN RN-001 RN-002: 24 h contra 48 h",
+    "#contradiccion rn-002 y rn-001",
+])
+def test_contradiccion_marcada_invalida_el_archivo(tmp_path, marca):
+    with pytest.raises(reglas.RulesError, match=r"línea 5: RN-00\d y RN-00\d se contradicen según el documento"):
+        reglas.parse(DOS_REGLAS.format(marca=marca))
+    # En el análisis también: el archivo del repo queda con error
+    root, files = repo(tmp_path, {"reglas_negocio.toml": DOS_REGLAS.format(marca=marca)})
+    assert "se contradicen según el documento" in correr(root, files).error
+
+
+@pytest.mark.parametrize("marca", [
+    "# CONTRADICCIÓN RN-001 RN-007: la otra ya se borró",
+    "# CONTRADICCIÓN RN-001 RN-001: consigo misma",
+    "# Ver la contradicción RN-001 RN-002 en el documento",
+])
+def test_marca_que_ya_no_aplica_no_estorba(marca):
+    assert len(reglas.parse(DOS_REGLAS.format(marca=marca)).rules) == 2
+
+
 def test_archivo_demasiado_grande(tmp_path, monkeypatch):
     monkeypatch.setattr(reglas, "MAX_BYTES", 10)
     root, files = repo(tmp_path, {"reglas_negocio.toml": REGLAS})

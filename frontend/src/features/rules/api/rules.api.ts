@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { download, http } from '@/shared/api/http'
-import type { BusinessRules, ProjectRules, RulesPrecheck, RulesValidation } from '../types'
+import type { BusinessRules, ImportedRules, ImportRulesRequest, ProjectRules, RulesPrecheck, RulesValidation } from '../types'
 
 export const RULES_FILENAME = 'reglas_negocio.toml'
 
@@ -14,6 +14,8 @@ export const rulesApi = {
   template: (repoId: string) => download(EP.rules.template(repoId), {}, RULES_FILENAME),
   /** `content` = valida ese texto contra el repo en vez de leer su archivo */
   precheck: (url: string, branch: string, content?: string) => http.post<RulesPrecheck>(EP.rules.precheck, { url, branch, content }),
+  /** La IA saca las reglas de un documento de requisitos; devuelve el TOML para revisarlo (no guarda nada) */
+  importDocument: (body: ImportRulesRequest) => http.post<ImportedRules>(EP.rules.import, body),
 }
 
 /** Bajo la clave del reporte: se refresca junto con él (re-analizar, guardar en el editor). */

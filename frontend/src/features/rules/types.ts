@@ -93,6 +93,10 @@ export interface ProjectRules {
   /** El repo ya se clonó (si no, todavía no se sabe si trae el archivo) */
   cloned: boolean
   commit: string | null
+  /** Documentos de requisitos de la copia del repo (PDF, Word, Markdown) que se pueden importar */
+  documents: string[]
+  /** Hay IA (Gemini) para importar reglas desde un documento */
+  can_import: boolean
 }
 
 /** Archivo de reglas del repo: valid | invalid | missing. unavailable = no se pudo leer sin clonar (acceso, rama, GitHub) */
@@ -114,4 +118,36 @@ export interface RulesPrecheck {
   template: string
   /** Validación del contenido enviado (editor del modal) */
   checked: RulesValidation | null
+  /** Documentos de requisitos del árbol del repo (los de docs/ primero) */
+  documents: string[]
+  can_import: boolean
+}
+
+/**
+ * Importar reglas desde un documento (POST /api/reglas/importar). Una de tres fuentes: el repo en GitHub
+ * (url + branch + path), la copia de un proyecto (project_id + path) o un archivo subido (filename + data en base64).
+ */
+export interface ImportRulesRequest {
+  url?: string
+  branch?: string
+  project_id?: string
+  path?: string
+  filename?: string
+  data?: string
+}
+
+/** reglas_negocio.toml que propone la IA desde el documento: no se guarda hasta que el usuario lo usa. */
+export interface ImportedRules {
+  content: string
+  count: number
+  /** Ambigüedades del documento */
+  doubts: string[]
+  /**
+   * Reglas que el documento contradice («RN-002 (§2.3) y RN-004 (§5.2): …»). Van marcadas en `content` con
+   * `# CONTRADICCIÓN` y el archivo no es válido hasta que se deje una de cada par.
+   */
+  contradictions: string[]
+  source: string
+  validation: RulesValidation
+  model: string
 }

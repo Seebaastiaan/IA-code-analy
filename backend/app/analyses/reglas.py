@@ -51,6 +51,8 @@ MAX_WARNINGS = 20
 MAX_TEST_FILE = 1024 * 1024
 
 ID_RE = re.compile(r"^RN-\d{3}$")
+# Marca del importador: dos reglas que el documento contradice (no se puede usar el archivo con las dos)
+MARKED_CONTRADICTION = re.compile(r"^\s*#\s*CONTRADICCI[OÓ]N\s+(RN-\d{3})\s+(?:y\s+)?(RN-\d{3})\s*:?\s*(.*)$", re.IGNORECASE)
 # Nombre alternativo al marcador: test_rn002_… (mismo criterio que el plugin ia_voy_reglas)
 TEST_NAME_RE = re.compile(r"^test_rn(\d{3})(?:_|$)", re.IGNORECASE)
 SEVERITIES = ("alta", "media", "baja")
@@ -315,6 +317,30 @@ def _rule_lines(text: str) -> list[int]:
     return [n for n, line in enumerate(text.splitlines(), start=1) if re.match(r"\s*\[\[\s*regla\s*\]\]", line)]
 
 
+def contradiction_comment(a: str, b: str, reason: str) -> str:
+    """Comentario con el que el importador marca dos reglas que el documento contradice (ver `_check_marked_contradictions`)."""
+    return f"# CONTRADICCIÓN {a} {b}: {reason}"
+
+
+def _check_marked_contradictions(text: str, ids: set[str]) -> None:
+    """
+    El importador marca con `# CONTRADICCIÓN RN-004 RN-009: …` las reglas que el documento dice de dos formas
+    incompatibles. Mientras existan las dos el archivo no es válido: el equipo deja la que vale (o borra el comentario si
+    decide que no se contradicen). Si ya solo queda una, el comentario no estorba.
+    """
+    for n, line in enumerate(text.splitlines(), start=1):
+        m = MARKED_CONTRADICTION.match(line)
+        if not m:
+            continue
+        a, b, reason = m.group(1).upper(), m.group(2).upper(), m.group(3).strip()
+        if a != b and a in ids and b in ids:
+            detail = f": {reason}" if reason else ""
+            raise RulesError(
+                f"línea {n}: {a} y {b} se contradicen según el documento{detail}. Deja solo la regla que vale y borra el "
+                "comentario «# CONTRADICCIÓN» (o bórralo si decides que no se contradicen)"
+            )
+
+
 def _text(rule: dict, key: str, where: str, limit: int, required: bool) -> str | None:
     value = rule.get(key)
     if value is None:
@@ -432,6 +458,7 @@ def parse(text: str) -> RuleSet:
             raise RulesError(f"{where}: {rule.id} está repetida")
         seen.add(rule.id)
         rules.append(rule)
+    _check_marked_contradictions(text, seen)
     return RuleSet(project=name, version=None if version is None else str(version), rules=rules)
 
 

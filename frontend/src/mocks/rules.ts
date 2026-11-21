@@ -4,7 +4,7 @@
  * En la revisión de Nuevo análisis, `ana-lopez/scraper-precios` (aún no es proyecto) trae un archivo con errores, y
  * los repos CRUD de prueba (fixtures/crudRules.ts) traen su archivo real.
  */
-import type { BusinessRuleResult, BusinessRules, ProjectRules, RulePreview, RulesPrecheck, RulesValidation } from '@/features/rules/types'
+import type { BusinessRuleResult, BusinessRules, ImportedRules, ImportRulesRequest, ProjectRules, RulePreview, RulesPrecheck, RulesValidation } from '@/features/rules/types'
 import type { Severity } from '@/shared/types/common'
 import { findRepoByName, getRepo } from './db'
 import { CRUD_REPOS } from './fixtures/crudRules'
@@ -178,7 +178,22 @@ function parse(text: string): { project: string; rules: ParsedRule[] } {
       paths: [...(/^\s*rutas\s*=\s*\[([^\]]*)\]/m.exec(block)?.[1] ?? '').matchAll(/["']([^"']+)["']/g)].map((m) => m[1].replace(/^\.?\/+/, '')),
     }
   })
+  checkMarkedContradictions(text, new Set(rules.map((r) => r.id)))
   return { project, rules }
+}
+
+/** `# CONTRADICCIÓN RN-002 RN-004: …` (lo escribe el importador): inválido mientras existan las dos reglas. */
+function checkMarkedContradictions(text: string, ids: Set<string>) {
+  text.split('\n').forEach((line, i) => {
+    const m = /^\s*#\s*CONTRADICCI[OÓ]N\s+(RN-\d{3})\s+(?:y\s+)?(RN-\d{3})\s*:?\s*(.*)$/i.exec(line)
+    if (!m) return
+    const [a, b, reason] = [m[1].toUpperCase(), m[2].toUpperCase(), m[3].trim()]
+    if (a !== b && ids.has(a) && ids.has(b)) {
+      throw new RulesError(
+        `línea ${i + 1}: ${a} y ${b} se contradicen según el documento${reason ? `: ${reason}` : ''}. Deja solo la regla que vale y borra el comentario «# CONTRADICCIÓN» (o bórralo si decides que no se contradicen)`,
+      )
+    }
+  })
 }
 
 // ─── Contradicciones y duplicados (reglas.conflicts del backend) ───
@@ -293,6 +308,8 @@ export function projectRules(repoId: string): ProjectRules {
     uploaded: up ? { ...validateFor(repoId, up.content), ...up } : null,
     cloned: repo.reports.length > 0,
     commit: repo.reports.at(-1)?.commit ?? null,
+    documents: repo.reports.length > 0 ? DOCUMENTS[repo.name] ?? [] : [],
+    can_import: true,
   }
 }
 
@@ -385,6 +402,82 @@ export function precheck(url: string, _branch: string, content?: string): RulesP
     active: file?.valid ? 'repo' : uploaded?.valid ? 'app' : file ? 'repo' : null,
     template: TEMPLATE.replace('nombre  = "Mi proyecto"', `nombre  = ${JSON.stringify(name)}`),
     checked: content === undefined ? null : withPaths(content, files, name),
+    documents: reachable ? Object.entries(DOCUMENTS).find(([n]) => n.toLowerCase() === name.toLowerCase())?.[1] ?? [] : [],
+    can_import: true,
+  }
+}
+
+
+// ─── Importar desde un documento de requisitos (lo que respondería Gemini) ───
+
+/** Documentos de requisitos de cada repo (los demás no tienen) */
+const DOCUMENTS: Record<string, string[]> = {
+  'equipo/bot-soporte': ['docs/Requerimientos.pdf'],
+}
+
+const IMPORTED_RULES = [
+  {
+    fuente: 'pág. 3 · §2.1', severidad: 'alta',
+    titulo: 'Solo un agente de soporte puede cerrar un ticket',
+    descripcion: 'Un ticket solo se marca como cerrado si lo cierra un agente de soporte; si lo intenta el cliente o el bot, se rechaza.',
+    criterio: 'Dado un ticket abierto, cuando el bot intenta cerrarlo, entonces el ticket sigue abierto',
+  },
+  {
+    fuente: 'pág. 4 · §2.3', severidad: 'media',
+    titulo: 'Un ticket urgente se responde en menos de una hora',
+    descripcion: 'Los tickets marcados como urgentes se asignan a un agente y reciben la primera respuesta en menos de 60 minutos.',
+    criterio: null,
+  },
+  {
+    fuente: 'pág. 5 · §3.1', severidad: 'alta',
+    titulo: 'El bot no muestra datos personales de otros clientes',
+    descripcion: 'Al responder, el bot solo usa los datos del cliente que escribe; nunca muestra correos, teléfonos ni tickets de otros clientes.',
+    criterio: null,
+  },
+]
+
+// Solo en los documentos subidos: el mismo documento da otro plazo para los urgentes (§5.2 contra §2.3)
+const UPLOADED_EXTRA = {
+  fuente: 'pág. 7 · §5.2', severidad: 'media',
+  titulo: 'Un ticket urgente se responde en menos de 4 horas',
+  descripcion: 'Los tickets urgentes reciben la primera respuesta en un plazo máximo de 4 horas hábiles.',
+  criterio: null,
+}
+const UPLOADED_CONTRADICTION = { a: 1, b: 3, motivo: '§2.3 pide responder un ticket urgente en menos de 1 hora y §5.2 da hasta 4 horas' }
+
+const q = (text: string) => JSON.stringify(text)
+
+/** Un texto = error (el handler responde 422 con ese mensaje). Mismo TOML que arma el backend. */
+export function importDocument(body: ImportRulesRequest): ImportedRules | string {
+  const source = body.path ?? body.filename ?? ''
+  if (!/\.(pdf|docx|md|markdown|txt)$/i.test(source)) return 'Usa un PDF, Word (.docx), Markdown (.md) o texto (.txt)'
+  const m = body.url ? REPO_URL.exec(body.url.trim()) : null
+  const project = m ? `${m[1]}/${m[2]}` : body.project_id ? getRepo(body.project_id).name : 'Mi proyecto'
+  const name = source.split('/').pop()
+  const lines = [
+    `# reglas_negocio.toml — reglas de negocio de ${project} (formato: docs/PROPUESTA_REGLAS_NEGOCIO.md)`,
+    `# Generado por IA voy desde «${name}». Revisa cada regla antes de usarlo:`,
+    '# la IA puede equivocarse. Para verificar una regla, escribe una prueba test_rn001_… (o @pytest.mark.regla("RN-001")).',
+    '',
+    '[proyecto]',
+    `nombre = ${q(project)}`,
+  ]
+  const rules = body.filename ? [...IMPORTED_RULES, UPLOADED_EXTRA] : IMPORTED_RULES
+  const pair = body.filename ? UPLOADED_CONTRADICTION : null
+  const rid = (i: number) => `RN-${String(i + 1).padStart(3, '0')}`
+  rules.forEach((r, i) => {
+    lines.push('', `# Fuente: ${r.fuente}`)
+    if (pair && (i === pair.a || i === pair.b)) lines.push(`# CONTRADICCIÓN ${rid(pair.a)} ${rid(pair.b)}: ${pair.motivo}`)
+    lines.push('[[regla]]', `id          = ${q(rid(i))}`)
+    lines.push(`titulo      = ${q(r.titulo)}`, `descripcion = ${q(r.descripcion)}`, `severidad   = ${q(r.severidad)}`)
+    if (r.criterio) lines.push(`criterio    = ${q(r.criterio)}`)
+  })
+  const content = lines.join('\n') + '\n'
+  return {
+    content, count: rules.length, source, model: 'Gemini 3.5 Flash Lite',
+    contradictions: pair ? [`${rid(pair.a)} (${rules[pair.a].fuente}) y ${rid(pair.b)} (${rules[pair.b].fuente}): ${pair.motivo}`] : [],
+    doubts: ['§2.3 dice "urgente" pero no explica quién marca un ticket como urgente', '§4 menciona "horario de atención" sin decir cuál es'],
+    validation: validate(content),
   }
 }
 

@@ -52,6 +52,27 @@ export function saveText(name: string, text: string, type = 'application/toml') 
   URL.revokeObjectURL(url)
 }
 
+// ─── Documentos de requisitos (importar con IA) ───
+
+/** Extensiones que la IA puede leer (backend/app/projects/reglas_importar.py) */
+export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.md', '.markdown', '.txt']
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+
+/** PDF, Word o Markdown: se importa con IA. Un .toml (o cualquier otro) se carga tal cual en el editor. */
+export const isDocument = (name: string) => DOCUMENT_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext))
+
+/** Nombre del archivo de una ruta (docs/Requerimientos.pdf → Requerimientos.pdf). */
+export const baseName = (path: string) => path.split('/').pop() || path
+
+/** Contenido de un archivo en base64 (sin el prefijo data:…), para mandarlo en JSON. */
+export async function fileToBase64(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  // Por bloques: String.fromCharCode con millones de argumentos desborda la pila
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
 /** "owner/repo" de una URL de GitHub (mismo criterio que el backend); null si no es de GitHub. */
 export function githubRepo(url: string): string | null {
   const m = /^https:\/\/(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i.exec(url.trim())
@@ -98,6 +119,11 @@ export function precheckView(p: RulesPrecheck, form: RulesValidation | null): Pr
   if (p.status === 'missing')
     return app
       ? { tone: 'neutral', uses: 'app', title: 'Este repo no declara reglas de negocio', detail: `Se usarán las cargadas en la app (${count(app)}).` }
-      : { tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio', detail: 'Descarga la plantilla o escríbelas aquí; si no, el análisis no verifica reglas.' }
+      : {
+          tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio',
+          detail: p.can_import && p.documents.length
+            ? `Encontré ${p.documents.length === 1 ? p.documents[0] : `${p.documents.length} documentos de requisitos`} en el repositorio: la IA puede sacar las reglas de ahí para que las revises. También puedes descargar la plantilla o escribirlas aquí.`
+            : 'Descarga la plantilla o escríbelas aquí; si no, el análisis no verifica reglas.',
+        }
   return { tone: 'neutral', uses: app ? 'app' : null, title: 'No se pudieron revisar las reglas', detail: p.message }
 }

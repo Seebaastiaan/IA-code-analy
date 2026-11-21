@@ -100,6 +100,12 @@ Cada regla termina en uno de tres estados:
   Configuración → Reglas de negocio (plantilla, validar, cargar en la app con precedencia del repo, descargar) y
   vista Reglas en el reporte. Tabla nueva `business_rules_upload` y columnas `origin`, `warnings`, `tests_ran`
   (`business_rule_checks`) y `tests` (`business_rule_results`).
+- **Sprint 8 (después)**: importar las reglas desde el documento de requisitos del proyecto
+  ([PLAN_IMPORTAR_REGLAS_DOCUMENTO.md](../PLAN_IMPORTAR_REGLAS_DOCUMENTO.md)). La IA **lee el documento y propone**
+  el `reglas_negocio.toml`; no decide si una regla se cumple. La persona lo revisa en el editor de siempre antes de
+  usarlo, y lo importado entra como "reglas cargadas en la app", sin ganarle a un archivo válido del repo.
+  `POST /api/reglas/importar`, detección de documentos en `POST /api/reglas/revisar` y en
+  `GET /api/projects/{id}/reglas` (`documents`, `can_import`). Gemini solo se llama al hacer clic, nunca en el análisis.
 - **Después**: categoría `neg` en el score (migración de `reports` y de las categorías fijas) y nivel IA.
 
 ## Alternativas descartadas

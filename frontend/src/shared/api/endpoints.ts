@@ -42,6 +42,8 @@ export const EP = {
     template: (projectId: string) => `/api/projects/${projectId}/reglas/plantilla`,
     /** Revisa las reglas de un repo antes de analizarlo (Nuevo análisis), sin clonarlo */
     precheck: '/api/reglas/revisar',
+    /** Saca las reglas de un documento de requisitos (PDF, Word, Markdown) con IA */
+    import: '/api/reglas/importar',
   },
   github: {
     status: '/api/github/status',

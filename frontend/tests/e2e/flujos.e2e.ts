@@ -204,6 +204,37 @@ test('reglas de negocio al cargar el repo: revisar y corregir antes de analizar'
   await expect(page).toHaveURL(/\/analyze\/jobs\//)
 })
 
+test('reglas de negocio desde el documento de requisitos del repo', async ({ page }) => {
+  await page.goto('/analyze')
+  const rules = page.getByRole('region', { name: 'Reglas de negocio' })
+
+  // Sin reglas_negocio.toml pero con un documento de requisitos: la IA solo se usa al hacer clic
+  await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/bot-soporte')
+  await expect(rules.getByText(/Encontré docs\/Requerimientos.pdf en el repositorio/)).toBeVisible()
+  await rules.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
+  await expect(rules.getByText(/Leyendo docs\/Requerimientos.pdf con IA/)).toBeVisible()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: 'Reglas sacadas de docs/Requerimientos.pdf' })).toBeVisible()
+  await expect(dialog.getByText('3 regla(s) sacadas de')).toBeVisible()
+  await expect(dialog.getByText('Dudas del documento')).toBeVisible()
+  await expect(dialog.getByText('Válido · equipo/bot-soporte · 3 regla(s)')).toBeVisible()
+  await expect(dialog.getByLabel('Reglas de negocio para este análisis')).toHaveValue(/# Fuente: pág. 3 · §2.1\n\[\[regla\]\]\nid {10}= "RN-001"/)
+  await dialog.getByRole('button', { name: 'Usar en este análisis' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(rules.getByText('3 regla(s) · equipo/bot-soporte escritas aquí')).toBeVisible()
+  // Ya hay reglas en el formulario: no se vuelve a ofrecer el documento
+  await expect(rules.getByRole('button', { name: /Sacar reglas de/ })).toBeHidden()
+
+  // En Configuración, el mismo documento desde la copia del proyecto
+  await page.goto('/repos/r3/settings?tab=reglas')
+  await page.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
+  await expect(page.getByText('3 regla(s) sacadas de')).toBeVisible()
+  await expect(page.getByLabel('Contenido de reglas_negocio.toml')).toHaveValue(/nombre = "equipo\/bot-soporte"/)
+  await page.getByRole('button', { name: 'Guardar en la app' }).click()
+  await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
+})
+
 test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await page.goto('/repos')
   await page.getByRole('navigation').getByRole('link', { name: 'Equipo' }).click()

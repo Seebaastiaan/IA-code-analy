@@ -5,6 +5,7 @@ import type { GithubCallbackRequest } from '@/features/auth/types'
 import type { SaveFileRequest } from '@/features/editor/types'
 import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
+import type { ImportRulesRequest } from '@/features/rules/types'
 import type { ShareRequest } from '@/features/share/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
@@ -180,6 +181,11 @@ export const handlers = [
     const result = rules.precheck(body.url, body.branch, body.content)
     return result ? json(result) : fail(422, 'invalid_url', 'Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)')
   })),
+  // Leer el documento con IA tarda: se simula una espera más larga
+  http.post(EP.rules.import, route(async ({ request }) => {
+    const result = rules.importDocument((await request.json()) as ImportRulesRequest)
+    return typeof result === 'string' ? fail(415, 'unsupported_type', result) : json(result)
+  }, 1200)),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

@@ -23,12 +23,22 @@ La propuesta cumple dos condiciones:
 |---|---|---|---|
 | **Repositorio** (principal) | Archivo `reglas_negocio.toml` en la raíz del repo, con commit como cualquier otro archivo | Siempre que se pueda | **Sí**: es la fuente de verdad |
 | **App: Configuración → Reglas de negocio** | Subir el archivo, o escribir las reglas en un formulario | Mientras se redactan, o para probar antes de hacer commit | No: la app avisa "súbelo al repositorio" y ofrece descargarlo |
+| **App: desde el documento de requisitos** | Subir el PDF, Word o Markdown del proyecto (o elegir el que se encontró en el repo) y la IA propone el `reglas_negocio.toml` | Cuando las reglas ya están escritas en un documento y nadie las ha pasado al formato | No, igual que la anterior: la persona revisa el archivo, lo usa en la app y lo descarga para subirlo al repo |
 
 **Precedencia**: si el repositorio tiene un `reglas_negocio.toml` válido, gana el del repositorio y la versión
 cargada en la app se ignora (la app lo indica). Así nadie califica con reglas que no están en el código entregado.
 Si el del repositorio tiene errores, el análisis usa la versión corregida en la app (desde Configuración o desde
 Nuevo análisis, que revisa el archivo al cargar el repo, antes de clonar) y el reporte lo indica junto con el
 error del archivo del repo.
+
+**Desde el documento de requisitos** ([PLAN_IMPORTAR_REGLAS_DOCUMENTO.md](PLAN_IMPORTAR_REGLAS_DOCUMENTO.md)): al
+cargar el repo en Nuevo análisis, si no tiene un `reglas_negocio.toml` válido pero sí un documento con nombre de
+requisitos (`docs/Requerimientos.pdf`, `reglas_de_negocio.docx`, `SRS.md`…), el cuadro ofrece **Sacar reglas de…**.
+Gemini lee el documento solo al hacer clic y propone las reglas en el formato de siempre (ids en orden, `# Fuente:`
+con la página o sección, `criterio` cuando el documento da los datos y las **dudas** que encontró). Si el documento
+se **contradice** (dos secciones con reglas incompatibles para el mismo caso), trae las dos versiones marcadas con
+`# CONTRADICCIÓN` y el archivo no es válido hasta que el equipo deje una (PLAN §5.5). No se generan
+patrones ni `rutas`: las reglas importadas se verifican con pruebas y quedan "sin verificar" hasta tenerlas.
 
 ### Por qué un archivo propio y no dentro de `.ia_voy.toml`
 

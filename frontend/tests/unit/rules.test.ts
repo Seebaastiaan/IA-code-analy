@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BusinessRuleResult, RulesPrecheck, RuleStatus, RulesValidation } from '@/features/rules/types'
-import { filterRules, githubRepo, precheckView, testFunction, testName } from '@/features/rules/utils/rules'
-import { fromAnalyze, precheck, templateFor, validate, validateFor } from '@/mocks/rules'
+import { baseName, fileToBase64, filterRules, githubRepo, isDocument, precheckView, testFunction, testName } from '@/features/rules/utils/rules'
+import { fromAnalyze, importDocument, precheck, templateFor, validate, validateFor } from '@/mocks/rules'
 
 const rule = (id: string, status: RuleStatus): BusinessRuleResult => ({
   id, title: id, description: '', severity: 'media', paths: [], forbidden: null, required: null, story: null, owner: null, criterion: null,
@@ -87,7 +87,8 @@ describe('revisión de reglas en Nuevo análisis', () => {
   })
   const bad: RulesValidation = { valid: false, error: 'línea 9: `R1` no cumple el formato `RN-###` (p. ej. RN-001)', project: null, rules: [] }
   const check = (over: Partial<RulesPrecheck>): RulesPrecheck => ({
-    repo: 'equipo/tienda', status: 'missing', message: null, file: null, project_id: null, uploaded: null, active: null, template: '', checked: null, ...over,
+    repo: 'equipo/tienda', status: 'missing', message: null, file: null, project_id: null, uploaded: null, active: null, template: '', checked: null,
+    documents: [], can_import: false, ...over,
   })
   const file = (v: RulesValidation) => ({ ...v, content: 'x', path: 'reglas_negocio.toml' })
 
@@ -117,6 +118,14 @@ describe('revisión de reglas en Nuevo análisis', () => {
     expect(precheckView(check({}), null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio' })
     expect(precheckView(check({ uploaded: { ...ok(), content: 'y', updated_at: '' } }), null).uses).toBe('app')
     expect(precheckView(check({ status: 'unavailable', message: 'Sin acceso' }), null)).toMatchObject({ tone: 'neutral', detail: 'Sin acceso' })
+  })
+
+  it('sin archivo pero con documento de requisitos: ofrece sacar las reglas con IA (solo si hay IA)', () => {
+    const docs = check({ documents: ['docs/Requerimientos.pdf'], can_import: true })
+    expect(precheckView(docs, null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio' })
+    expect(precheckView(docs, null).detail).toContain('Encontré docs/Requerimientos.pdf en el repositorio')
+    expect(precheckView({ ...docs, documents: ['a.md', 'b.pdf'] }, null).detail).toContain('2 documentos de requisitos')
+    expect(precheckView({ ...docs, can_import: false }, null).detail).toContain('Descarga la plantilla')
   })
 
   it('simulada: lee el archivo del repo, valida el contenido y guarda las reglas del análisis', () => {
@@ -169,5 +178,48 @@ describe('revisión de reglas en Nuevo análisis', () => {
       'línea 58: RN-006 está repetida',
     ])
     expect(validate(text)).toMatchObject({ valid: true, project: 'Papelería escolar', warnings: [] })
+  })
+})
+
+describe('importar reglas desde un documento', () => {
+  it('reconoce los documentos que lee la IA', () => {
+    expect(['Requerimientos.PDF', 'reglas.docx', 'srs.md', 'notas.txt'].every(isDocument)).toBe(true)
+    expect(isDocument('reglas_negocio.toml')).toBe(false)
+    expect(isDocument('foto.png')).toBe(false)
+    expect(baseName('docs/sub/Requerimientos.pdf')).toBe('Requerimientos.pdf')
+  })
+
+  it('convierte el archivo a base64 (también archivos grandes)', async () => {
+    expect(await fileToBase64(new Blob(['%PDF-1.4 ñ']))).toBe(btoa(unescape(encodeURIComponent('%PDF-1.4 ñ'))))
+    const big = new Uint8Array(100_000).fill(65)
+    expect(await fileToBase64(new Blob([big]))).toBe(btoa('A'.repeat(100_000)))
+  })
+
+  it('simulada: el repo con documento lo muestra en la revisión y la IA devuelve un TOML válido', () => {
+    expect(precheck('https://github.com/equipo/bot-soporte', 'main')).toMatchObject({ documents: ['docs/Requerimientos.pdf'], can_import: true })
+    expect(precheck('https://github.com/equipo/api-pagos', 'main')!.documents).toEqual([])
+    const r = importDocument({ url: 'https://github.com/equipo/bot-soporte', branch: 'main', path: 'docs/Requerimientos.pdf' })
+    if (typeof r === 'string') throw new Error(r)
+    expect(r.validation).toMatchObject({ valid: true, project: 'equipo/bot-soporte' })
+    expect(r.validation.rules.map((x) => x.id)).toEqual(['RN-001', 'RN-002', 'RN-003'])
+    expect(r.content).toContain('# Fuente: pág. 3 · §2.1\n[[regla]]')
+    expect(r.doubts.length).toBeGreaterThan(0)
+    expect(importDocument({ filename: 'virus.exe', data: '' })).toContain('Usa un PDF')
+    expect(r.contradictions).toEqual([])
+  })
+
+  it('simulada: un documento que se contradice marca el par y no es válido hasta dejar una regla', () => {
+    const r = importDocument({ filename: 'Requisitos.pdf', data: '' })
+    if (typeof r === 'string') throw new Error(r)
+    expect(r.count).toBe(4)
+    expect(r.contradictions).toEqual([expect.stringMatching(/^RN-002 \(pág\. 4 · §2\.3\) y RN-004 \(pág\. 7 · §5\.2\): /)])
+    expect(r.content.match(/# CONTRADICCIÓN RN-002 RN-004: /g)).toHaveLength(2)
+    expect(r.validation.valid).toBe(false)
+    expect(r.validation.error).toMatch(/RN-002 y RN-004 se contradicen según el documento/)
+    // Se deja la de 1 hora: ya es válido
+    const sinRN004 = r.content.split('\n\n# Fuente: pág. 7')[0] + '\n'
+    expect(validate(sinRN004)).toMatchObject({ valid: true })
+    // O se decide que no se contradicen y se borra el comentario
+    expect(validate(r.content.replace(/^# CONTRADICCIÓN.*\n/gm, ''))).toMatchObject({ valid: true })
   })
 })

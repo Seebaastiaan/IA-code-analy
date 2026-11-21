@@ -8,13 +8,19 @@ el suyo no es válido. No hay reglas generales.
 
 `POST /api/reglas/revisar` revisa las reglas al cargar el repo (Nuevo análisis), antes de clonar: lee el archivo
 con la API de GitHub y lo valida con el mismo parser.
+
+`POST /api/reglas/importar` saca las reglas de un documento de requisitos (PDF, Word, Markdown) con Gemini
+(app.projects.reglas_importar) y devuelve el `reglas_negocio.toml` para revisarlo en el editor; no guarda nada.
 """
 
+import asyncio
+import base64
+import binascii
 from collections.abc import Awaitable, Callable
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 
 from app.analyses import reglas
@@ -22,9 +28,12 @@ from app.analyses.access import Analyses, UserId, require_repo
 from app.analyses.reglas_store import RulesStore
 from app.analyses.workspace import Workspace
 from app.analysis.router import BRANCH, REPO_URL, Config, Db
+from app.assistant.llm import LLM, LlmError
+from app.assistant.router import get_llm
 from app.errors import ApiError
 from app.github.client import GithubAuthError, GithubError
 from app.github.deps import Client, Store
+from app.projects import reglas_importar as importar
 from app.teams.store import team_id_of
 
 router = APIRouter(tags=["reglas de negocio"])
@@ -75,6 +84,9 @@ class ProjectRules(BaseModel):
     cloned: bool
     # Commit del último análisis (la versión del repo que se leyó)
     commit: str | None
+    # Documentos de requisitos de la copia del repo (se pueden importar) y si hay IA para importarlos
+    documents: list[str] = Field(default_factory=list)
+    can_import: bool = False
 
 
 def validate(text: str, files: list[str] | None = None, project: str = "") -> Validation:
@@ -104,6 +116,13 @@ def _files(ws: Workspace) -> list[str] | None:
     return ws.list_files([]) if ws.exists() else None
 
 
+def _documents(ws: Workspace, files: list[str] | None) -> list[str]:
+    """Documentos de requisitos de la copia del repo (los de `docs/` primero)."""
+    if not files:
+        return []
+    return importar.find_documents({f: (ws.root / f).stat().st_size for f in files if f.lower().endswith(importar.EXTENSIONS)})
+
+
 def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRules:
     ws = Workspace(settings, repo_id)
     files = _files(ws)
@@ -124,6 +143,7 @@ def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRu
     return ProjectRules(
         active=_active(repo_file, uploaded),
         repo=repo_file, uploaded=uploaded, cloned=ws.exists(), commit=latest["commit_sha"] if latest else None,
+        documents=_documents(ws, files), can_import=bool(settings.gemini_api_key),
     )
 
 
@@ -195,6 +215,9 @@ class Precheck(BaseModel):
     template: str
     # Validación de `content`, si se mandó
     checked: Validation | None = None
+    # Documentos de requisitos del árbol (PDF, Word, Markdown) y si hay IA para importarlos
+    documents: list[str] = Field(default_factory=list)
+    can_import: bool = False
 
 
 async def _github[T](call: Callable[[str | None], Awaitable[T]], token: str | None) -> T:
@@ -215,11 +238,15 @@ def _unavailable(exc: Exception) -> str:
     return "No se pudo consultar GitHub: las reglas se revisan al analizar."
 
 
-async def _repo_file(client: Client, token: str | None, name: str, branch: str) -> tuple[RepoRulesFile | None, list[str] | None, list[str]]:
-    """(archivo de reglas del repo, archivos para revisar `rutas`, todos los archivos). Lanza si GitHub falla."""
+async def _repo_file(client: Client, token: str | None, name: str, branch: str) -> tuple[RepoRulesFile | None, list[str] | None, list[str], list[str]]:
+    """
+    (archivo de reglas del repo, archivos para revisar `rutas`, todos los archivos, documentos de requisitos).
+    Lanza si GitHub falla.
+    """
     tree = await _github(lambda t: client.get_tree(t, name, branch), token)
     blobs = {e["path"]: e for e in tree.get("tree", []) if e.get("type") == "blob"}
     files = list(blobs)
+    documents = importar.find_documents({p: int(e.get("size") or 0) for p, e in blobs.items()})
     # Árbol truncado (repos enormes): las rutas no se pueden revisar con certeza
     check_files = None if tree.get("truncated") else files
     for path in reglas.LOCATIONS:
@@ -227,18 +254,18 @@ async def _repo_file(client: Client, token: str | None, name: str, branch: str) 
         if entry is None:
             continue
         if entry.get("size", 0) > reglas.MAX_BYTES:
-            return RepoRulesFile(valid=False, error=f"{path} es demasiado grande (máx. {reglas.MAX_BYTES // 1024} KB)", path=path, content=""), check_files, files
+            return RepoRulesFile(valid=False, error=f"{path} es demasiado grande (máx. {reglas.MAX_BYTES // 1024} KB)", path=path, content=""), check_files, files, documents
         raw = await _github(lambda t, p=path: client.get_file(t, name, p, branch), token)
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            return RepoRulesFile(valid=False, error=f"{path} no está en UTF-8", path=path, content=""), check_files, files
-        return RepoRulesFile(**validate(text, check_files, name).model_dump(), path=path, content=text), check_files, files
-    return None, check_files, files
+            return RepoRulesFile(valid=False, error=f"{path} no está en UTF-8", path=path, content=""), check_files, files, documents
+        return RepoRulesFile(**validate(text, check_files, name).model_dump(), path=path, content=text), check_files, files, documents
+    return None, check_files, files, documents
 
 
 @router.post("/api/reglas/revisar", response_model=Precheck)
-async def precheck(body: PrecheckRequest, user_id: UserId, conn: Db, client: Client, accounts: Store) -> Precheck:
+async def precheck(body: PrecheckRequest, user_id: UserId, conn: Db, client: Client, accounts: Store, settings: Config) -> Precheck:
     """
     Reglas de negocio de un repo antes de analizarlo: lee su reglas_negocio.toml con la API de GitHub (sin clonar)
     y lo valida. Si el repo ya es un proyecto del equipo, también dice qué reglas tiene cargadas en la app.
@@ -258,8 +285,9 @@ async def precheck(body: PrecheckRequest, user_id: UserId, conn: Db, client: Cli
     repo_file: RepoRulesFile | None = None
     check_files: list[str] | None = None
     files: list[str] = []
+    documents: list[str] = []
     try:
-        repo_file, check_files, files = await _repo_file(client, token, name, branch)
+        repo_file, check_files, files, documents = await _repo_file(client, token, name, branch)
         status = "missing" if repo_file is None else "valid" if repo_file.valid else "invalid"
     except (GithubAuthError, GithubError, httpx.HTTPError) as exc:
         status, message = "unavailable", _unavailable(exc)
@@ -274,4 +302,122 @@ async def precheck(body: PrecheckRequest, user_id: UserId, conn: Db, client: Cli
         repo=name, status=status, message=message, file=repo_file, project_id=project["id"] if project else None, uploaded=uploaded,
         active=_active(repo_file, uploaded), template=reglas.template_for(name, files),
         checked=validate(body.content, check_files, name) if body.content is not None else None,
+        documents=documents, can_import=bool(settings.gemini_api_key),
+    )
+
+
+# ───────────────────────── Importar desde un documento de requisitos ─────────────────────────
+
+
+# 10 MB en base64, con margen
+MAX_BASE64 = importar.MAX_DOC_BYTES * 4 // 3 + 1024
+
+
+class ImportRequest(BaseModel):
+    """
+    Una de tres fuentes: el repo en GitHub (`url` + `branch` + `path`, Nuevo análisis), la copia de un proyecto
+    (`project_id` + `path`, Configuración) o un archivo subido (`filename` + `data`; `project_id` opcional da el nombre).
+    """
+
+    url: str | None = Field(default=None, max_length=300)
+    branch: str = Field(default="main", max_length=200)
+    project_id: str | None = Field(default=None, max_length=100)
+    path: str | None = Field(default=None, max_length=500)
+    filename: str | None = Field(default=None, max_length=255)
+    # Contenido del archivo subido, en base64
+    data: str | None = Field(default=None, max_length=MAX_BASE64)
+
+
+class ImportedRules(BaseModel):
+    # reglas_negocio.toml para revisar en el editor (no se guarda)
+    content: str
+    count: int
+    # Ambigüedades del documento que encontró la IA
+    doubts: list[str]
+    # Reglas que el documento contradice («RN-004 (§4.2) y RN-009 (§7.1): …»). Van marcadas en `content` con
+    # `# CONTRADICCIÓN` y el archivo no es válido hasta que el equipo deje una de cada par
+    contradictions: list[str] = Field(default_factory=list)
+    source: str
+    validation: Validation
+    model: str
+
+
+def _repo_name(url: str | None) -> str | None:
+    m = REPO_URL.match((url or "").strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+async def _document(body: ImportRequest, user_id: str, client: Client, accounts: Store, store: Analyses, settings) -> tuple[str, str, bytes]:
+    """(nombre del proyecto, nombre del documento, contenido). DocumentError o ApiError si no se puede leer."""
+    if body.data is not None:
+        if not body.filename:
+            raise ApiError(422, "invalid_request", "Falta el nombre del archivo")
+        importar.kind_of(body.filename)
+        if len(body.data) > MAX_BASE64:
+            raise importar.DocumentError("file_too_large", f"El documento pesa más de {importar.MAX_DOC_BYTES // (1024 * 1024)} MB")
+        try:
+            data = base64.b64decode(body.data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ApiError(422, "invalid_document", "El archivo no llegó completo; vuelve a subirlo") from exc
+        project = require_repo(store, user_id, body.project_id)["name"] if body.project_id else _repo_name(body.url) or "Mi proyecto"
+        return project, body.filename, data
+    if not body.path:
+        raise ApiError(422, "invalid_request", "Indica el documento: su ruta en el repositorio o un archivo subido")
+    importar.kind_of(body.path)
+    if body.project_id:
+        repo = require_repo(store, user_id, body.project_id)
+        full = Workspace(settings, repo["id"]).resolve(body.path)
+        if not full.is_file():
+            raise ApiError(404, "not_found", f"No existe {body.path} en la copia del repositorio")
+        if full.stat().st_size > importar.MAX_DOC_BYTES:
+            raise importar.DocumentError("file_too_large", f"El documento pesa más de {importar.MAX_DOC_BYTES // (1024 * 1024)} MB")
+        return repo["name"], body.path, full.read_bytes()
+    name = _repo_name(body.url)
+    if not name:
+        raise ApiError(422, "invalid_url", "Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)")
+    branch = body.branch.strip() or "main"
+    if not BRANCH.match(branch):
+        raise ApiError(422, "invalid_branch", "El nombre de la rama no es válido")
+    account = accounts.get(user_id)
+    try:
+        data = await _github(lambda t: client.get_file(t, name, body.path, branch), account.token if account else None)
+    except GithubError as exc:
+        if exc.status == 404:
+            raise ApiError(404, "not_found", f"No se encontró {body.path} en {name} ({branch})") from exc
+        raise ApiError(502, "github_unavailable", "No se pudo leer el documento de GitHub; intenta de nuevo") from exc
+    except (GithubAuthError, httpx.HTTPError) as exc:
+        raise ApiError(502, "github_unavailable", "No se pudo leer el documento de GitHub; intenta de nuevo") from exc
+    return name, body.path, data
+
+
+LLM_ERRORS = {
+    "quota": ("llm_rate_limited", "La IA alcanzó su límite de uso. Intenta de nuevo en un minuto."),
+    "busy": ("llm_busy", "Los modelos de IA están saturados en este momento. Intenta de nuevo en unos segundos."),
+}
+DOCUMENT_STATUS = {"unsupported_type": 415, "file_too_large": 413}
+
+
+@router.post("/api/reglas/importar", response_model=ImportedRules)
+async def import_document(
+    body: ImportRequest, user_id: UserId, client: Client, accounts: Store, store: Analyses, settings: Config,
+    llm: Annotated[LLM, Depends(get_llm)],
+) -> ImportedRules:
+    """
+    Reglas de negocio desde un documento de requisitos: Gemini las propone y aquí se arma y valida el
+    reglas_negocio.toml. No guarda nada: el usuario lo revisa en el editor y lo usa o lo descarga como siempre.
+    """
+    try:
+        project, source, data = await _document(body, user_id, client, accounts, store, settings)
+        result = await asyncio.to_thread(importar.extract, llm, project, source, data)
+    except importar.DocumentError as exc:
+        raise ApiError(DOCUMENT_STATUS.get(exc.code, 422), exc.code, str(exc)) from exc
+    except LlmError as exc:
+        code, message = LLM_ERRORS.get(exc.kind or "", ("llm_unavailable", f"La IA no pudo leer el documento: {exc}"))
+        raise ApiError(503, code, message) from exc
+    if not result.count:
+        detail = f" {result.doubts[0]}" if result.doubts else ""
+        raise ApiError(422, "no_rules_found", f"No se encontraron reglas de negocio en {source}.{detail}")
+    return ImportedRules(
+        content=result.content, count=result.count, doubts=result.doubts, contradictions=result.contradictions, source=source,
+        validation=validate(result.content, None, project), model=result.model,
     )

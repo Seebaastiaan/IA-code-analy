@@ -52,7 +52,7 @@ En el frontend, `frontend/.env.development` con `VITE_USE_MOCKS=false`: Vite red
 | `JOB_STEP_SECONDS` | Pausa de los pasos que no esperan al sandbox en la terminal del frontend (por defecto 0.9 s). |
 | `SANDBOX` | Dónde corren pytest, coverage y pip-audit: `off` (simulados, por defecto en código), `wsl` o `docker`. Ver [Sandbox](#sandbox). |
 | `SANDBOX_WSL_DISTRO` / `SANDBOX_DOCKER_IMAGE` / `SANDBOX_TIMEOUT_S` | Opcionales. Por defecto `Ubuntu-24.04`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` y 1200 s por análisis. |
-| `GEMINI_API_KEY` | Asistente IA (respuestas y embeddings): https://aistudio.google.com/apikey. Sin ella el asistente responde `503 llm_not_configured`. |
+| `GEMINI_API_KEY` | Asistente IA (respuestas y embeddings) e importar reglas desde un documento: https://aistudio.google.com/apikey. Sin ella el asistente y la importación responden `503 llm_not_configured`. |
 | `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Opcionales. Por defecto `gemini-3.5-flash-lite` y, si responde 429/503, `gemini-3.5-flash,gemini-3.1-flash-lite`. |
 | `GROQ_API_KEY` | Opcional. Último respaldo (Llama 3.3), independiente de Google: https://console.groq.com/keys |
 | `CLONES_PATH` | Carpeta de los repos clonados (por defecto `%LOCALAPPDATA%\ia-voy\repos`). No uses una carpeta de OneDrive/Dropbox. |
@@ -145,7 +145,19 @@ usuario y, si GitHub lo rechaza, sin él), y lo valida con el mismo parser y con
 reglas cargadas en la app si el repo ya es proyecto, cuáles usará el análisis (`active`) y una plantilla con el
 nombre y carpetas del repo. Con `content` valida ese texto en vez del archivo (editor del formulario). Las reglas
 corregidas en el formulario viajan en `POST /api/analyze` como `rules`: se validan (`422 invalid_rules`) y se
-guardan como reglas cargadas en la app del proyecto.
+guardan como reglas cargadas en la app del proyecto. La respuesta trae además `documents` (documentos de requisitos
+del árbol: PDF, `.docx`, `.md` o `.txt` con nombre de requisitos, los de `docs/` primero) y `can_import` (hay
+`GEMINI_API_KEY`); `GET /api/projects/{id}/reglas` trae lo mismo para la copia del proyecto.
+
+**Importar reglas desde un documento** ([app/projects/reglas_importar.py](app/projects/reglas_importar.py),
+[plan](../docs/PLAN_IMPORTAR_REGLAS_DOCUMENTO.md)): `POST /api/reglas/importar` con `{url, branch, path}` (documento
+del repo en GitHub), `{project_id, path}` (copia del proyecto) o `{filename, data}` (archivo subido en base64; máx.
+10 MB). Gemini lee el PDF tal cual (`inlineData`), el `.docx` como texto (`zipfile`, sin dependencias) y el `.md`/`.txt`
+como texto, y responde JSON con esquema; el backend numera las reglas (`RN-001`…), pone la fuente como comentario
+y valida el TOML. Responde `{content, count, doubts, source, validation, model}` y **no guarda nada**: el usuario lo
+revisa en el editor. Errores: `415 unsupported_type`, `413 file_too_large`, `422 invalid_document` / `no_rules_found`,
+`503 llm_not_configured` / `llm_rate_limited` / `llm_busy` / `llm_unavailable`. El `demo_repo` trae
+[docs/Requerimientos.md](seed_data/demo_repo/docs/Requerimientos.md) para probarlo.
 
 ### Sandbox
 
