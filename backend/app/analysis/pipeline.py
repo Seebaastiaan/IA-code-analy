@@ -6,8 +6,9 @@ Pasos 2-11 del análisis sobre el clon:
   (app.analysis.sandbox) cuando `SANDBOX` es `wsl` o `docker`. Con `SANDBOX=off`, o si el sandbox no está
   disponible, se SIMULAN: sus números salen de la semilla del job (el mismo reporte siempre se ve igual)
   y sus hallazgos dicen "(simulado)" para no confundirse con resultados reales.
-- Reglas de negocio (`reglas_negocio.toml`, app.analyses.reglas): nivel patrón, en el backend. Sus resultados
-  van aparte de los hallazgos y todavía no entran al score (docs/adr/ADR-003-reglas-de-negocio.md).
+- Reglas de negocio (`reglas_negocio.toml`, app.analyses.reglas): el nivel patrón en el backend y el nivel
+  pruebas con pytest en el sandbox (plugin ia_voy_reglas). Sus resultados van aparte de los hallazgos y todavía
+  no entran al score (docs/adr/ADR-003-reglas-de-negocio.md).
 """
 
 import logging
@@ -19,6 +20,7 @@ from app.analyses import reglas
 from app.analyses.analyzers import complexity, is_test_path, static_findings_dir
 from app.analyses.config_file import FILENAME, ConfigError, from_toml
 from app.analyses.models import ComplexityInput, CoverageInput, FindingInput, ReportInput
+from app.analyses.reglas_store import RulesStore
 from app.analyses.scoring import category_scores, effective_coverage, global_score
 from app.analyses.store import AnalysisStore, ProjectConfig
 from app.analyses.workspace import Workspace, is_excluded
@@ -142,13 +144,14 @@ def analyze_static(settings: Settings, repo_id: str, analyzers: list[str] | tupl
         store = AnalysisStore(conn)
         import_repo_config(store, ws, repo_id)
         cfg = store.config(repo_id)
+        uploaded = RulesStore(conn).uploaded_text(repo_id)
     files = ws.list_files(cfg.excluded)
     py = [f for f in files if f.endswith(".py")]
     findings = static_findings_dir(ws.root, files, ruff_on="ruff" in analyzers, bandit_on="bandit" in analyzers)
     lines = sum(len(lines) for f in py if (lines := ws.read_lines(f)))
     return StaticResult(
         files=files, py=py, findings=findings, complexity=complexity(ws.root, py) if "radon" in analyzers else [], cfg=cfg, code_lines=lines,
-        rules=reglas.run(ws.root, files, ws.read_lines),
+        rules=reglas.run(ws.root, files, ws.read_lines, uploaded),
     )
 
 
@@ -179,8 +182,12 @@ def audit_findings(ws: Workspace, files: list[str], out: SandboxOutput) -> list[
     findings = []
     for v in parse_audit(out.audit):
         fix = f"Actualizar a {v.package} {v.fix_versions[0]} o superior" if v.fix_versions else "No hay versión corregida publicada: evalúa reemplazar el paquete"
+        line = _package_line(lines, v.package)
+        # La versión se cambia sola en un requirements*.txt donde aparece el paquete; en otro archivo la propone la IA
+        pinned = bool(lines) and 1 <= line <= len(lines) and _normalize(v.package) in _normalize(lines[line - 1])
+        kind = ("auto" if pinned and deps.endswith(".txt") else "ia") if v.fix_versions else None
         findings.append(FindingInput(
-            sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=_package_line(lines, v.package),
+            sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=line, fix=kind is not None, fix_kind=kind,
             msg=f"{v.package} {v.version} tiene {len(v.ids)} vulnerabilidad(es) conocida(s): {', '.join(v.ids[:5])}",
             why=v.description[:400] or "La versión instalada tiene avisos de seguridad publicados.",
             rec=f"{fix} y volver a correr las pruebas.",
@@ -269,6 +276,14 @@ def build(
     else:
         coverage, cov_total, failed, passed, test_findings = simulated_tests(static.py, random.Random(seed), cat["test"], cfg.thresholds["cov"])
         simulated = True
+    # Nivel pruebas de las reglas de negocio: solo cuenta si pytest corrió de verdad en el sandbox
+    if "pytest" not in analyzers:
+        not_run = "no se eligió pytest en este análisis"
+    elif simulated:
+        not_run = "sin sandbox las pruebas no se ejecutan (SANDBOX=wsl o docker)"
+    else:
+        not_run = None
+    rules = reglas.with_tests(static.rules, out.reglas if out is not None else None, not_run)
     if "pytest" not in analyzers:
         failed, passed = 0, 0
         test_findings = [f for f in test_findings if f.tool != "pytest"]
@@ -284,7 +299,7 @@ def build(
     )
     ignored = set(cfg.ignored)
     cats = category_scores(((f.cat, f.sev) for f in findings if f.rule not in ignored), effective_coverage(cov_total, analyzers), failed, static.code_lines)
-    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, cats), simulated=simulated, vulnerable=len(vulns), rules=static.rules)
+    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, cats), simulated=simulated, vulnerable=len(vulns), rules=rules)
 
 
 def run(settings: Settings, repo_id: str, branch: str, commit: str | None, seed: int, cat: dict) -> PipelineResult:

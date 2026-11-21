@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router'
-import { FindingDrawer, useFindingParam } from '@/features/findings'
+import { FindingDrawer, isAiFix, useFindingParam } from '@/features/findings'
 import { useReport } from '@/features/report/api/report.api'
 import { useRepoTree } from '@/features/repos'
 import { SEV } from '@/shared/constants/severities'
@@ -138,8 +138,8 @@ export default function EditorPage() {
                       ) : (
                         f.fix && (
                           <Button className="px-2 py-1 text-xs rounded-md" onClick={() => applyFix.mutate([f])} disabled={applyFix.isPending}>
-                            <Icon name="wand" className="w-3 h-3" />
-                            Aplicar fix
+                            <Icon name={isAiFix(f) ? 'sparkle' : 'wand'} className="w-3 h-3" />
+                            {isAiFix(f) ? 'Fix con IA' : 'Aplicar fix'}
                           </Button>
                         )
                       )}

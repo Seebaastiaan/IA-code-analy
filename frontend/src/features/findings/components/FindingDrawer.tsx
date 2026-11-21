@@ -4,7 +4,7 @@ import { SEV } from '@/shared/constants/severities'
 import { paths } from '@/shared/constants/paths'
 import { Button, CategoryChip, Chip, CodeSnippet, Drawer, Icon, SeverityBadge, Spinner, buttonClass } from '@/shared/ui'
 import { useIgnoreRule } from '../hooks/useIgnoreRule'
-import type { Finding } from '../types'
+import { isAiFix, type Finding } from '../types'
 
 interface FindingDrawerProps {
   finding: Finding
@@ -68,10 +68,13 @@ export function FindingDrawer({ finding: f, repoId, onClose, pending }: FindingD
 
       <div className="p-4 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-2">
         {f.fix && !done && !pending && (
-          <Button className="col-span-2" onClick={() => applyFix.mutate([f])} disabled={applyFix.isPending}>
-            {applyFix.isPending ? <Spinner /> : <Icon name="wand" className="w-4 h-4" />}
-            Aplicar corrección automática
-          </Button>
+          <>
+            <Button className="col-span-2" onClick={() => applyFix.mutate([f])} disabled={applyFix.isPending}>
+              {applyFix.isPending ? <Spinner /> : <Icon name={isAiFix(f) ? 'sparkle' : 'wand'} className="w-4 h-4" />}
+              {isAiFix(f) ? 'Corregir con IA' : 'Aplicar corrección automática'}
+            </Button>
+            {isAiFix(f) && <p className="col-span-2 -mt-1 text-xs text-slate-500 text-center">La IA propone el cambio; revisa el diff en el editor antes de guardar.</p>}
+          </>
         )}
         <Link to={paths.editor(repoId, { file: f.file, line: f.line })} onClick={onClose} className={buttonClass('secondary')}>
           <Icon name="code" className="w-4 h-4" />

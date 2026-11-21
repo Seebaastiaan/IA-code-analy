@@ -146,10 +146,14 @@ def test_hallazgo_mencionado_lleva_su_codigo(client, repo_id, llm):
 
 def test_accion_solo_para_hallazgos_con_correccion(client, repo_id, llm):
     report = client.get("/api/report/latest", params={"repo": repo_id}).json()
-    fixable = next(f for f in report["findings"] if f["fix"])
+    auto = next(f for f in report["findings"] if f["fix_kind"] == "auto")
+    ia = next(f for f in report["findings"] if f["fix_kind"] == "ia")
+    # La cobertura baja no se corrige con un parche
     manual = next(f for f in report["findings"] if not f["fix"])
-    llm.reply = {"answer": "Aplica la corrección.", "sources": [], "finding_id": fixable["id"]}
-    assert ask(client, repo_id, "¿Cómo lo arreglo?").json()["action"] == {"finding_id": fixable["id"], "label": "Aplicar corrección automática"}
+    llm.reply = {"answer": "Aplica la corrección.", "sources": [], "finding_id": auto["id"]}
+    assert ask(client, repo_id, "¿Cómo lo arreglo?").json()["action"] == {"finding_id": auto["id"], "label": "Aplicar corrección automática"}
+    llm.reply = {"answer": "Lee la clave del entorno.", "sources": [], "finding_id": ia["id"]}
+    assert ask(client, repo_id, "¿Y la clave?").json()["action"] == {"finding_id": ia["id"], "label": "Corregir con IA"}
     llm.reply = {"answer": "Corrígelo a mano.", "sources": [], "finding_id": manual["id"]}
     assert ask(client, repo_id, "¿Y este?").json()["action"] is None
 

@@ -1,6 +1,6 @@
-import type { Finding } from '@/features/findings'
+import { isAiFix, type Finding } from '@/features/findings'
 import { GRADE } from '@/shared/constants/grades'
-import { Card, CategoryChip, Chip, EmptyState, Icon, Input, SegmentedControl, Select, SeverityBadge } from '@/shared/ui'
+import { Button, Card, CategoryChip, Chip, EmptyState, Icon, Input, SegmentedControl, Select, SeverityBadge, Spinner } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import type { CatFilter, SevFilter } from '../hooks/useReportFilters'
 import type { Report } from '../types'
@@ -27,13 +27,18 @@ interface FindingsTabProps {
   onChange: (patch: { q?: string; sev?: SevFilter; cat?: CatFilter }) => void
   onClear: () => void
   onOpen: (id: number) => void
+  /** Corrige de golpe los hallazgos visibles que tienen corrección */
+  onFixAll?: (findings: Finding[]) => void
+  fixing?: boolean
 }
 
-export function FindingsTab({ findings, q, sev, cat, onChange, onClear, onOpen }: FindingsTabProps) {
+export function FindingsTab({ findings, q, sev, cat, onChange, onClear, onOpen, onFixAll, fixing = false }: FindingsTabProps) {
   const s = q.toLowerCase()
   const list = findings.filter(
     (f) => (sev === 'todas' || f.sev === sev) && (cat === 'todas' || f.cat === cat) && (!s || `${f.msg} ${f.file} ${f.rule} ${f.tool}`.toLowerCase().includes(s)),
   )
+  const fixable = list.filter((f) => f.fix && f.status === 'open')
+  const aiFiles = new Set(fixable.filter(isAiFix).map((f) => f.file)).size
 
   return (
     <Card className="mt-4 overflow-hidden">
@@ -55,8 +60,20 @@ export function FindingsTab({ findings, q, sev, cat, onChange, onClear, onOpen }
           </Select>
         </div>
       </div>
-      <div className="px-5 py-2 text-xs text-slate-400 bg-slate-50/60 dark:bg-slate-950/40 border-b border-slate-100 dark:border-slate-800">
-        {list.length} resultados · haz clic en un hallazgo para ver el detalle
+      <div className="px-5 py-2 text-xs text-slate-400 bg-slate-50/60 dark:bg-slate-950/40 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-2">
+        <span>{list.length} resultados · haz clic en un hallazgo para ver el detalle</span>
+        {onFixAll && fixable.length > 0 && (
+          <Button
+            variant="ghost"
+            className="ml-auto px-2 py-1 text-xs text-brand-600 dark:text-brand-300"
+            onClick={() => onFixAll(fixable)}
+            disabled={fixing}
+            title={aiFiles ? `${aiFiles} archivo(s) se corrigen con IA: puede tardar` : undefined}
+          >
+            {fixing ? <Spinner /> : <Icon name="wand" className="w-3.5 h-3.5" />}
+            {fixing ? 'Corrigiendo…' : `Corregir todo (${fixable.length})`}
+          </Button>
+        )}
       </div>
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {!list.length ? (
@@ -92,8 +109,8 @@ export function FindingsTab({ findings, q, sev, cat, onChange, onClear, onOpen }
                   ) : (
                     f.fix && (
                       <Chip tone="brand">
-                        <Icon name="wand" className="w-3 h-3" />
-                        Fix
+                        <Icon name={isAiFix(f) ? 'sparkle' : 'wand'} className="w-3 h-3" />
+                        {isAiFix(f) ? 'Fix IA' : 'Fix'}
                       </Chip>
                     )
                   )}

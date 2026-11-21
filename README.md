@@ -25,10 +25,11 @@ Demostrar la mejora real entre dos análisis (hallazgos nuevos y resueltos), que
 - Análisis completo en 10 pasos: pytest y coverage en el sandbox (simulados sin él), Ruff y Radon en el backend; se eligen los analizadores
 - Score ponderado por categoría (pesos de Configuración / `.ia_voy.toml`) en Repositorios y en el tablero, con tendencia y hallazgos prioritarios
 - Reporte navegable: hallazgos con su código, cobertura y complejidad; ignorar una regla recalcula el score
-- Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones automáticas
+- Asistente IA (RAG con Gemini) con respuestas en streaming y fuentes archivo:línea; editor Monaco con correcciones: las de Ruff y pip-audit automáticas, las demás (Bandit, pruebas que fallan…) propuestas por la IA, siempre con diff antes de guardar
+- Recomendaciones concretas por regla (qué cambiar y con qué código), sin mandar a leer la documentación
 - Compartir el reporte con un enlace público (contraseña y expiración opcionales) y exportarlo a JSON, HTML, Markdown o SARIF
 - Comparativa entre dos análisis (nuevos y resueltos) y respaldo del asistente (modelos de Gemini y Groq)
-- Reglas de negocio del proyecto (`reglas_negocio.toml`): paso 10 del análisis con verificación por patrones y API con la matriz regla → estado → evidencia ([ADR-003](docs/adr/ADR-003-reglas-de-negocio.md)); aún no cuentan en el score
+- Reglas de negocio del proyecto (`reglas_negocio.toml`, [ADR-003](docs/adr/ADR-003-reglas-de-negocio.md)): paso 10 del análisis con patrones y con las pruebas marcadas `@pytest.mark.regla("RN-###")` (o `test_rn###_…`), que pytest corre en el sandbox con el plugin `ia_voy_reglas`; vista **Reglas** en el reporte (regla → estado → evidencia) y pestaña **Configuración → Reglas de negocio** (plantilla, validar, cargar en la app, descargar para el repo); aún no cuentan en el score
 
 Llega en los siguientes sprints:
 
@@ -57,8 +58,8 @@ Llega en los siguientes sprints:
 cd backend
 uv sync --extra dev
 cp .env.example .env       # llenar GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (ver backend/README.md)
-uv run uvicorn app.main:app --reload --port 8000
-uv run pytest              # 226 pruebas
+uv run uvicorn app.main:app --reload --reload-dir app --port 8000
+uv run pytest
 uv run python -m app.seed --login <tu-usuario-de-github>   # datos de demostración (después de entrar una vez)
 
 # Frontend (http://localhost:5173; /api y /ws van al backend)
@@ -66,7 +67,7 @@ cd frontend
 npm install
 npm run dev
 npm run build
-npm test                   # 22 pruebas unitarias
+npm test                   # 28 pruebas unitarias
 npm run test:e2e           # pruebas e2e con Playwright (backend simulado)
 ```
 
@@ -82,7 +83,7 @@ para usar el backend simulado (MSW) con la cuenta de prueba.
 |---|---|
 | [backend/](backend) | API FastAPI + SQLite (detalle en [backend/README.md](backend/README.md)) |
 | [frontend/](frontend) | React 19 + Vite + Tailwind, por módulos (`app → features → shared`) |
-| [docs/](docs) | Especificación y estructura del frontend, ADRs y documentación técnica |
+| [docs/](docs) | Especificación y estructura del frontend, ADRs y documentación técnica; [repos de prueba](docs/repos-de-prueba.md) |
 | [ia_voy_prototipo.html](ia_voy_prototipo.html) | Wireframes navegables originales |
 
 ## Equipos

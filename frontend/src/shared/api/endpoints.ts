@@ -25,6 +25,8 @@ export const EP = {
     get: (id: string) => `/api/report/${id}`,
     share: (id: string) => `/api/report/${id}/share`,
     export: (id: string) => `/api/report/${id}/export`,
+    /** Matriz regla → estado → evidencia de un análisis (id puede ser 'latest' con ?repo=) */
+    rules: (id: string) => `/api/report/${id}/reglas`,
   },
   file: '/api/file',
   fix: '/api/fix',
@@ -32,6 +34,17 @@ export const EP = {
   chatStream: '/api/chat/stream',
   diff: '/api/diff',
   config: (projectId: string) => `/api/projects/${projectId}/config`,
+  /** Reglas de negocio: origen y carga desde Configuración (docs/adr/ADR-003) */
+  rules: {
+    project: (projectId: string) => `/api/projects/${projectId}/reglas`,
+    /** Las reglas son de cada proyecto: se validan contra su repositorio y la plantilla lleva su nombre */
+    validate: (projectId: string) => `/api/projects/${projectId}/reglas/validar`,
+    template: (projectId: string) => `/api/projects/${projectId}/reglas/plantilla`,
+    /** Revisa las reglas de un repo antes de analizarlo (Nuevo análisis), sin clonarlo */
+    precheck: '/api/reglas/revisar',
+    /** Saca las reglas de un documento de requisitos (PDF, Word, Markdown) con IA */
+    import: '/api/reglas/importar',
+  },
   github: {
     status: '/api/github/status',
     repos: '/api/github/repos',

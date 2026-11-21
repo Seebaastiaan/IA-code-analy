@@ -159,9 +159,14 @@ def test_correccion_automatica(client, repo_id):
 
 
 def test_correccion_no_disponible(client, repo_id):
-    f = finding(client, repo_id, rule="B602")
+    # La cobertura baja no se corrige con un parche
+    f = finding(client, repo_id, rule="COV")
     res = client.post("/api/fix", json={"repo_id": repo_id, "finding_ids": [f["id"]]})
     assert res.status_code == 422 and res.json()["error"]["code"] == "fix_unavailable"
+    # Bandit se corrige con IA: sin GEMINI_API_KEY lo dice (Ruff funciona sin ella)
+    f = finding(client, repo_id, rule="B602")
+    res = client.post("/api/fix", json={"repo_id": repo_id, "finding_ids": [f["id"]]})
+    assert res.status_code == 503 and res.json()["error"]["code"] == "llm_not_configured"
 
 
 def test_guardar_resuelve_y_respalda(client, repo_id, settings):

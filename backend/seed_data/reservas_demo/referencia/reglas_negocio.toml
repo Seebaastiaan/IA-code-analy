@@ -1,0 +1,132 @@
+# Reglas de negocio de referencia de reservas_demo (docs/PROPUESTA_REGLAS_VERIFICABLES.md §11.1 de IA voy).
+#
+# Es lo que el importador debería proponer a partir de docs/Requisitos.pdf, ya revisado por el equipo: con las 2
+# contradicciones del documento resueltas («Contradicción resuelta»), la regla repetida en §3.1 y §6.1 juntada en una
+# sola (RN-001) y las 3 dudas resueltas («Duda resuelta»). Está en referencia/ y no en la raíz a propósito: así el
+# repo NO tiene reglas_negocio.toml y la app ofrece "Sacar reglas del documento".
+#
+# Formato v1 (el actual). Las pruebas que verifican cada regla están en tests/reglas/.
+
+[proyecto]
+nombre  = "Reservas Sereno"
+version = "1.0"
+
+[[regla]]
+id          = "RN-001"
+titulo      = "Un profesional no tiene dos citas que se empalmen"
+descripcion = "No se agenda a un profesional en dos citas cuyo horario se empalme, aunque sea en parte. El documento lo dice dos veces (§3.1 y §6.1): es una sola regla."
+severidad   = "alta"
+historia    = "Requisitos.pdf §3.1 · §6.1"
+criterio    = "Dada una cita de 10:00 a 11:00 con un terapeuta, cuando otro cliente pide ese terapeuta a las 10:30, entonces se rechaza (409)"
+
+[[regla]]
+id          = "RN-002"
+titulo      = "Un cliente no tiene dos citas que se empalmen"
+descripcion = "Un cliente no puede tener dos citas confirmadas cuyo horario se empalme, aunque sean con profesionales distintos."
+severidad   = "media"
+historia    = "Requisitos.pdf §3.2"
+criterio    = "Dada una cita del cliente de 10:00 a 11:00, cuando reserva otra a las 10:30 con otro terapeuta, entonces se rechaza (409)"
+
+[[regla]]
+id          = "RN-003"
+titulo      = "Solo se reserva en horario de atención"
+descripcion = "Las citas se reservan de lunes a sábado entre 9:00 y 20:00, y la cita completa (inicio y fin) debe quedar dentro de ese horario."
+severidad   = "media"
+historia    = "Requisitos.pdf §3.3"
+criterio    = "Dado un masaje de 60 minutos, cuando se pide a las 19:30, entonces se rechaza porque termina a las 20:30"
+
+[[regla]]
+id          = "RN-004"
+titulo      = "Se reserva con al menos 2 horas de anticipación"
+descripcion = "No se aceptan citas que empiecen en menos de 2 horas a partir de ahora."
+severidad   = "media"
+historia    = "Requisitos.pdf §3.3"
+criterio    = "Dadas las 8:00, cuando se pide una cita a las 9:30, entonces se rechaza; a las 10:00 se acepta"
+
+[[regla]]
+id          = "RN-005"
+titulo      = "Máximo 3 citas activas por cliente"
+descripcion = "Un cliente no puede tener más de 3 citas activas. Duda resuelta: activas = confirmadas y por venir; las canceladas y las que ya pasaron no cuentan."
+severidad   = "baja"
+historia    = "Requisitos.pdf §3.4"
+criterio    = "Dado un cliente con 3 citas futuras confirmadas, cuando reserva una cuarta, entonces se rechaza (409)"
+
+[[regla]]
+id          = "RN-006"
+titulo      = "El anticipo es el 30 % del precio"
+descripcion = "Al reservar se cobra un anticipo del 30 % del precio del servicio. Duda resuelta: en pesos con 2 decimales, redondeo a la mitad hacia arriba."
+severidad   = "alta"
+historia    = "Requisitos.pdf §4.1"
+criterio    = "Dado un masaje de $800, cuando se reserva, entonces el anticipo es $240.00"
+
+[[regla]]
+id          = "RN-007"
+titulo      = "Cancelar con 24 horas o más reembolsa todo el anticipo"
+descripcion = "Si el cliente cancela con al menos 24 horas de anticipación (24 h exactas cuentan), se le reembolsa el 100 % del anticipo, sin comisiones. Contradicción resuelta: §7.1 cobraba 50 % con menos de 48 h y §7.2 descontaba 10 % de comisión; el equipo se quedó con §4.2."
+severidad   = "alta"
+historia    = "Requisitos.pdf §4.2 (contra §7.1 y §7.2)"
+criterio    = "Dada una cita el jueves a las 10:00, cuando se cancela el miércoles a las 10:00, entonces se reembolsan $240.00"
+
+[[regla]]
+id          = "RN-008"
+titulo      = "Cancelar con menos de 24 horas retiene el anticipo"
+descripcion = "Si el cliente cancela con menos de 24 horas de anticipación, el anticipo no se reembolsa. Una cita que ya empezó no se puede cancelar."
+severidad   = "alta"
+historia    = "Requisitos.pdf §4.3"
+criterio    = "Dada una cita el jueves a las 10:00, cuando se cancela el miércoles a las 11:00, entonces el reembolso es $0.00"
+
+[[regla]]
+id          = "RN-009"
+titulo      = "Los clientes premium cancelan sin cargo hasta 12 horas antes"
+descripcion = "Excepción a RN-007 y RN-008 para clientes premium: reembolso total si cancelan con más de 12 horas de anticipación. No es una contradicción: aplica a otro tipo de cliente."
+severidad   = "media"
+historia    = "Requisitos.pdf §4.4"
+criterio    = "Dado un cliente premium con cita el jueves a las 10:00, cuando cancela el miércoles a las 21:00, entonces se reembolsan $240.00"
+
+[[regla]]
+id          = "RN-010"
+titulo      = "Al reservar se envía un correo de confirmación"
+descripcion = "Cada cita confirmada envía un correo al cliente con el folio, el servicio, la fecha y la hora."
+severidad   = "media"
+historia    = "Requisitos.pdf §5.1"
+criterio    = "Dada una reserva de masaje el 03/12/2026 a las 10:00, cuando se confirma, entonces el cliente recibe un correo con su folio, «Masaje relajante» y esa fecha y hora"
+
+[[regla]]
+id          = "RN-011"
+titulo      = "Al cancelar se envía un correo con el reembolso"
+descripcion = "Cada cancelación envía un correo al cliente con el folio y el monto que se le reembolsa."
+severidad   = "media"
+historia    = "Requisitos.pdf §5.2"
+criterio    = "Dada una cancelación con 48 h de anticipación de un anticipo de $240, cuando se procesa, entonces el correo dice $240.00"
+
+[[regla]]
+id          = "RN-012"
+titulo      = "Recordatorio una sola vez el día anterior"
+descripcion = "El sistema envía un recordatorio por correo de cada cita confirmada una sola vez. Duda resuelta: «un día antes» = cuando faltan 24 horas o menos (la tarea corre cada hora)."
+severidad   = "baja"
+historia    = "Requisitos.pdf §5.3"
+criterio    = "Dada una cita el jueves a las 10:00, cuando la tarea corre el miércoles a las 11:00 y otra vez a las 12:00, entonces se envía un solo recordatorio"
+
+[[regla]]
+id          = "RN-013"
+titulo      = "Un cliente solo ve y cancela sus propias citas"
+descripcion = "Un cliente no puede ver, listar ni cancelar las citas de otro cliente; para él, las de otros no existen (404)."
+severidad   = "alta"
+historia    = "Requisitos.pdf §8.1"
+criterio    = "Dada una cita de Ana, cuando Beto la consulta por su id, entonces recibe 404"
+
+[[regla]]
+id          = "RN-014"
+titulo      = "La cuenta se bloquea 15 minutos tras 3 intentos fallidos"
+descripcion = "Después de 3 intentos fallidos de inicio de sesión seguidos, la cuenta queda bloqueada 15 minutos, aunque luego se use la contraseña correcta."
+severidad   = "alta"
+historia    = "Requisitos.pdf §8.2"
+criterio    = "Dados 3 intentos con contraseña incorrecta, cuando se intenta con la correcta, entonces se rechaza (423)"
+
+[[regla]]
+id          = "RN-015"
+titulo      = "Permisos separados por rol"
+descripcion = "Matriz del equipo: el cliente solo reserva y cancela para sí mismo; la recepción además reserva para cualquier cliente, ve la agenda de los profesionales y lanza los recordatorios; solo la administración da de alta servicios y profesionales, cambia precios, marca clientes premium y ve el reporte de anticipos."
+severidad   = "alta"
+historia    = "Requisitos.pdf §8.3"
+criterio    = "Dado un cliente, cuando intenta cambiar el precio de un servicio, entonces se rechaza (403)"

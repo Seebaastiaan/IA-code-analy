@@ -43,10 +43,17 @@ def report_scores(store: AnalysisStore, report: sqlite3.Row, cfg: ProjectConfig)
     return scores(report, visible(store.findings(report["id"]), cfg), cfg)
 
 
+def fix_kind(row: sqlite3.Row) -> str | None:
+    """auto | ia | None. Los reportes anteriores a las correcciones con IA solo tienen `fix` (de Ruff)."""
+    if not row["fix"]:
+        return None
+    return row["fix_kind"] or "auto"
+
+
 def finding_view(row: sqlite3.Row, with_code: bool = True) -> Finding:
     return Finding(
         id=row["id"], sev=row["sev"], cat=row["cat"], tool=row["tool"], rule=row["rule"], file=row["file"], line=row["line"],
-        msg=row["msg"], why=row["why"], rec=row["rec"], fix=bool(row["fix"]), status=row["status"],
+        msg=row["msg"], why=row["why"], rec=row["rec"], fix=bool(row["fix"]), fix_kind=fix_kind(row), status=row["status"],
         snippet=json.loads(row["snippet"]) if with_code and row["snippet"] else None,
     )
 

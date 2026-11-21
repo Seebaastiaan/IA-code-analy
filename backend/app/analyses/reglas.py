@@ -3,20 +3,28 @@ Reglas de negocio del proyecto analizado (docs/adr/ADR-003-reglas-de-negocio.md 
 docs/PROPUESTA_REGLAS_NEGOCIO.md).
 
 Cada proyecto declara sus reglas en `reglas_negocio.toml` (raíz del repo o `docs/`) y las liga a algo
-verificable. Este módulo lee y valida el archivo y verifica el nivel **patrón**: `prohibido` (regex que no debe
-aparecer) y `obligatorio` (regex que debe aparecer en cada archivo) sobre los `.py` de `rutas`. Como Bandit y
-Ruff, solo lee el código: no lo ejecuta. Las pruebas del proyecto no se revisan aquí: `prohibido` en una
-prueba es normal (la prueba lo usa para comprobar la regla).
+verificable. Si el repo no lo tiene, o el suyo no es válido, se usan las cargadas en la app (Configuración o
+Nuevo análisis); un archivo válido del repo siempre gana. Dos niveles, combinados en un estado por regla (`combine`):
 
-El nivel **pruebas** (`@pytest.mark.regla("RN-002")`, en el sandbox) llega en el Sprint 8: mientras tanto una
-regla sin patrón queda "sin verificar". Los resultados se guardan aparte de los hallazgos
-(app.analyses.reglas_store) y todavía no entran al score.
+- **Patrón** (`run`, en el backend): `prohibido` (regex que no debe aparecer) y `obligatorio` (regex que debe
+  aparecer en cada archivo) sobre los `.py` de `rutas`. Como Bandit y Ruff, solo lee el código. Las pruebas
+  no se revisan aquí: `prohibido` en una prueba es normal (la prueba lo usa para comprobar la regla).
+- **Pruebas** (`with_tests`): las pruebas marcadas `@pytest.mark.regla("RN-002")` o llamadas `test_rn002_…`.
+  En el sandbox las corre pytest con el plugin app.analysis.ia_voy_reglas; sin sandbox se encuentran leyendo
+  las pruebas (`declared_tests`, con `ast`) y la regla queda "sin verificar" con el motivo.
+
+Un `id` repetido invalida el archivo. Las reglas que se contradicen (una prohíbe lo que otra exige en las mismas
+rutas) o que parecen duplicadas (mismo patrón y rutas, o mismo título o descripción) solo dan avisos (`conflicts`), al
+validar y en el reporte; se siguen verificando todas.
+
+Los resultados se guardan aparte de los hallazgos (app.analyses.reglas_store) y todavía no entran al score.
 """
 
+import ast
 import re
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -36,8 +44,17 @@ MAX_PATTERN = 500
 MAX_EVIDENCE = 20
 # Líneas más largas que esto (código minificado, datos) no se revisan con los patrones
 MAX_LINE = 2000
+# Pruebas guardadas por regla y avisos por análisis
+MAX_TESTS = 20
+MAX_WARNINGS = 20
+# Archivos de prueba más grandes que esto no se leen buscando marcadores
+MAX_TEST_FILE = 1024 * 1024
 
 ID_RE = re.compile(r"^RN-\d{3}$")
+# Marca del importador: dos reglas que el documento contradice (no se puede usar el archivo con las dos)
+MARKED_CONTRADICTION = re.compile(r"^\s*#\s*CONTRADICCI[OÓ]N\s+(RN-\d{3})\s+(?:y\s+)?(RN-\d{3})\s*:?\s*(.*)$", re.IGNORECASE)
+# Nombre alternativo al marcador: test_rn002_… (mismo criterio que el plugin ia_voy_reglas)
+TEST_NAME_RE = re.compile(r"^test_rn(\d{3})(?:_|$)", re.IGNORECASE)
 SEVERITIES = ("alta", "media", "baja")
 REQUIRED = ("id", "titulo", "descripcion", "severidad")
 OPTIONAL_TEXT = ("historia", "responsable", "criterio")
@@ -45,7 +62,166 @@ RULE_FIELDS = {*REQUIRED, *OPTIONAL_TEXT, "rutas", "prohibido", "obligatorio", "
 PROJECT_FIELDS = {"nombre", "version"}
 
 Status = Literal["cumple", "no_cumple", "sin_verificar"]
-Level = Literal["patron", "ninguno"]
+Level = Literal["pruebas", "patron", "pruebas_y_patron", "ninguno"]
+Origin = Literal["repo", "app"]
+# Texto que ve el usuario como origen de las reglas cargadas en la app
+APP_SOURCE = "Configuración (cargadas en la app)"
+
+
+# Plantilla que se descarga desde Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §3.3)
+TEMPLATE = '''# reglas_negocio.toml — reglas de negocio del proyecto (IA voy, docs/PROPUESTA_REGLAS_NEGOCIO.md)
+# Va en la raíz del repositorio (o en docs/) y se sube con commit, como el resto del código.
+# Cada regla se verifica con una prueba (@pytest.mark.regla("RN-001") o test_rn001_…) y/o con un patrón.
+
+[proyecto]
+nombre  = "Mi proyecto"
+version = "1.0"
+
+[[regla]]
+id          = "RN-001"                       # RN- + 3 dígitos, único
+titulo      = "Montos con Decimal"
+descripcion = "Todo monto de dinero se calcula con Decimal; nunca con float."
+severidad   = "alta"                         # alta | media | baja
+rutas       = ["app/pagos/"]                 # opcional · vacío = todo el repo
+prohibido   = 'float\\('                      # opcional · regex que NO debe aparecer
+historia    = "HU-01"                        # opcional · trazabilidad
+criterio    = "Dado un pago de $0.10, cuando se cobra, entonces el total es exactamente $0.10"
+
+[[regla]]
+id          = "RN-002"
+titulo      = "Un pedido cancelado no vuelve a pagado"
+descripcion = "Una vez cancelado, el estado de un pedido no puede cambiar a 'pagado'."
+severidad   = "alta"
+# Sin patrón: la verifica una prueba marcada @pytest.mark.regla("RN-002")
+
+[[regla]]
+id          = "RN-003"
+titulo      = "Rutas de administración protegidas"
+descripcion = "Toda ruta bajo /admin exige el decorador @requiere_admin."
+severidad   = "media"
+rutas       = ["app/admin/"]
+obligatorio = '@requiere_admin'              # opcional · regex que DEBE aparecer en cada archivo
+'''
+
+
+def _toml_str(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def code_folders(files: list[str]) -> list[str]:
+    """Carpetas de primer nivel con código del proyecto (sin pruebas), las de más archivos primero."""
+    count: dict[str, int] = {}
+    for f in files:
+        parts = PurePosixPath(f).parts
+        if len(parts) > 1 and f.endswith(".py") and not is_test_path(f) and parts[0] != "docs":
+            count[parts[0]] = count.get(parts[0], 0) + 1
+    return sorted(count, key=lambda d: (-count[d], d))
+
+
+def template_for(project: str, files: list[str]) -> str:
+    """
+    Plantilla de un proyecto: su nombre en [proyecto] y `rutas` de carpetas que existen en su repositorio
+    (sin clonar todavía, o sin carpetas con código: todo el repo).
+    """
+    folders = code_folders(files)
+    first = folders[0] if folders else None
+    second = folders[1] if len(folders) > 1 else first
+    rutas = lambda d: f'["{d}/"]' if d else "[]"
+    return (
+        TEMPLATE.replace("reglas de negocio del proyecto (", f"reglas de negocio de {project} (", 1)
+        .replace('nombre  = "Mi proyecto"', f"nombre  = {_toml_str(project)}", 1)
+        .replace('rutas       = ["app/pagos/"]                 #', f"rutas       = {rutas(first)}".ljust(46) + " #", 1)
+        .replace('rutas       = ["app/admin/"]', f"rutas       = {rutas(second)}", 1)
+    )
+
+
+def missing_paths(ruleset: "RuleSet", files: list[str], project: str) -> list[str]:
+    """Avisos de `rutas` que no corresponden a ningún archivo del proyecto (la regla no revisaría nada)."""
+    return [
+        f"{r.id}: la ruta `{p}` no existe en {project}"
+        for r in ruleset.rules
+        for p in r.paths
+        if not any(is_excluded(f, [p]) for f in files)
+    ][:MAX_WARNINGS]
+
+
+# Caracteres con significado en una regex: un patrón sin ellos (o con ellos escapados) busca un texto fijo
+_REGEX_META = frozenset(".^$*+?{}[]|()")
+
+
+def _literal(pattern: str) -> str | None:
+    """Texto fijo que busca `pattern` (p. ej. `@requiere_admin`, `os\\.getenv`); None si usa regex de verdad."""
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\":
+            # \d, \w, \b…: ya no es un texto fijo
+            if i + 1 >= len(pattern) or pattern[i + 1].isalnum():
+                return None
+            out.append(pattern[i + 1])
+            i += 2
+            continue
+        if c in _REGEX_META:
+            return None
+        out.append(c)
+        i += 1
+    return "".join(out) or None
+
+
+def _overlap(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
+    """Las `rutas` de dos reglas comparten archivos (vacío = todo el repo)."""
+    if not a or not b:
+        return True
+    return any(is_excluded(x.rstrip("/"), [y]) or is_excluded(y.rstrip("/"), [x]) for x in a for y in b)
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.casefold().split()).rstrip(".;:")
+
+
+def _forces_forbidden(forbidden: re.Pattern, required: str) -> bool:
+    """Todo archivo que cumple `required` contiene `forbidden`: el mismo patrón, o `required` es un texto fijo que lo incluye."""
+    if forbidden.pattern == required:
+        return True
+    lit = _literal(required)
+    # Con espacios alrededor, como en una línea real: `^float` o `float$` no cuentan
+    return lit is not None and forbidden.search(lit) is not None and forbidden.search(f" {lit} ") is not None
+
+
+def conflicts(rules: list["BusinessRule"]) -> list[str]:
+    """
+    Avisos de reglas que se contradicen (nadie puede cumplir las dos) o que están duplicadas (mismo patrón y rutas,
+    o mismo título o descripción con otro `id`). No invalidan el archivo: cada regla se sigue verificando.
+    """
+    out: list[str] = []
+    forbidden = {r.id: re.compile(r.forbidden) for r in rules if r.forbidden}
+    # Una regla consigo misma también puede contradecirse (prohibido y obligatorio a la vez)
+    for a in rules:
+        for b in rules:
+            if a.id not in forbidden or not b.required or not _overlap(a.paths, b.paths):
+                continue
+            if not _forces_forbidden(forbidden[a.id], b.required):
+                continue
+            if a is b:
+                out.append(f"{a.id} se contradice: `obligatorio` (`{a.required}`) siempre incluye lo `prohibido` (`{a.forbidden}`); nunca puede cumplirse")
+            else:
+                out.append(
+                    f"{a.id} y {b.id} se contradicen: {b.id} exige `{b.required}` y {a.id} prohíbe `{a.forbidden}` en las mismas rutas; "
+                    "no pueden cumplirse las dos"
+                )
+    for i, a in enumerate(rules):
+        for b in rules[i + 1:]:
+            same: list[str] = []
+            if (a.forbidden or a.required) and (a.forbidden, a.required, set(a.paths)) == (b.forbidden, b.required, set(b.paths)):
+                same.append("el mismo patrón y rutas")
+            if _norm(a.title) == _norm(b.title):
+                same.append("el mismo título")
+            if _norm(a.description) == _norm(b.description):
+                same.append("la misma descripción")
+            if same:
+                out.append(f"{b.id} parece duplicada de {a.id}: tiene {' y '.join(same)}")
+    return list(dict.fromkeys(out))[:MAX_WARNINGS]
 
 
 class RulesError(ValueError):
@@ -81,6 +257,19 @@ class Evidence:
     text: str
 
 
+@dataclass(frozen=True)
+class LinkedTest:
+    """Prueba ligada a una o más reglas (por marcador o por nombre)."""
+
+    name: str
+    file: str
+    line: int
+    rules: tuple[str, ...]
+    # passed | failed | error | skipped | not_run (del plugin) o sin_ejecutar (encontrada leyendo el código)
+    outcome: str = "sin_ejecutar"
+    message: str = ""
+
+
 @dataclass
 class RuleResult:
     rule: BusinessRule
@@ -89,19 +278,35 @@ class RuleResult:
     detail: str
     evidence: list[Evidence] = field(default_factory=list)
     evidence_total: int = 0
+    # Pruebas de la regla (las que fallan primero; máx. MAX_TESTS)
+    tests: list[LinkedTest] = field(default_factory=list)
 
 
 @dataclass
 class RulesCheck:
-    """Resultado del paso "Verificando reglas de negocio". `source` = None: el repo no declara reglas."""
+    """Resultado del paso "Verificando reglas de negocio". `source` = None: no hay reglas declaradas."""
 
     source: str | None = None
     project: str | None = None
     error: str | None = None
     results: list[RuleResult] = field(default_factory=list)
+    origin: Origin | None = None
+    # Error del archivo del repo cuando en su lugar se usaron las reglas corregidas en la app (origin = "app")
+    repo_error: str | None = None
+    # Pruebas que usan reglas que no existen, etc. No detienen nada.
+    warnings: list[str] = field(default_factory=list)
+    # Las pruebas se ejecutaron (sandbox); False = solo se encontraron leyendo el código
+    tests_ran: bool = False
+    # Internos (no se guardan): resultado del patrón por regla y pruebas encontradas leyendo el código
+    patterns: list[RuleResult] = field(default_factory=list, repr=False)
+    declared: list[LinkedTest] = field(default_factory=list, repr=False)
 
     def count(self, status: Status) -> int:
         return sum(r.status == status for r in self.results)
+
+    @property
+    def tests_total(self) -> int:
+        return len({t.name for r in self.results for t in r.tests})
 
 
 # ───────────────────────── Lectura y validación ─────────────────────────
@@ -110,6 +315,30 @@ class RulesCheck:
 def _rule_lines(text: str) -> list[int]:
     """Línea (1-based) de cada encabezado `[[regla]]`, para ubicar los errores en el archivo."""
     return [n for n, line in enumerate(text.splitlines(), start=1) if re.match(r"\s*\[\[\s*regla\s*\]\]", line)]
+
+
+def contradiction_comment(a: str, b: str, reason: str) -> str:
+    """Comentario con el que el importador marca dos reglas que el documento contradice (ver `_check_marked_contradictions`)."""
+    return f"# CONTRADICCIÓN {a} {b}: {reason}"
+
+
+def _check_marked_contradictions(text: str, ids: set[str]) -> None:
+    """
+    El importador marca con `# CONTRADICCIÓN RN-004 RN-009: …` las reglas que el documento dice de dos formas
+    incompatibles. Mientras existan las dos el archivo no es válido: el equipo deja la que vale (o borra el comentario si
+    decide que no se contradicen). Si ya solo queda una, el comentario no estorba.
+    """
+    for n, line in enumerate(text.splitlines(), start=1):
+        m = MARKED_CONTRADICTION.match(line)
+        if not m:
+            continue
+        a, b, reason = m.group(1).upper(), m.group(2).upper(), m.group(3).strip()
+        if a != b and a in ids and b in ids:
+            detail = f": {reason}" if reason else ""
+            raise RulesError(
+                f"línea {n}: {a} y {b} se contradicen según el documento{detail}. Deja solo la regla que vale y borra el "
+                "comentario «# CONTRADICCIÓN» (o bórralo si decides que no se contradicen)"
+            )
 
 
 def _text(rule: dict, key: str, where: str, limit: int, required: bool) -> str | None:
@@ -229,6 +458,7 @@ def parse(text: str) -> RuleSet:
             raise RulesError(f"{where}: {rule.id} está repetida")
         seen.add(rule.id)
         rules.append(rule)
+    _check_marked_contradictions(text, seen)
     return RuleSet(project=name, version=None if version is None else str(version), rules=rules)
 
 
@@ -264,11 +494,9 @@ def scope(rule: BusinessRule, files: list[str]) -> list[str]:
 
 
 def check_rule(rule: BusinessRule, files: list[str], read_lines: Callable[[str], list[str] | None]) -> RuleResult:
+    """Nivel patrón de una regla. Sin patrón: level "ninguno" (la verifican, si las tiene, sus pruebas)."""
     if rule.forbidden is None and rule.required is None:
-        return RuleResult(
-            rule, "sin_verificar", "ninguno",
-            "Sin patrón: agrega `prohibido` u `obligatorio`. Las pruebas con @pytest.mark.regla se verifican desde el Sprint 8.",
-        )
+        return RuleResult(rule, "sin_verificar", "ninguno", "Sin patrón")
     targets = scope(rule, files)
     if not targets:
         where = ", ".join(rule.paths) if rule.paths else "el repositorio"
@@ -315,22 +543,210 @@ def check_rule(rule: BusinessRule, files: list[str], read_lines: Callable[[str],
     return RuleResult(rule, "cumple", "patron", f"{' y '.join(checks)} ({n_files} revisado(s))")
 
 
-def run(root: Path, files: list[str], read_lines: Callable[[str], list[str] | None]) -> RulesCheck:
+# ───────────────────────── Nivel pruebas ─────────────────────────
+
+
+def _mark_ids(node: ast.expr) -> list[str]:
+    """IDs de `pytest.mark.regla("RN-001", …)` / `mark.regla(…)`; [] si la expresión es otra cosa."""
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "regla":
+        return []
+    owner = node.func.value
+    if not (isinstance(owner, ast.Attribute) and owner.attr == "mark") and not (isinstance(owner, ast.Name) and owner.id == "mark"):
+        return []
+    ids: list[str] = []
+    for arg in node.args:
+        values = arg.elts if isinstance(arg, (ast.List, ast.Tuple)) else [arg]
+        ids += [v.value.strip().upper() for v in values if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+    return ids
+
+
+def _marks(nodes: list[ast.expr]) -> list[str]:
+    return [i for n in nodes for i in _mark_ids(n)]
+
+
+def _module_marks(tree: ast.Module) -> list[str]:
+    """`pytestmark = pytest.mark.regla(…)` (o una lista de marcadores) al nivel del módulo."""
+    ids: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in node.targets):
+            value = node.value
+            ids += _marks(list(value.elts) if isinstance(value, (ast.List, ast.Tuple)) else [value])
+    return ids
+
+
+def _test_rules(fn: ast.FunctionDef | ast.AsyncFunctionDef, inherited: list[str]) -> tuple[str, ...]:
+    ids = inherited + _marks(fn.decorator_list)
+    match = TEST_NAME_RE.match(fn.name)
+    if match:
+        ids.append(f"RN-{match.group(1)}")
+    return tuple(sorted({i for i in ids if i}))
+
+
+def linked_in_source(file: str, source: str) -> list[LinkedTest]:
+    """Pruebas ligadas a reglas en un archivo de pruebas, sin ejecutarlo (mismo criterio que el plugin)."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    module = _module_marks(tree)
+    found: list[LinkedTest] = []
+
+    def add(fn: ast.FunctionDef | ast.AsyncFunctionDef, name: str, inherited: list[str]) -> None:
+        if fn.name.startswith("test"):
+            rules = _test_rules(fn, inherited)
+            if rules:
+                # Primera línea con sus decoradores: la misma que reporta pytest
+                found.append(LinkedTest(name=name, file=file, line=min([fn.lineno, *(d.lineno for d in fn.decorator_list)]), rules=rules))
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            add(node, f"{file}::{node.name}", module)
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            inherited = module + _marks(node.decorator_list)
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    add(item, f"{file}::{node.name}::{item.name}", inherited)
+    return found
+
+
+def declared_tests(files: list[str], read_lines: Callable[[str], list[str] | None]) -> list[LinkedTest]:
+    """Pruebas ligadas a reglas en los archivos de prueba del repo (`files` ya sin rutas excluidas)."""
+    found: list[LinkedTest] = []
+    for file in files:
+        if PurePosixPath(file).suffix != ".py" or not is_test_path(file):
+            continue
+        lines = read_lines(file)
+        if not lines:
+            continue
+        source = "\n".join(line.rstrip("\r") for line in lines)
+        if len(source) > MAX_TEST_FILE or ("regla" not in source and "test_rn" not in source.lower()):
+            continue
+        found += linked_in_source(file, source)
+    return found
+
+
+def plugin_tests(data: dict | None) -> list[LinkedTest] | None:
+    """Pruebas del `reglas.json` que escribe el plugin en el sandbox; None si falta o no tiene el formato."""
+    if not isinstance(data, dict) or not isinstance(data.get("tests"), list):
+        return None
+    out: list[LinkedTest] = []
+    for t in data["tests"]:
+        if not isinstance(t, dict) or not isinstance(t.get("rules"), list):
+            continue
+        line = t.get("line")
+        out.append(LinkedTest(
+            name=str(t.get("nodeid") or "?")[:300],
+            file=str(t.get("file") or "").replace("\\", "/")[:300],
+            line=line if isinstance(line, int) and line > 0 else 1,
+            rules=tuple(dict.fromkeys(str(r).strip().upper()[:32] for r in t["rules"] if str(r).strip())),
+            outcome=str(t.get("outcome") or "not_run"),
+            message=str(t.get("message") or "")[:300],
+        ))
+    return out
+
+
+def hint_for(rule_id: str) -> str:
+    return f'@pytest.mark.regla("{rule_id}") (o llamada test_{rule_id.replace("-", "").lower()}_…)'
+
+
+def combine(pattern: RuleResult, tests: list[LinkedTest], reason: str | None) -> RuleResult:
     """
-    Paso "Verificando reglas de negocio" sobre el clon. `files` = archivos del repo ya sin las rutas excluidas.
+    Estado de la regla con su patrón y sus pruebas (`reason` = por qué no se ejecutaron; None = sí corrieron):
+    no cumple si falla una prueba o aparece el patrón; cumple si todo lo que la verifica pasó; si no, sin verificar.
+    """
+    rule = pattern.rule
+    has_pattern = pattern.level != "ninguno"
+    statuses: list[str] = [pattern.status] if has_pattern else []
+    parts = [pattern.detail] if has_pattern else []
+    n = len(tests)
+    failing = [t for t in tests if t.outcome in ("failed", "error")]
+    if tests:
+        if reason:
+            statuses.append("sin_verificar")
+            parts.append(f"{n} prueba(s) sin ejecutar: {reason}")
+        elif failing:
+            statuses.append("no_cumple")
+            parts.append(f"{len(failing)} de {n} prueba(s) falla(n)")
+        elif passed := sum(t.outcome == "passed" for t in tests):
+            statuses.append("cumple")
+            parts.append(f"{passed} prueba(s) pasan" + (f" ({n - passed} omitida(s))" if passed < n else ""))
+        else:
+            statuses.append("sin_verificar")
+            parts.append(f"sus {n} prueba(s) se omitieron o no corrieron")
+    if not statuses:
+        status: Status = "sin_verificar"
+        detail = f"Sin patrón ni pruebas: agrega `prohibido` u `obligatorio`, o una prueba con {hint_for(rule.id)}."
+    else:
+        status = "no_cumple" if "no_cumple" in statuses else "sin_verificar" if "sin_verificar" in statuses else "cumple"
+        detail = "; ".join(parts)
+    level: Level = ("pruebas_y_patron" if tests else "patron") if has_pattern else ("pruebas" if tests else "ninguno")
+    ordered = failing + [t for t in tests if t not in failing]
+    return RuleResult(rule, status, level, detail, pattern.evidence, pattern.evidence_total, ordered[:MAX_TESTS])
+
+
+def _warnings(source: str, rule_ids: set[str], tests: list[LinkedTest]) -> list[str]:
+    out: list[str] = []
+    for t in tests:
+        for rid in t.rules:
+            if not ID_RE.match(rid):
+                out.append(f"{t.name} usa «{rid}», que no cumple el formato RN-###")
+            elif rid not in rule_ids:
+                out.append(f"{t.name} usa {rid}, que no está en {source}")
+    return list(dict.fromkeys(out))[:MAX_WARNINGS]
+
+
+def _with(check: RulesCheck, tests: list[LinkedTest], reason: str | None) -> RulesCheck:
+    results = [combine(p, [t for t in tests if p.rule.id in t.rules], reason) for p in check.patterns]
+    ids = {p.rule.id for p in check.patterns}
+    warnings = conflicts([p.rule for p in check.patterns]) + _warnings(check.source or FILENAME, ids, tests)
+    return replace(check, results=results, warnings=warnings[:MAX_WARNINGS], tests_ran=reason is None)
+
+
+# Sin sandbox (o sin que pytest corra) las pruebas ligadas se encuentran leyendo el código
+PENDING = "se ejecutan en el sandbox"
+
+
+def with_tests(check: RulesCheck | None, data: dict | None, reason: str | None) -> RulesCheck | None:
+    """
+    Agrega el resultado de las pruebas: las del plugin (`data`, de reglas.json) si corrieron en el sandbox
+    (`reason` = None), o las encontradas leyendo el código con `reason` = por qué no se ejecutaron.
+    """
+    if check is None or check.error or not check.patterns:
+        return check
+    if reason is None:
+        ran = plugin_tests(data)
+        if ran is not None:
+            return _with(check, ran, None)
+        reason = "pytest no pudo correr las pruebas"
+    return _with(check, check.declared, reason)
+
+
+def run(
+    root: Path, files: list[str], read_lines: Callable[[str], list[str] | None], uploaded: str | None = None,
+) -> RulesCheck:
+    """
+    Paso "Verificando reglas de negocio" sobre el clon. `files` = archivos del repo ya sin las rutas excluidas;
+    `uploaded` = reglas cargadas en la app: se usan si el repo no tiene el archivo o si el suyo no es válido
+    (entonces `repo_error` dice por qué). Un archivo válido del repo siempre gana.
+    Las pruebas quedan "sin ejecutar" hasta `with_tests`.
     Nunca lanza por culpa del archivo: un archivo inválido queda en `error` y el análisis sigue.
     """
-    try:
-        found = find(root)
-    except RulesError as exc:
-        return RulesCheck(source=FILENAME, error=str(exc))
-    if found is None:
-        return RulesCheck()
-    source, text = found
-    try:
-        ruleset = parse(text)
-    except RulesError as exc:
-        return RulesCheck(source=source, error=str(exc))
+    source, ruleset, repo_error = _repo_rules(root)
+    origin: Origin = "repo"
+    if ruleset is None:
+        app_rules: RuleSet | None = None
+        if uploaded and uploaded.strip():
+            try:
+                app_rules = parse(uploaded)
+            except RulesError as exc:
+                # Se validan al guardarse; si aun así fallan, manda el error del repo (si hay)
+                if repo_error is None:
+                    return RulesCheck(source=APP_SOURCE, error=str(exc), origin="app")
+        if app_rules is None:
+            return RulesCheck(source=source, error=repo_error, origin="repo") if repo_error else RulesCheck()
+        ruleset, origin = app_rules, "app"
+        repo_error = f"{source}: {repo_error}" if repo_error else None
+        source = APP_SOURCE
     cache: dict[str, list[str] | None] = {}
 
     def cached(file: str) -> list[str] | None:
@@ -338,7 +754,24 @@ def run(root: Path, files: list[str], read_lines: Callable[[str], list[str] | No
             cache[file] = read_lines(file)
         return cache[file]
 
-    return RulesCheck(source=source, project=ruleset.project, results=[check_rule(r, files, cached) for r in ruleset.rules])
+    patterns = [check_rule(r, files, cached) for r in ruleset.rules]
+    check = RulesCheck(
+        source=source, project=ruleset.project, origin=origin, repo_error=repo_error, patterns=patterns, declared=declared_tests(files, cached),
+    )
+    return _with(check, check.declared, PENDING)
+
+
+def _repo_rules(root: Path) -> tuple[str, RuleSet | None, str | None]:
+    """(archivo, reglas, error) del repo: (FILENAME, None, None) si no tiene el archivo."""
+    source = FILENAME
+    try:
+        found = find(root)
+        if found is None:
+            return source, None, None
+        source, text = found
+        return source, parse(text), None
+    except RulesError as exc:
+        return source, None, str(exc)
 
 
 def summary_line(check: RulesCheck | None) -> str:
@@ -349,7 +782,14 @@ def summary_line(check: RulesCheck | None) -> str:
         return f"  ERROR en {check.source}: {check.error}\n  el análisis sigue sin verificar las reglas de negocio"
     if not check.results:
         return f"  {check.source} no declara reglas"
-    return (
+    line = (
         f"  {len(check.results)} regla(s) · {check.count('cumple')} cumplen · "
         f"{check.count('no_cumple')} no cumplen · {check.count('sin_verificar')} sin verificar"
     )
+    if check.tests_total:
+        line += f" · {check.tests_total} prueba(s) ligada(s)" + ("" if check.tests_ran else " sin ejecutar")
+    if check.repo_error:
+        line += f"\n  aviso: {check.repo_error}\n  se usaron las reglas corregidas en la app; sube el archivo corregido al repositorio"
+    elif check.origin == "app":
+        line += "\n  aviso: reglas cargadas en la app; súbelas al repositorio como reglas_negocio.toml"
+    return "\n".join([line, *(f"  aviso: {w}" for w in check.warnings)])

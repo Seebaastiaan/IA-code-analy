@@ -22,8 +22,10 @@ class FindingInput:
     msg: str
     why: str
     rec: str
-    # Hay corrección automática (hoy solo reglas de Ruff con corrección "safe")
+    # Hay corrección: `fix_kind` "auto" (Ruff safe/unsafe, versión de pip-audit) o "ia" (la propone el LLM en el
+    # editor, con diff para revisar). False/None: no se corrige con un parche (cobertura, dependencias rotas).
     fix: bool = False
+    fix_kind: str | None = None
     # Texto de la línea señalada; si se omite, save_report lo toma de la copia de trabajo
     code: str | None = None
 

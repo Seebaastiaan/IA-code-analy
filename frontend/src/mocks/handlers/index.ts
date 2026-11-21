@@ -6,10 +6,12 @@ import type { DiffRequest } from '@/features/compare/types'
 import type { SaveFileRequest } from '@/features/editor/types'
 import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
+import type { ImportRulesRequest } from '@/features/rules/types'
 import type { ShareRequest } from '@/features/share/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
+import * as rules from '../rules'
 import * as team from '../team'
 import { answer } from '../fixtures/chat'
 import { languageOf } from '../fixtures/code'
@@ -74,6 +76,8 @@ export const handlers = [
   http.post(EP.analyze, route(async ({ request }) => {
     const body = (await request.json()) as AnalyzeRequest
     if (!/^https?:\/\/.+\/.+/.test(body.url)) return fail(422, 'invalid_url', 'La URL del repositorio no es válida')
+    const invalid = body.rules === undefined ? null : rules.fromAnalyze(body.url, body.rules)
+    if (invalid) return fail(422, 'invalid_rules', invalid)
     return json({ job_id: db.startJob(body.url, body.branch || 'main') })
   }, 400)),
   http.get(EP.jobs.get(':jobId'), route(({ params }) => json(db.jobSnapshot(params.jobId as string)))),
@@ -128,7 +132,7 @@ export const handlers = [
   }, 1200)),
   http.post(EP.fix, route(async ({ request }) => {
     const body = (await request.json()) as FixRequest
-    return json({ patches: db.fixPatches(body.finding_ids) })
+    return json({ patches: db.fixPatches(body.finding_ids), notes: db.fixNotes(body.finding_ids) })
   })),
 
   // ─── Asistente ───
@@ -165,6 +169,31 @@ export const handlers = [
   // ─── Configuración ───
   http.get(EP.config(':projectId'), route(({ params }) => json(db.getConfig(params.projectId as string)))),
   http.put(EP.config(':projectId'), route(async ({ request, params }) => json(db.saveConfig(params.projectId as string, (await request.json()) as ProjectConfig)))),
+
+  // ─── Reglas de negocio ───
+  http.get(EP.report.rules(':reportId'), route(({ request, params }) => {
+    const repo = param(request, 'repo') ?? (params.reportId as string).split('-')[0]
+    return json(rules.reportRules(repo, params.reportId as string))
+  })),
+  http.get(EP.rules.project(':projectId'), route(({ params }) => json(rules.projectRules(params.projectId as string)))),
+  http.put(EP.rules.project(':projectId'), route(async ({ request, params }) => {
+    const { content } = (await request.json()) as { content: string }
+    const saved = rules.upload(params.projectId as string, content)
+    return typeof saved === 'string' ? fail(422, 'invalid_rules', saved) : json(saved)
+  })),
+  http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
+  http.post(EP.rules.validate(':projectId'), route(async ({ request, params }) => json(rules.validateFor(params.projectId as string, ((await request.json()) as { content: string }).content)))),
+  http.get(EP.rules.template(':projectId'), route(({ params }) => new HttpResponse(rules.templateFor(params.projectId as string), { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
+  http.post(EP.rules.precheck, route(async ({ request }) => {
+    const body = (await request.json()) as { url: string; branch: string; content?: string }
+    const result = rules.precheck(body.url, body.branch, body.content)
+    return result ? json(result) : fail(422, 'invalid_url', 'Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)')
+  })),
+  // Leer el documento con IA tarda: se simula una espera más larga
+  http.post(EP.rules.import, route(async ({ request }) => {
+    const result = rules.importDocument((await request.json()) as ImportRulesRequest)
+    return typeof result === 'string' ? fail(415, 'unsupported_type', result) : json(result)
+  }, 1200)),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

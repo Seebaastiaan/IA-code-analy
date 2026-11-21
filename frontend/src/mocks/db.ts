@@ -144,6 +144,9 @@ let jobSeq = 0
 
 export class NotFound extends Error {}
 
+/** Proyecto del equipo con ese "owner/repo" (como el backend, sin distinguir mayúsculas). */
+export const findRepoByName = (name: string) => repos.find((r) => r.name.toLowerCase() === name.toLowerCase())
+
 export const getRepo = (id: string) => {
   const r = repos.find((x) => x.id === id)
   if (!r) throw new NotFound(`Repositorio ${id} no encontrado`)
@@ -170,7 +173,9 @@ function findingView(report: ReportRecord, f: FindingTemplate, withCode = true):
           .map((text, i) => ({ line: i + 1, text }))
           .filter((l) => Math.abs(l.line - f.line) <= 2)
       : undefined
-  return { ...f, status: report.resolved.has(f.id) ? 'resolved' : 'open', snippet }
+  // Como el backend: Ruff y pip-audit con corrección propia; lo demás que se corrige, con IA
+  const fix_kind = f.fix ? (FIXES[f.id] && (f.tool === 'Ruff' || f.tool === 'pip-audit') ? 'auto' : 'ia') : null
+  return { ...f, fix_kind, status: report.resolved.has(f.id) ? 'resolved' : 'open', snippet }
 }
 
 /** Hallazgos visibles: sin las reglas ignoradas en la configuración, ordenados por severidad. */
@@ -280,6 +285,13 @@ export function getFile(repoId: string, path: string) {
   const content = getRepo(repoId).content[path]
   if (content === undefined) throw new NotFound(`${path} no existe`)
   return content
+}
+
+/** Explicación simulada de la IA para los hallazgos que no corrige una herramienta. */
+export function fixNotes(findingIds: number[]): string[] {
+  return FINDINGS.filter((f) => findingIds.includes(f.id) && f.fix && f.tool !== 'Ruff' && f.tool !== 'pip-audit').map(
+    (f) => `${f.file}: corregí ${f.rule} siguiendo la recomendación (${f.rec.split('.')[0].toLowerCase()}).`,
+  )
 }
 
 export function fixPatches(findingIds: number[]): Patch[] {

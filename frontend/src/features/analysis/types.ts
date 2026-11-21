@@ -40,6 +40,8 @@ export interface AnalyzeRequest {
   analyzers: AnalyzerId[]
   sandbox: boolean
   index: boolean
+  /** Reglas de negocio escritas o corregidas en el formulario: se guardan en el proyecto (cargadas en la app) */
+  rules?: string
 }
 
 export interface AnalyzeResponse {

@@ -1,7 +1,7 @@
 # ADR-003 · Las reglas de negocio se declaran en el repo analizado y se verifican de forma determinista
 
-- Estado: aceptada · en implementación (Sprint 7: archivo, validación y nivel patrón)
-- Fecha: 25 de octubre de 2026 (Sprint 5); actualizada el 7 de noviembre de 2026 (Sprint 7)
+- Estado: aceptada · en implementación (Sprint 7: archivo, validación y nivel patrón · Sprint 8: nivel pruebas, Configuración y vista Reglas)
+- Fecha: 25 de octubre de 2026 (Sprint 5); actualizada el 7 de noviembre de 2026 (Sprint 7) y el 14 de noviembre de 2026 (Sprint 8)
 - Responsable: por definir
 
 ## Contexto
@@ -26,7 +26,8 @@ con evidencia. La IA solo explica.
 Un archivo propio, no una sección de `.ia_voy.toml`: ahí `[reglas]` ya significa "reglas de Bandit/Ruff
 ignoradas" (TOML no admite `[reglas]` y `[[reglas]]` juntos) y la pantalla de Configuración reescribe ese
 archivo completo al guardar. El archivo se versiona con git como el resto del código; también se puede cargar
-desde Configuración → Reglas de negocio, pero si el repo lo tiene, gana el del repo. Formato, campos y
+desde Configuración → Reglas de negocio o al cargar el repo en Nuevo análisis, pero si el repo lo tiene y es
+válido, gana el del repo (si el del repo tiene errores, se usan las corregidas en la app). Formato, campos y
 nomenclatura completos en [PROPUESTA_REGLAS_NEGOCIO.md](../PROPUESTA_REGLAS_NEGOCIO.md).
 
 ```toml
@@ -94,8 +95,17 @@ Cada regla termina en uno de tres estados:
   `business_rule_results`) y no como hallazgos: la tabla `findings` solo admite `cat IN ('seg','test','prac')`
   (un `CHECK` que SQLite no deja cambiar sin reconstruir la tabla) y las categorías están fijas en el backend y
   el frontend. Todavía no entran al score. API: `GET /api/report/{id}/reglas`.
-- **Sprint 8**: nivel pruebas (nombre `test_rn###_…` y plugin `-p ia_voy_reglas`), pestaña en Configuración y
-  vista Reglas.
+- **Sprint 8**: nivel pruebas (marcador, nombre `test_rn###_…` y plugin `-p ia_voy_reglas`, que escribe
+  `reglas.json` en el sandbox; sin sandbox las pruebas se leen con `ast` y quedan sin ejecutar), pestaña
+  Configuración → Reglas de negocio (plantilla, validar, cargar en la app con precedencia del repo, descargar) y
+  vista Reglas en el reporte. Tabla nueva `business_rules_upload` y columnas `origin`, `warnings`, `tests_ran`
+  (`business_rule_checks`) y `tests` (`business_rule_results`).
+- **Sprint 8 (después)**: importar las reglas desde el documento de requisitos del proyecto
+  ([PLAN_IMPORTAR_REGLAS_DOCUMENTO.md](../PLAN_IMPORTAR_REGLAS_DOCUMENTO.md)). La IA **lee el documento y propone**
+  el `reglas_negocio.toml`; no decide si una regla se cumple. La persona lo revisa en el editor de siempre antes de
+  usarlo, y lo importado entra como "reglas cargadas en la app", sin ganarle a un archivo válido del repo.
+  `POST /api/reglas/importar`, detección de documentos en `POST /api/reglas/revisar` y en
+  `GET /api/projects/{id}/reglas` (`documents`, `can_import`). Gemini solo se llama al hacer clic, nunca en el análisis.
 - **Después**: categoría `neg` en el score (migración de `reports` y de las categorías fijas) y nivel IA.
 
 ## Alternativas descartadas

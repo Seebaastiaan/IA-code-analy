@@ -20,7 +20,7 @@ export const paths = {
     withQuery(`/repos/${repoId}/editor`, { file: opts.file, line: opts.line, diff: opts.diff ? 1 : undefined }),
   assistant: (repoId: string, question?: string) => withQuery(`/repos/${repoId}/assistant`, { q: question }),
   compare: (repoId: string) => `/repos/${repoId}/compare`,
-  settings: (repoId: string) => `/repos/${repoId}/settings`,
+  settings: (repoId: string, tab?: 'reglas') => withQuery(`/repos/${repoId}/settings`, { tab }),
   publicReport: (shareId: string) => `/r/${shareId}`,
   team: () => '/team',
   joinTeam: (code: string) => `/join/${code}`,
