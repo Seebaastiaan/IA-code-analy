@@ -1,5 +1,5 @@
 import type { CHIP_TONES } from '@/shared/ui/styles'
-import type { BusinessRuleResult, RuleLevel, RulesPrecheck, RuleStatus, RulesValidation, TestOutcome } from '../types'
+import type { BusinessRuleResult, Harness, HarnessOrigin, MapSummary, RuleLevel, RulesPrecheck, RuleStatus, RulesValidation, SmokeStatus, TestOutcome } from '../types'
 
 type Tone = keyof typeof CHIP_TONES
 
@@ -126,4 +126,42 @@ export function precheckView(p: RulesPrecheck, form: RulesValidation | null): Pr
             : 'Descarga la plantilla o escríbelas aquí; si no, el análisis no verifica reglas.',
         }
   return { tone: 'neutral', uses: app ? 'app' : null, title: 'No se pudieron revisar las reglas', detail: p.message }
+}
+
+// ─── Mapa y arnés ───
+
+export const FRAMEWORK: Record<string, string> = { fastapi: 'FastAPI', flask: 'Flask', django: 'Django' }
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** "16 endpoints, 9 modelos y 4 roles" */
+export function mapSummary(m: MapSummary): string {
+  const parts = [plural(m.endpoints, 'endpoint', 'endpoints'), plural(m.models, 'modelo', 'modelos'), plural(m.roles.length, 'rol', 'roles')]
+  return `${parts.slice(0, -1).join(', ')} y ${parts.at(-1)}`
+}
+
+export const HARNESS_ORIGIN: Record<HarnessOrigin, string> = { ia: 'Propuesto por IA', repo: 'Del repositorio', manual: 'Editado a mano' }
+
+/** Estado del arnés para mostrar: aprobado gana a la prueba de humo. */
+export function harnessStatus(h: Harness): { label: string; tone: Tone } {
+  if (h.approved) return { label: 'Aprobado', tone: 'success' }
+  if (h.errors.length) return { label: 'Con errores', tone: 'danger' }
+  const smoke: Record<SmokeStatus, { label: string; tone: Tone }> = {
+    pendiente: { label: 'Sin probar', tone: 'neutral' },
+    corriendo: { label: 'Probando…', tone: 'brand' },
+    paso: { label: 'Prueba de humo pasó', tone: 'success' },
+    fallo: { label: 'Prueba de humo falló', tone: 'danger' },
+  }
+  return smoke[h.smoke]
+}
+
+/** test_humo_como[cajero] → "como('cajero')"; test_humo_crear[crear_producto] → "crear_producto()" */
+export function smokeLabel(name: string): string {
+  const m = /^test_humo_(\w+?)(?:\[(.*)\])?$/.exec(name)
+  if (!m) return name
+  const [, kind, param] = m
+  if (kind === 'como') return `como('${param}')`
+  if (kind === 'crear') return `${param}()`
+  if (kind === 'extras') return param ?? kind
+  return kind
 }

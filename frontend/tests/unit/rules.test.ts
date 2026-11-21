@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import type { BusinessRuleResult, RulesPrecheck, RuleStatus, RulesValidation } from '@/features/rules/types'
-import { baseName, fileToBase64, filterRules, githubRepo, isDocument, precheckView, testFunction, testName } from '@/features/rules/utils/rules'
+import { describe, expect, it, vi } from 'vitest'
+import type { BusinessRuleResult, HarnessView, MapSummary, RulesPrecheck, RuleStatus, RulesValidation } from '@/features/rules/types'
+import { baseName, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, precheckView, smokeLabel, testFunction, testName } from '@/features/rules/utils/rules'
+import * as harness from '@/mocks/harness'
 import { fromAnalyze, importDocument, precheck, templateFor, validate, validateFor } from '@/mocks/rules'
 
 const rule = (id: string, status: RuleStatus): BusinessRuleResult => ({
@@ -221,5 +222,63 @@ describe('importar reglas desde un documento', () => {
     expect(validate(sinRN004)).toMatchObject({ valid: true })
     // O se decide que no se contradicen y se borra el comentario
     expect(validate(r.content.replace(/^# CONTRADICCIÓN.*\n/gm, ''))).toMatchObject({ valid: true })
+  })
+})
+
+describe('mapa y arnés de pruebas', () => {
+  const map: MapSummary = {
+    framework: 'fastapi', frameworks: ['fastapi'], endpoints: 16, models: 1, schemas: 3, roles: ['cajero', 'gerente'], integrations: [], uses_time: false,
+    entry: ['inventario.main:app'], warnings: [],
+  }
+
+  it('resume el mapa con plurales', () => {
+    expect(mapSummary(map)).toBe('16 endpoints, 1 modelo y 2 roles')
+    expect(mapSummary({ ...map, endpoints: 1, roles: [] })).toBe('1 endpoint, 1 modelo y 0 roles')
+  })
+
+  it('nombra cada comprobación de la prueba de humo por su fixture', () => {
+    expect(smokeLabel('test_humo_como[cajero]')).toBe("como('cajero')")
+    expect(smokeLabel('test_humo_crear[crear_producto]')).toBe('crear_producto()')
+    expect(smokeLabel('test_humo_extras[reloj]')).toBe('reloj')
+    expect(smokeLabel('test_humo_api')).toBe('api')
+    expect(smokeLabel('otra')).toBe('otra')
+  })
+
+  it('simulado: proponer, probar (pasa), aprobar; editar invalida y un token roto falla con un solo aviso', () => {
+    vi.useFakeTimers()
+    try {
+      const repo = 'r1'
+      harness.removeHarness(repo)
+      const view = harness.proposeHarness(repo)
+      const h = view.harness!
+      expect(view.map?.framework).toBe('fastapi')
+      expect([h.origin, h.smoke, h.errors]).toEqual(['ia', 'pendiente', []])
+      expect(h.fixtures).toEqual(['sesiones', 'api', 'como', 'crear_pago'])
+      expect(harnessStatus(h)).toEqual({ label: 'Sin probar', tone: 'neutral' })
+      // No se aprueba sin prueba de humo
+      expect(harness.approveHarness(repo, 'Ana')).toMatch(/prueba de humo/)
+
+      expect((harness.runSmoke(repo) as HarnessView).harness?.smoke).toBe('corriendo')
+      vi.runAllTimers()
+      const passed = harness.harnessView(repo).harness!
+      expect([passed.smoke, passed.smoke_message]).toEqual(['paso', '6 comprobaciones pasaron'])
+      const approved = harness.approveHarness(repo, 'Ana') as HarnessView
+      expect([approved.ready, approved.harness?.approved_by, harnessStatus(approved.harness!).label]).toEqual([true, 'Ana', 'Aprobado'])
+
+      const edited = harness.editHarness(repo, passed.code.replace('Bearer prueba-{rol}', 'Bearer otro-{rol}'))!
+      expect([edited.harness?.origin, edited.harness?.smoke, edited.ready]).toEqual(['manual', 'pendiente', false])
+      harness.runSmoke(repo)
+      vi.runAllTimers()
+      const failed = harness.harnessView(repo).harness!
+      expect(failed.smoke).toBe('fallo')
+      expect(failed.smoke_message).toBe("como('cliente'): AssertionError: como('cliente'): GET /pagos respondió 401, el usuario no quedó autenticado (y 4 más)")
+
+      // Con errores de validación no corre
+      harness.editHarness(repo, 'import subprocess\n')
+      expect(harness.runSmoke(repo)).toMatch(/^Corrige el arnés antes de probarlo: Falta el fixture `api`/)
+      harness.removeHarness(repo)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

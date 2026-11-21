@@ -151,3 +151,69 @@ export interface ImportedRules {
   validation: RulesValidation
   model: string
 }
+
+// ─── Mapa del proyecto y arnés de pruebas (docs/PROPUESTA_REGLAS_VERIFICABLES.md §6.2 y §7) ───
+
+/** Lo que el backend encontró en el código leyéndolo con `ast` (sin IA). */
+export interface MapSummary {
+  framework: string | null
+  frameworks: string[]
+  endpoints: number
+  models: number
+  schemas: number
+  roles: string[]
+  /** Tipos de integración: correo, sms, pagos, http, tareas, push, nube */
+  integrations: string[]
+  uses_time: boolean
+  /** "inventario.main:app", "reservas.app:crear_app" */
+  entry: string[]
+  warnings: string[]
+}
+
+export type SmokeStatus = 'pendiente' | 'corriendo' | 'paso' | 'fallo'
+export type HarnessOrigin = 'ia' | 'repo' | 'manual'
+
+export interface SmokeTest {
+  /** test_humo_como[cajero], test_humo_crear[crear_producto]… */
+  name: string
+  outcome: 'passed' | 'failed' | 'error' | 'skipped'
+  message: string
+}
+
+/** tests/_ia_voy_reglas/conftest.py: los fixtures con los que se escriben las pruebas de cada regla. */
+export interface Harness {
+  code: string
+  origin: HarnessOrigin
+  /** conftest.py del repo del que salió (origin = repo) */
+  source_path: string | null
+  /** Lo que la IA tuvo que suponer */
+  assumptions: string[]
+  model: string | null
+  commit: string | null
+  updated_at: string
+  fixtures: string[]
+  /** Impiden correr la prueba de humo (validación con ast) */
+  errors: string[]
+  warnings: string[]
+  smoke: SmokeStatus
+  /** Un solo aviso: la primera falla, con el fixture que la causó */
+  smoke_message: string | null
+  smoke_tests: SmokeTest[]
+  smoke_at: string | null
+  approved: boolean
+  approved_by: string | null
+  approved_at: string | null
+}
+
+export interface HarnessView {
+  cloned: boolean
+  map: MapSummary | null
+  harness: Harness | null
+  /** conftest.py del repo que ya sirve de arnés (define `api` y `como`) */
+  repo_harness: string | null
+  can_generate: boolean
+  /** Hay sandbox configurado: sin él no se corre la prueba de humo */
+  sandbox: boolean
+  /** Aprobado con el código actual: ya se pueden generar las pruebas de las reglas */
+  ready: boolean
+}

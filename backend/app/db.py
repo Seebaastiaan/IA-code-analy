@@ -202,6 +202,28 @@ CREATE TABLE IF NOT EXISTS business_rules_upload (
     updated_by  TEXT
 );
 
+-- Arnés de las pruebas de reglas de negocio (app.projects.reglas_arnes, PROPUESTA_REGLAS_VERIFICABLES.md §7): uno
+-- por repo. origin = ia | repo | manual. La prueba de humo y la aprobación valen para el código con ese hash.
+CREATE TABLE IF NOT EXISTS business_rule_harness (
+    repo_id        TEXT PRIMARY KEY REFERENCES repos (id) ON DELETE CASCADE,
+    code           TEXT NOT NULL,
+    origin         TEXT NOT NULL,
+    source_path    TEXT,
+    assumptions    TEXT NOT NULL DEFAULT '[]',
+    model          TEXT,
+    commit_sha     TEXT,
+    smoke_status   TEXT NOT NULL DEFAULT 'pendiente',
+    smoke_message  TEXT,
+    smoke_tests    TEXT NOT NULL DEFAULT '[]',
+    smoke_hash     TEXT,
+    smoke_at       TEXT,
+    approved_by    TEXT,
+    approved_at    TEXT,
+    approved_hash  TEXT,
+    updated_at     TEXT NOT NULL,
+    updated_by     TEXT
+);
+
 -- Índice del asistente (app.assistant): fragmentos del código con su embedding (float32, normalizado)
 CREATE TABLE IF NOT EXISTS code_chunks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

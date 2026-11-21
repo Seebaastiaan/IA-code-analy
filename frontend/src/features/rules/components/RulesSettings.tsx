@@ -6,6 +6,7 @@ import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '..
 import type { ImportedRules, ProjectRules, RulesValidation } from '../types'
 import { baseName, DOCUMENT_EXTENSIONS, isDocument, saveText } from '../utils/rules'
 import { useImportRules } from '../hooks/useImportRules'
+import { HarnessCard } from './HarnessCard'
 import { ImportNotice } from './ImportNotice'
 import { ValidationResult } from './ValidationResult'
 
@@ -210,6 +211,7 @@ const STEPS = [
   'Por cada regla, una prueba con @pytest.mark.regla("RN-###") (o llamada test_rn###_…) o un patrón prohibido / obligatorio.',
   'Haz commit de reglas_negocio.toml y las pruebas en la raíz del repositorio.',
   'Analiza: el paso 10 dice qué reglas cumplen, cuáles no y cuáles no tienen prueba.',
+  'Para que IA voy escriba las pruebas: arma el arnés (Mapa y arnés de pruebas), córrele la prueba de humo y apruébalo.',
 ]
 
 /** Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §6). */
@@ -232,6 +234,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
         </Card>
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
         <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+        <HarnessCard repoId={repoId} />
       </div>
       <Card className="p-5 h-fit">
         <h2 className="font-semibold mb-3">Cómo se verifican</h2>

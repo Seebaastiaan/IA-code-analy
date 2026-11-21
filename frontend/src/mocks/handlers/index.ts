@@ -11,6 +11,7 @@ import type { ShareRequest } from '@/features/share/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
+import * as harness from '../harness'
 import * as rules from '../rules'
 import * as team from '../team'
 import { answer } from '../fixtures/chat'
@@ -194,6 +195,23 @@ export const handlers = [
     const result = rules.importDocument((await request.json()) as ImportRulesRequest)
     return typeof result === 'string' ? fail(415, 'unsupported_type', result) : json(result)
   }, 1200)),
+  // Mapa y arnés de pruebas: la IA tarda en proponer el arnés; la prueba de humo corre unos segundos
+  http.get(EP.rules.harness(':projectId'), route(({ params }) => json(harness.harnessView(params.projectId as string)))),
+  http.post(EP.rules.harness(':projectId'), route(({ params }) => json(harness.proposeHarness(params.projectId as string)), 1500)),
+  http.post(EP.rules.harnessFromRepo(':projectId'), route(() => fail(404, 'no_repo_harness', 'El repo no tiene un conftest.py con los fixtures `api` y `como`'))),
+  http.put(EP.rules.harness(':projectId'), route(async ({ request, params }) => {
+    const view = harness.editHarness(params.projectId as string, ((await request.json()) as { code: string }).code)
+    return view ? json(view) : fail(404, 'no_harness', 'Todavía no hay arnés: propónlo con la IA o usa el del repo')
+  })),
+  http.delete(EP.rules.harness(':projectId'), route(({ params }) => json(harness.removeHarness(params.projectId as string)))),
+  http.post(EP.rules.harnessSmoke(':projectId'), route(({ params }) => {
+    const view = harness.runSmoke(params.projectId as string)
+    return typeof view === 'string' ? fail(422, 'invalid_harness', view) : json(view)
+  })),
+  http.post(EP.rules.harnessApprove(':projectId'), route(({ params }) => {
+    const view = harness.approveHarness(params.projectId as string, demoUser.name)
+    return typeof view === 'string' ? fail(409, 'smoke_required', view) : json(view)
+  })),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

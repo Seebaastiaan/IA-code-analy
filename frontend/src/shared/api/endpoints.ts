@@ -44,6 +44,13 @@ export const EP = {
     precheck: '/api/reglas/revisar',
     /** Saca las reglas de un documento de requisitos (PDF, Word, Markdown) con IA */
     import: '/api/reglas/importar',
+    /** Mapa del proyecto (endpoints, modelos, roles) leído del código sin IA */
+    map: (projectId: string) => `/api/projects/${projectId}/reglas/mapa`,
+    /** Arnés de pruebas: GET / POST (proponer con IA) / PUT (editar) / DELETE */
+    harness: (projectId: string) => `/api/projects/${projectId}/reglas/arnes`,
+    harnessFromRepo: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/repo`,
+    harnessSmoke: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/humo`,
+    harnessApprove: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/aprobar`,
   },
   github: {
     status: '/api/github/status',

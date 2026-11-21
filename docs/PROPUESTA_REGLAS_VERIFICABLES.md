@@ -354,6 +354,46 @@ registro de cada modelo principal. Si algo falla, la vista Reglas muestra **un s
 fixture que lo causó («`crear_producto`: la API pidió `categoria_id`»). No se generan pruebas de reglas hasta que
 el arnés pase.
 
+### 7.5 Cómo quedó (fase 3)
+
+- **Mapa** ([mapa.py](../backend/app/analyses/mapa.py)):
+  - Qué lee:
+    - FastAPI: routers anidados con `prefix`, `include_router` y alias `Annotated[..., Depends(...)]` importados.
+    - Flask: blueprints importados, `register_blueprint(url_prefix=)` y la fábrica `create_app()`.
+    - Django/DRF: `ROOT_URLCONF`, `include()`, `DefaultRouter`, viewsets con `@action` y vistas genéricas.
+    - Roles: constantes `ROLES`, enums, `requiere("x")` / `requiere(*CONSTANTE)`, `usuario.rol == "x"` y grupos de Django.
+    - Modelos: SQLAlchemy, SQLModel con `table=True`, Flask-SQLAlchemy y Django con bases abstractas.
+    - Esquemas Pydantic y DRF, integraciones, usos de la hora, la base real (`engine`, `SessionLocal`) y los
+      nombres de cada módulo.
+  - Lee la sintaxis de Python 3.14 (`except A, B:`).
+  - Probado con los dos demos y con `fastapi/full-stack-fastapi-template` (23 endpoints, 2 modelos),
+    `miguelgrinberg/microblog` (35 endpoints con blueprints, 5 modelos) y `MSKose/django-stock-app` (31 endpoints DRF,
+    5 modelos).
+- **Arnés** ([reglas_arnes.py](../backend/app/projects/reglas_arnes.py)):
+  - Lo propone Gemini o se toma el `conftest.py` del repo que ya define `api` y `como`.
+  - IA voy pone `PreparacionFallida`, `preparar` y `Reloj`; la IA no los escribe.
+  - La validación con `ast` revisa, sin ejecutar:
+    - que estén los fixtures obligatorios y que solo importe lo permitido (biblioteca estándar, pytest, el
+      framework, las dependencias y los paquetes del proyecto);
+    - que no llame a `open`, `eval`, `subprocess` ni `os.system`;
+    - que un fixture no tape algo importado (`def reloj` + `from reservas import reloj`);
+    - que no use nombres que no existen en los módulos del proyecto (`db.select` cuando `reservas/db.py` no lo define);
+    - y avisa si usa la base real.
+
+  Los tres últimos salieron de arneses reales de Gemini que fallaban: ahora se detectan antes de correr.
+- **Prueba de humo:**
+  - El backend la arma con el mapa (`test_humo_api`, `test_humo_como[rol]`, `test_humo_crear[crear_x]` y
+    `reloj` / `buzon`).
+  - Corre en el sandbox (modo `arnes`: copia, `overlay` en `tests/_ia_voy_reglas/`, instalar y pytest, sin
+    auditoría ni cobertura).
+  - Si falla, da un solo aviso: «como('cajero'): GET /alertas respondió 401, el usuario no quedó autenticado».
+- **Aprobación:** solo con la prueba de humo pasada sobre el mismo código (hash). Editarlo vuelve a pedirla.
+- **Endpoints:**
+  - `GET /api/projects/{id}/reglas/mapa`;
+  - `GET|POST|PUT|DELETE …/reglas/arnes`;
+  - `POST …/reglas/arnes/repo`, `…/arnes/humo` y `…/arnes/aprobar`.
+- **Frontend:** tarjeta «Mapa y arnés de pruebas» en Configuración → Reglas de negocio.
+
 ## 8. Evidencia de apoyo (IA, no cuenta)
 
 Para cada regla, la vista Reglas muestra **dónde parece estar implementada**: el índice RAG busca con el texto de
@@ -503,7 +543,7 @@ Literatura que respalda dos decisiones:
 | [backend/app/analysis/ia_voy_reglas.py](../backend/app/analysis/ia_voy_reglas.py) | Clasificar «no cumple» vs. «prueba rota» |
 | [backend/app/analysis/sandbox.py](../backend/app/analysis/sandbox.py) | Copiar las pruebas aprobadas de la app a `tests/_ia_voy_reglas/` en la copia temporal (salvo que el repo traiga `tests/reglas/`); instalar `time-machine`, `respx`, `responses`, `aiosqlite` y, en Django, `pytest-django` junto al plugin |
 | [backend/app/analyses/reglas_store.py](../backend/app/analyses/reglas_store.py) + migración | Tablas `business_rule_tests` (repo, regla, hash de la regla, código, estado, modelo, commit) y `business_rule_harness`; mapa por commit |
-| Endpoints | `POST /api/reglas/arnes`, `POST /api/reglas/pruebas` (generar para una lista de ids), `PUT /api/reglas/pruebas/{rule_id}` (editar o aprobar), `GET /api/projects/{id}/reglas/exportar` (zip con TOML + `tests/reglas/`) |
+| Endpoints | Arnés (hecho, §7.5): `…/reglas/mapa`, `…/reglas/arnes` (+ `/repo`, `/humo`, `/aprobar`). Pendientes: `POST /api/reglas/pruebas` (generar para una lista de ids), `PUT /api/reglas/pruebas/{rule_id}` (editar o aprobar), `GET /api/projects/{id}/reglas/exportar` (zip con TOML + `tests/reglas/`) |
 | Frontend `features/rules` | Tabla de reglas con estado y dudas; vista de prueba (código, supuestos, último resultado); editor de la matriz de permisos; aviso del arnés; exportar |
 | `docs/adr/ADR-004-pruebas-generadas.md` (nuevo) | Deja constancia de que la IA genera pruebas, que solo cuentan las aprobadas y que el veredicto sale de ejecutarlas |
 
@@ -517,7 +557,7 @@ resultado se guarda por hash de la regla y commit; el análisis **nunca** llama 
 |---|---|---|
 | **1 · Importador v2** | Formato v2, reglas atómicas, `tipo`, escenarios, `estado` y `dudas`; tabla de aprobación | Con el `.docx` del inventario: 18 reglas, ≥ 5 de las 7 dudas; un TOML v1 sigue validando |
 | **2 · Repos demo** (**hecho**) | `inventario_demo` y `reservas_demo` con sus documentos, pruebas manuales de referencia y tabla de resultados esperados | Con las pruebas **escritas a mano** y el plugin actual, el reporte da 13/5 (inventario) y 11/4 (reservas) ([test_demos_reglas.py](../backend/tests/test_demos_reglas.py)). Es la referencia para todo lo que sigue |
-| **3 · Mapa y arnés** | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno |
+| **3 · Mapa y arnés** (**hecho**, falta la parte de repos públicos) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno. **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en esos repos quedan pendientes (código ajeno: correrlo en Docker) |
 | **4 · Pruebas generadas** | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo` |
 | **5 · Servicios con clientes y calidad** | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada |
 | **6 · Score** | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |

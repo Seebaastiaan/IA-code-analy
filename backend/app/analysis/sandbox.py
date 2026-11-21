@@ -70,6 +70,9 @@ phase venv 300 bash -c '
 cd "$WORK" || { skip install audit tests coverage; exit 0; }
 if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit tests coverage; exit 0; fi
 export VIRTUAL_ENV="$WORK/.venv"; export PATH="$VIRTUAL_ENV/bin:$PATH"
+# Archivos de IA voy sobre la copia (el arnés de reglas de negocio y su prueba de humo); el clon no se toca
+if [ -d "$OUT/overlay" ]; then cp -R "$OUT/overlay/." "$WORK/"; fi
+MODE="$(cat "$OUT/mode" 2>/dev/null || echo analisis)"
 
 phase install 600 bash -c '
   if [ -f requirements.txt ]; then uv pip install -r requirements.txt || exit $?
@@ -88,6 +91,16 @@ phase install 600 bash -c '
     done
   fi
   exit 0'
+
+# Prueba de humo del arnés (app.projects.reglas_arnes): solo pytest sobre tests/_ia_voy_reglas, sin auditoría ni cobertura.
+# httpx: el TestClient de FastAPI / Starlette lo necesita y muchos proyectos no lo declaran
+if [ "$MODE" = arnes ]; then
+  skip audit coverage
+  uv pip install -q pytest httpx > "$OUT/tools.log" 2>&1
+  phase tests 300 python -m pytest -q -p no:cacheprovider -o addopts= --junitxml="$OUT/junit.xml" -o junit_family=xunit1 \
+    tests/_ia_voy_reglas/test_humo_arnes.py
+  exit 0
+fi
 
 # Solo las dependencias del proyecto: pytest y coverage se instalan después
 SITE="$(echo "$VIRTUAL_ENV"/lib/python3*/site-packages)"
@@ -264,19 +277,31 @@ def _load_json(path: Path) -> dict | None:
         return None
 
 
-def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | None]:
-    """(sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se simula."""
+def start(settings: Settings, repo_id: str, mode: str = "analisis", overlay: dict[str, str] | None = None) -> tuple[SandboxRun | None, str | None]:
+    """
+    (sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se simula.
+    `mode="arnes"` corre solo la prueba de humo del arnés de reglas de negocio; `overlay` = archivos (ruta relativa →
+    texto) que se escriben sobre la copia temporal del repo antes de instalar.
+    """
     if settings.sandbox == "off":
         return None, None
     reason = _available(settings)
     if reason:
         return None, reason
-    out = clones_root(settings) / f"{repo_id}.sandbox"
+    # Carpeta propia por modo: la prueba del arnés no pisa la salida de un análisis del mismo repo
+    out = clones_root(settings) / (f"{repo_id}.sandbox" if mode == "analisis" else f"{repo_id}.{mode}")
     name = f"ia-voy-{repo_id}-{secrets.token_hex(3)}"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     # newline="\n": bash no acepta los \r de Windows
     (out / "sandbox.sh").write_text(SCRIPT, encoding="utf-8", newline="\n")
+    (out / "mode").write_text(mode, encoding="utf-8", newline="\n")
+    for rel, text in (overlay or {}).items():
+        target = (out / "overlay" / rel).resolve()
+        if not target.is_relative_to((out / "overlay").resolve()):
+            raise ValueError(f"ruta fuera de la copia: {rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8", newline="\n")
     (out / "plugins").mkdir()
     (out / "plugins" / PLUGIN.name).write_text(PLUGIN.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     # Entorno mínimo: el código analizado no hereda las claves del backend (.env ya cargado en os.environ)

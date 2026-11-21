@@ -275,3 +275,34 @@ test('nuevo análisis exige un analizador por categoría', async ({ page }) => {
   await expect(page.getByText('Elige al menos un analizador de: Pruebas')).toBeVisible()
   await expect(page).toHaveURL(/\/analyze$/)
 })
+
+test('reglas de negocio: mapa del proyecto y arnés de pruebas (proponer, probar, aprobar)', async ({ page }) => {
+  await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  const card = page.locator('section, div').filter({ has: page.getByRole('heading', { name: 'Mapa y arnés de pruebas' }) }).last()
+  await expect(card.getByText('IA voy encontró 14 endpoints, 5 modelos y 4 roles en el código.')).toBeVisible()
+  await expect(card.getByText('El arnés sustituye pagos, correo, la hora')).toBeVisible()
+
+  await card.getByRole('button', { name: 'Proponer con IA' }).click()
+  await expect(card.getByText('Propuesto por IA · Gemini 3.8 Flash')).toBeVisible()
+  await expect(card.getByText('Un pago se crea como el rol «ventas»')).toBeVisible()
+  // Sin prueba de humo no se aprueba
+  await expect(card.getByRole('button', { name: 'Aprobar arnés' })).toBeDisabled()
+
+  await card.getByRole('button', { name: 'Correr prueba de humo' }).click()
+  await expect(card.getByText(/Corriendo la prueba de humo en el sandbox/)).toBeVisible()
+  await expect(card.getByText('La prueba de humo pasó')).toBeVisible()
+  await card.getByRole('button', { name: 'Ver las 6 comprobaciones' }).click()
+  await expect(card.getByText("como('cliente')")).toBeVisible()
+  await card.getByRole('button', { name: 'Aprobar arnés' }).click()
+  await expect(card.getByText('Aprobado', { exact: true })).toBeVisible()
+
+  // Editarlo a mano invalida la aprobación; un token distinto rompe como(rol) y sale un solo aviso
+  await card.getByRole('button', { name: 'Ver y editar el código (conftest.py)' }).click()
+  const code = card.getByLabel('Código del arnés (conftest.py)')
+  await code.fill((await code.inputValue()).replaceAll('Bearer prueba-{rol}', 'Bearer otro-{rol}'))
+  await card.getByRole('button', { name: 'Guardar cambios' }).click()
+  await expect(card.getByText('Editado a mano')).toBeVisible()
+  await card.getByRole('button', { name: 'Correr prueba de humo' }).click()
+  await expect(card.getByText('La prueba de humo falló')).toBeVisible()
+  await expect(card.getByText(/como\('cliente'\): AssertionError: como\('cliente'\): GET \/pagos respondió 401/)).toBeVisible()
+})
