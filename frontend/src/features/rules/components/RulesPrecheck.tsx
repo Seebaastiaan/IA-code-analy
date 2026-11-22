@@ -243,7 +243,7 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
                 </>
               ) : data.status !== 'valid' ? (
                 <>
-                  <Button variant="secondary" onClick={() => saveText(RULES_FILENAME, data.template)}>
+                  <Button variant="ghost" onClick={() => saveText(RULES_FILENAME, data.template)}>
                     <Icon name="download" className="w-4 h-4" />
                     Descargar plantilla
                   </Button>

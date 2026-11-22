@@ -4,13 +4,13 @@ import { harnessQuery, projectRulesQuery, ruleTestsQuery, rulesApi } from '../ap
 
 /** Los pasos técnicos que el programa hace solo (docs/PLAN_REGLAS_AUTOMATICO.md, pasos 1 y 2). */
 export const AUTO_STEPS = [
-  { id: 'reglas', label: 'Aprobar las reglas sin dudas' },
+  { id: 'reglas', label: 'Aprobar las reglas que no tienen dudas' },
   { id: 'arnes', label: 'Preparar el entorno de pruebas del proyecto' },
-  { id: 'humo', label: 'Comprobar que el entorno arranca' },
-  { id: 'pruebas', label: 'Escribir una prueba por regla' },
-  { id: 'correr', label: 'Correr las pruebas' },
-  { id: 'fuerza', label: 'Comprobar que las pruebas detectan violaciones' },
-  { id: 'revision', label: 'Leer el código sin ver la prueba y comparar los dos resultados' },
+  { id: 'humo', label: 'Comprobar que el proyecto arranca' },
+  { id: 'pruebas', label: 'Escribir una prueba para cada regla' },
+  { id: 'correr', label: 'Ejecutar las pruebas' },
+  { id: 'fuerza', label: 'Verificar que las pruebas sí detectan una regla rota' },
+  { id: 'revision', label: 'Segunda opinión: la IA lee el código por su cuenta y se compara' },
 ] as const
 
 export type AutoStepId = (typeof AUTO_STEPS)[number]['id']

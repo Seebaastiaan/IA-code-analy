@@ -51,10 +51,10 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
         {editable && (
           <input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Elegir ${rule.id}`} className="shrink-0 accent-brand-600" />
         )}
-        <button type="button" onClick={onToggle} aria-expanded={open} aria-label={`${open ? 'Ocultar' : 'Ver'} ${rule.id}`} className="flex flex-1 items-center gap-2 min-w-0 text-left">
+        <button type="button" onClick={onToggle} aria-expanded={open} aria-label={`${open ? 'Ocultar' : 'Ver'} ${rule.id}`} className="flex flex-1 items-start gap-2 min-w-0 text-left">
           <Icon name="chevron" className={open ? 'w-3.5 h-3.5 shrink-0 rotate-90 transition-transform' : 'w-3.5 h-3.5 shrink-0 transition-transform'} />
           <span className="font-mono text-xs text-slate-500 shrink-0">{rule.id}</span>
-          <span className="truncate text-sm">{rule.title}</span>
+          <span className="text-sm break-words min-w-0">{rule.title}</span>
           {rule.source && <span className="hidden md:inline shrink-0 max-w-[14rem] truncate text-xs text-slate-400" title={rule.source}>{rule.source}</span>}
         </button>
         <span className="hidden sm:flex items-center gap-1.5 shrink-0">
@@ -97,11 +97,11 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
           )}
           {doubts.length > 0 && (
             <div>
-              <p className="text-xs font-medium text-rose-700 dark:text-rose-300">Dudas abiertas: contesta Sí o No (el programa recuerda la respuesta)</p>
+              <p className="text-sm font-medium">Preguntas para ti: contesta Sí o No (el programa recuerda la respuesta)</p>
               <ul className="mt-1 space-y-1">
                 {doubts.map((d) => (
-                  <li key={d} className="flex items-start gap-2 text-xs">
-                    <span className="flex-1">{d}</span>
+                  <li key={d} className="flex flex-wrap items-start gap-2 text-sm">
+                    <span className="flex-1 min-w-48">{d}</span>
                     {editable && (
                       <span className="flex shrink-0 gap-1">
                         <Button variant="secondary" disabled={busy} onClick={() => onAnswer(d, 'si')} aria-label={`Responder sí: ${d}`}>
@@ -110,8 +110,8 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
                         <Button variant="secondary" disabled={busy} onClick={() => onAnswer(d, 'no')} aria-label={`Responder no: ${d}`}>
                           No
                         </Button>
-                        <Button variant="ghost" disabled={busy} onClick={() => onResolve(d)} title="Cerrar la duda sin guardar una respuesta">
-                          Resuelta
+                        <Button variant="ghost" disabled={busy} onClick={() => onResolve(d)} title="Cerrar la pregunta sin guardar una respuesta">
+                          Cerrar sin responder
                         </Button>
                       </span>
                     )}

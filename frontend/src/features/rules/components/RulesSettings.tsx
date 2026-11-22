@@ -123,9 +123,9 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
         <h2 className="font-semibold">{data.uploaded ? 'Reglas cargadas en la app' : 'Importar las reglas'}</h2>
       </div>
       {data.can_import && !fromRepo && data.documents.length > 0 && (
-        <div className="mb-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 text-sm">
+        <div className="mb-2 text-sm">
           <p className="text-slate-600 dark:text-slate-300">
-            Encontré {data.documents.length === 1 ? 'un documento' : 'documentos'} de requisitos en el repositorio: la IA puede sacar las reglas para que las revises aquí.
+            Encontré {data.documents.length === 1 ? 'un documento' : 'documentos'} de requisitos en el repositorio. Úsalo, o sube otro abajo.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {data.documents.map((path) => (

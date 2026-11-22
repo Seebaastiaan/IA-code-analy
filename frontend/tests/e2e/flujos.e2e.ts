@@ -272,7 +272,7 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
 
   // Resolver la duda (se quita de la lista) y entonces sí se aprueba
   await table.getByRole('button', { name: 'Ver RN-002' }).click()
-  await table.getByRole('button', { name: 'Resuelta' }).click()
+  await table.getByRole('button', { name: 'Cerrar sin responder' }).click()
   await table.getByLabel('Elegir RN-002').check()
   await table.getByRole('button', { name: /Aprobar elegidas/ }).click()
   await expect(table.getByText(/1 de 3 reglas son borrador/)).toBeVisible()
