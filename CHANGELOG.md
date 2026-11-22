@@ -5,6 +5,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 ## [Sin publicar] — Reglas de negocio verificables (docs/PROPUESTA_REGLAS_VERIFICABLES.md)
 
 ### Agregado
+- Configuración → Reglas como asistente de 4 pasos (importar, preguntas y aprobación, preparar todo, resultado) con la siguiente
+  acción siempre a la vista, «Preguntas para ti» (una por una, con la cita del documento, el efecto del Sí y del No y respuesta
+  escrita para las abiertas) y errores de la IA o del documento en palabras con «Reintentar». El reporte de reglas ya no
+  se corta en celular. Revisión en docs/REVISION_USABILIDAD_REGLAS.md.
 - Formato `reglas_negocio.toml` v2 (`tipo`, escenarios Dado/Cuando/Entonces, `estado`, `dudas`, `fuente`); el importador
   desde un documento saca reglas atómicas en borrador y una tabla de aprobación en Configuración las aprueba (solo las
   aprobadas se verifican).

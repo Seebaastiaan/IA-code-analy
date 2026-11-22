@@ -67,9 +67,6 @@ function RuleDetail({ rule, repoId }: { rule: BusinessRuleResult; repoId: string
   const violated = rule.status === 'no_cumple' || rule.status === 'no_implementada'
   return (
     <div className="px-4 sm:px-5 pb-4 pt-1 space-y-3 text-sm break-words bg-slate-50/60 dark:bg-slate-950/30">
-      <p className="font-medium">
-        {LIGHT[plain(rule).light].dot} {plain(rule).text}
-      </p>
       {violated && (
         <div className="rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50/60 dark:bg-rose-500/10 p-3.5">
           <p className="font-medium text-rose-700 dark:text-rose-300">El documento manda: el código tiene que seguir a la regla.</p>
@@ -211,7 +208,9 @@ export function RulesTab({ repoId, reportId }: { repoId: string; reportId: strin
       <Notices data={data} repoId={repoId} />
       <div className="px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
         <SegmentedControl options={FILTERS} value={status} onChange={setStatus} />
-        <span className="hidden sm:block text-xs text-slate-400">Aún no cuentan en el score</span>
+        <Link to={paths.settings(repoId)} className="hidden sm:block text-xs text-slate-400 hover:underline" title="Las reglas pesan 0 % en el score hasta que subas su peso en Configuración → General">
+          Pesan 0 % en el score por defecto: ajustar
+        </Link>
       </div>
 
       {!summary.total ? (

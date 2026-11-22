@@ -61,7 +61,7 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
           <SeverityBadge sev={rule.severity} />
           {rule.tipo && <Chip>{KIND_LABEL[rule.tipo] ?? rule.tipo}</Chip>}
           {doubts.length > 0 && <Chip tone="danger">{doubts.length} duda{doubts.length === 1 ? '' : 's'}</Chip>}
-          <Chip tone={approval(rule) === 'aprobada' ? 'success' : 'neutral'}>{approval(rule) === 'aprobada' ? (rule.approved_by === 'programa' ? 'Aprobada por el programa' : 'Aprobada') : 'Borrador'}</Chip>
+          <Chip tone={approval(rule) === 'aprobada' ? 'success' : 'neutral'} title={approval(rule) === 'aprobada' ? 'Aprobada: se verifica en el análisis' : 'Borrador: todavía no se verifica; apruébala cuando no tenga dudas'}>{approval(rule) === 'aprobada' ? (rule.approved_by === 'programa' ? 'Aprobada por el programa' : 'Aprobada') : 'Borrador'}</Chip>
         </span>
       </div>
       {open && (

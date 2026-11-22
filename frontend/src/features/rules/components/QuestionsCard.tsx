@@ -3,20 +3,9 @@ import { useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, Icon } from '@/shared/ui'
 import { projectRulesQuery, rulesApi } from '../api/rules.api'
-import type { DoubtAnswer, ProjectRules, RulePreview } from '../types'
+import type { DoubtAnswer, ProjectRules } from '../types'
 import { parseDoubt } from '../utils/rules'
-
-interface Question {
-  rule: RulePreview
-  doubt: string
-}
-
-/** Las dudas de todas las reglas que siguen en borrador, en una sola lista. */
-export function pendingQuestions(rules: RulePreview[]): Question[] {
-  return rules
-    .filter((r) => (r.status ?? 'aprobada') === 'borrador')
-    .flatMap((rule) => (rule.doubts ?? []).map((doubt) => ({ rule, doubt })))
-}
+import { pendingQuestions, type Question } from '../utils/steps'
 
 /**
  * Preguntas para ti: una por una, con la frase del documento al lado y lo que cambia según la respuesta.

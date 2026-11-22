@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, ErrorState, Icon, PageLoader, Spinner } from '@/shared/ui'
 import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '../api/rules.api'
@@ -15,7 +15,8 @@ import { RuleTestsCard } from './RuleTestsCard'
 import { WriteRuleCard } from './WriteRuleCard'
 import { RulesApprovalTable } from './RulesApprovalTable'
 import { QuestionsCard } from './QuestionsCard'
-import { ResultStep, RulesStepper, currentStep } from './RulesStepper'
+import { ResultStep, RulesStepper } from './RulesStepper'
+import { currentStep } from '../utils/steps'
 import { ValidationResult } from './ValidationResult'
 import { cn } from '@/shared/utils/cn'
 
@@ -263,7 +264,11 @@ function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
   const where = currentStep(rules)
   const [step, setStep] = useState(where)
   // Cuando el proyecto avanza (se guardan reglas, se aprueba la última), la vista avanza con él; ir atrás sigue siendo libre
-  useEffect(() => setStep(where), [where])
+  const [seen, setSeen] = useState(where)
+  if (seen !== where) {
+    setSeen(where)
+    setStep(where)
+  }
   const show = (n: number) => (step === n ? '' : 'hidden')
 
   return (

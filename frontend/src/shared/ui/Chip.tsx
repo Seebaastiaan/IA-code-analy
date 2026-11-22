@@ -7,8 +7,12 @@ import { Icon } from './Icon'
 import { Spinner } from './Spinner'
 import { CHIP_TONES, chipBase } from './styles'
 
-export function Chip({ tone = 'neutral', className, children }: { tone?: keyof typeof CHIP_TONES; className?: string; children: ReactNode }) {
-  return <span className={cn(chipBase, CHIP_TONES[tone], className)}>{children}</span>
+export function Chip({ tone = 'neutral', className, title, children }: { tone?: keyof typeof CHIP_TONES; className?: string; title?: string; children: ReactNode }) {
+  return (
+    <span className={cn(chipBase, CHIP_TONES[tone], className)} title={title}>
+      {children}
+    </span>
+  )
 }
 
 export function SeverityBadge({ sev }: { sev: Severity }) {
