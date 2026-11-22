@@ -68,6 +68,14 @@ subtítulo y encabezados sin «reglas_negocio.toml»), 3 y problema 9 (un solo c
 regla, arnés, pruebas una por una y casos de control quedan en «Herramientas avanzadas», cerrado). Los puntos 5 y 6 también están hechos (una sola entrada para importar,
 dudas como preguntas con «Cerrar sin responder», título completo en la tabla, nombres claros y «de 3 a 8 minutos» en «Preparar todo»).
 
+## Asistente por pasos (segunda ronda)
+
+Configuración → Reglas ahora muestra **un paso a la vez** (Importar → Preguntas y aprobación → Preparar todo → Resultado). El programa marca el paso en
+curso según el estado de las reglas (sin reglas, con borradores, todo aprobado), avanza solo cuando el proyecto avanza y una franja «Siguiente:» dice
+qué hacer ahora con un botón que lleva al paso. Se puede saltar a cualquier paso; los pasos no se desmontan, así que lo escrito en el editor no se
+pierde. Pendiente de la propuesta: preguntas de todas las reglas en una sola lista, mostrar qué cambia según la respuesta, errores en palabras con un
+botón, ayuda «?» junto a los términos y la comparación con el análisis anterior.
+
 ## Para validar de verdad
 
 Esta revisión no sustituye una prueba con una persona que no conozca el proyecto: pedirle que importe un documento y llegue a ver un resultado sin

@@ -17,6 +17,11 @@ async function openReport(page: Page) {
 }
 
 /** Las herramientas avanzadas (arnés, pruebas una por una, regla con tus palabras, control) están en un bloque cerrado */
+/** Los cuatro pasos de Configuración → Reglas: el programa muestra el que toca; los demás se abren desde la barra de pasos */
+async function goStep(page: Page, n: number) {
+  await page.getByRole('button', { name: new RegExp(`^Paso ${n}:`) }).click()
+}
+
 async function openAdvanced(page: Page) {
   await page.getByText(/Herramientas avanzadas/).click()
 }
@@ -181,6 +186,7 @@ test('reglas de negocio: matriz del reporte y carga desde configuración', async
   await expect(page.getByText('Válido · ETL · 1 regla(s)')).toBeVisible()
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
+  await goStep(page, 1)
   await expect(page.getByText('Cargadas en la app', { exact: true })).toBeVisible()
 
   // Las reglas son de este proyecto: las rutas se revisan contra su repositorio (al guardar, «Avanzado» vuelve a cerrarse)
@@ -426,6 +432,7 @@ test('reglas de negocio en el score: tablero y reporte muestran su nota aunque p
 
 test('reglas del repositorio: se aprueban en la copia del proyecto y avisa que falta el commit', async ({ page }) => {
   await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await goStep(page, 2)
   await expect(page.getByText(/Son las reglas del repositorio: lo que cambies se guarda en su copia, no en GitHub/)).toBeVisible()
   await page.getByLabel('Elegir RN-001').check()
   await page.getByRole('button', { name: 'Volver a borrador' }).click()
@@ -466,6 +473,7 @@ test('repositorios: eliminar uno con confirmación', async ({ page }) => {
 
 test('reglas de negocio: documento para presentar, sin TOML', async ({ page }) => {
   await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await goStep(page, 2)
   const popup = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Documento para presentar' }).click()
   const doc = await popup
@@ -480,7 +488,7 @@ test('reglas de negocio: documento para presentar, sin TOML', async ({ page }) =
 test('reglas de negocio: «Preparar todo» hace solo el arnés, las pruebas y la prueba de fuerza', async ({ page }) => {
   test.setTimeout(120_000)
   await page.goto(`/repos/${REPO}/settings?tab=reglas`)
-  await page.getByRole('button', { name: 'Preparar todo' }).click()
+  await page.getByRole('button', { name: 'Preparar todo', exact: true }).click()
   const steps = page.getByRole('list', { name: 'Avance de la preparación' })
   await expect(steps.getByText('Preparar el entorno de pruebas del proyecto')).toBeVisible()
   // Termina con el resumen y sin pasos fallidos
@@ -533,7 +541,9 @@ test('reglas de negocio: dudas con sí o no, una regla con tus palabras y casos 
 test('reglas de negocio: lo que aprueba el programa se marca y se revierte en un clic', async ({ page }) => {
   test.setTimeout(90_000)
   const table = await importedRules(page)
-  await page.getByRole('button', { name: 'Preparar todo' }).click()
+  await goStep(page, 3)
+  await page.getByRole('button', { name: 'Preparar todo', exact: true }).click()
+  await goStep(page, 2)
   // El primer paso aprueba las reglas sin dudas; el resto no hace falta para esta comprobación
   await expect(table.getByText('Aprobada por el programa').first()).toBeVisible({ timeout: 30_000 })
   const stop = page.getByRole('button', { name: 'Detener' })
@@ -558,4 +568,23 @@ test('reglas de negocio: el resultado en palabras y «el documento manda» para 
   await page.getByRole('button', { name: 'Corregir con IA' }).click()
   // En la demo no hay IA: el error llega como aviso, sin romper la pantalla
   await expect(page.getByText('La corrección del código con IA no está disponible en la demo')).toBeVisible()
+})
+
+test('reglas de negocio: el asistente marca el paso en curso y dice qué hacer ahora', async ({ page }) => {
+  // Sin reglas: empieza en «Importar»
+  await page.goto('/repos/r2/settings?tab=reglas')
+  await expect(page.getByRole('button', { name: /^Paso 1:/ })).toHaveAttribute('aria-current', 'step')
+  await expect(page.getByRole('status').filter({ hasText: 'Siguiente:' })).toContainText('Empieza importando el documento')
+  await expect(page.getByRole('heading', { name: 'Aprobación de las reglas' })).toBeHidden()
+
+  // Importadas y guardadas (en borrador): pasa solo al paso 2 y pide revisar
+  await importedRules(page)
+  await expect(page.getByRole('button', { name: /^Paso 2:/ })).toHaveAttribute('aria-current', 'step')
+  await expect(page.getByRole('status').filter({ hasText: 'Siguiente:' })).toContainText(/Tienes \d+ reglas? con preguntas/)
+
+  // Se puede ir a cualquier paso y volver; el paso 4 lleva al reporte
+  await goStep(page, 4)
+  await expect(page.getByRole('link', { name: 'Ver el último reporte de reglas' })).toBeVisible()
+  await goStep(page, 2)
+  await expect(page.getByRole('heading', { name: 'Aprobación de las reglas' })).toBeVisible()
 })

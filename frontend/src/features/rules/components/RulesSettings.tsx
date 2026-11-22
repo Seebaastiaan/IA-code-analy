@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, ErrorState, Icon, PageLoader, Spinner } from '@/shared/ui'
 import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '../api/rules.api'
@@ -14,7 +14,9 @@ import { ImportNotice } from './ImportNotice'
 import { RuleTestsCard } from './RuleTestsCard'
 import { WriteRuleCard } from './WriteRuleCard'
 import { RulesApprovalTable } from './RulesApprovalTable'
+import { ResultStep, RulesStepper, currentStep } from './RulesStepper'
 import { ValidationResult } from './ValidationResult'
+import { cn } from '@/shared/utils/cn'
 
 function Origin({ data }: { data: ProjectRules }) {
   if (data.active === 'repo' && data.repo)
@@ -215,33 +217,6 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   )
 }
 
-const STEPS = [
-  { title: 'Importa el documento', text: 'Sube el PDF o Word de requisitos (o elige el que está en el repositorio): la IA saca las reglas.' },
-  { title: 'Contesta las dudas y aprueba', text: 'Responde Sí o No a lo que el documento deja ambiguo y aprueba las reglas. Solo lo aprobado se verifica.' },
-  { title: 'Pulsa «Preparar todo»', text: 'El programa prepara el entorno, escribe las pruebas y las corre. Puede tardar unos minutos.' },
-  { title: 'Lee el resultado', text: 'Analiza el repositorio: el reporte dice qué reglas se cumplen y cuáles no.' },
-]
-
-function Steps() {
-  return (
-    <Card className="p-5">
-      <h2 className="font-semibold mb-3">Cómo funciona</h2>
-      <ol className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm text-slate-600 dark:text-slate-300">
-        {STEPS.map((step, i) => (
-          <li key={step.title} className="flex gap-2.5">
-            <span className="w-5 h-5 shrink-0 rounded-full grid place-items-center text-[11px] font-bold bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{i + 1}</span>
-            <span>
-              <b className="block text-slate-800 dark:text-slate-100">{step.title}</b>
-              {step.text}
-            </span>
-          </li>
-        ))}
-      </ol>
-      <p className="mt-3 text-xs text-slate-400">Las reglas son de este proyecto. Si el repositorio ya tiene un archivo válido, gana el del repositorio.</p>
-    </Card>
-  )
-}
-
 /** Cómo escribir los patrones `prohibido` y `obligatorio` (expresiones regulares), con ejemplos que se pueden copiar. */
 function RegexHelp() {
   const code = 'font-mono text-xs bg-slate-100 dark:bg-slate-800 rounded px-1 py-0.5'
@@ -273,35 +248,55 @@ function RegexHelp() {
   )
 }
 
-/** Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §6). */
+/** Configuración → Reglas de negocio: cuatro pasos, uno a la vez, con la siguiente acción siempre a la vista. */
 export function RulesSettings({ repoId }: { repoId: string }) {
   const { data, error, refetch, isPlaceholderData } = useProjectRules(repoId)
   if (error) return <ErrorState error={error} onRetry={() => void refetch()} />
   if (!data || isPlaceholderData) return <PageLoader />
+  return <RulesFlow repoId={repoId} data={data} />
+}
+
+function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
+  const source = data.active === 'repo' ? data.repo : data.uploaded
+  const rules = source?.valid ? source.rules : []
+  const where = currentStep(rules)
+  const [step, setStep] = useState(where)
+  // Cuando el proyecto avanza (se guardan reglas, se aprueba la última), la vista avanza con él; ir atrás sigue siendo libre
+  useEffect(() => setStep(where), [where])
+  const show = (n: number) => (step === n ? '' : 'hidden')
 
   return (
     <div className="space-y-4">
-      <Steps />
-      <Card className="p-5">
-        <h2 className="font-semibold mb-3">De dónde vienen las reglas</h2>
-        <Origin data={data} />
-        {data.repo && !data.repo.valid && (
-          <p className="mt-3 text-sm text-rose-600 dark:text-rose-400 font-mono">
-            {data.repo.path}: {data.repo.error}
-          </p>
-        )}
-      </Card>
-      {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
-      <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
-      <RulesApprovalTable repoId={repoId} data={data} />
-      <AutoVerifyCard repoId={repoId} />
+      <RulesStepper rules={rules} step={step} onStep={setStep} />
+      <div className={cn('space-y-4', show(0))}>
+        <Card className="p-5">
+          <h2 className="font-semibold mb-3">De dónde vienen las reglas</h2>
+          <Origin data={data} />
+          {data.repo && !data.repo.valid && (
+            <p className="mt-3 text-sm text-rose-600 dark:text-rose-400 font-mono">
+              {data.repo.path}: {data.repo.error}
+            </p>
+          )}
+        </Card>
+        {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
+        <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+      </div>
+      <div className={show(1)}>
+        <RulesApprovalTable repoId={repoId} data={data} />
+      </div>
+      <div className={show(2)}>
+        <AutoVerifyCard repoId={repoId} />
+      </div>
+      <div className={show(3)}>
+        <ResultStep repoId={repoId} />
+      </div>
       <details className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
         <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">
           Herramientas avanzadas: escribir una regla, arnés, pruebas una por una y comparación con lo que sabes
         </summary>
         <div className="mt-4 space-y-4">
           <WriteRuleCard repoId={repoId} canWrite={data.can_import} />
-          <ConcordanceCard repoId={repoId} version={(data.active === 'repo' ? data.repo : data.uploaded)?.rules.map((r) => r.id).join(',') ?? ''} />
+          <ConcordanceCard repoId={repoId} version={rules.map((r) => r.id).join(',')} />
           <HarnessCard repoId={repoId} />
           <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
         </div>
