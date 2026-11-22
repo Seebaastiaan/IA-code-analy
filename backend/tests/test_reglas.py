@@ -178,7 +178,11 @@ def test_patrones_prohibido_y_obligatorio(tmp_path):
 
     assert (r3.status, r3.level) == ("sin_verificar", "ninguno")
     assert (r4.status, r4.level) == ("sin_verificar", "patron") and "revisa `rutas`" in r4.detail
-    assert reglas.summary_line(check) == "  4 regla(s) · 0 cumplen · 2 no cumplen · 2 sin verificar"
+    # `obligatorio` sigue funcionando (formato v1) pero avisa que está obsoleto (PROPUESTA_REGLAS_VERIFICABLES.md §4.1)
+    assert reglas.summary_line(check).splitlines() == [
+        "  4 regla(s) · 0 cumplen · 2 no cumplen · 2 sin verificar",
+        "  aviso: RN-002: `obligatorio` está obsoleto (un archivo que no lo tenga, como un __init__.py vacío, ya no cumple); verifica la regla con una prueba",
+    ]
 
 
 def test_cumple_y_respeta_rutas_excluidas(tmp_path):
@@ -298,7 +302,10 @@ def test_paso_de_reglas_en_el_analisis_y_api(client):
     assert job["status"] == "done" and job["total"] == len(fake.JOB_STEPS) == 12
     i = job["logs"].index(next(line for line in job["logs"] if "Verificando reglas de negocio" in line))
     assert job["logs"][i].startswith("[10/12]")
-    assert job["logs"][i + 1] == "  4 regla(s) · 0 cumplen · 1 no cumplen · 3 sin verificar"
+    summary, *avisos = job["logs"][i + 1].splitlines()
+    assert summary == "  4 regla(s) · 0 cumplen · 1 no cumplen · 3 sin verificar"
+    # Las reglas del repo falso usan `obligatorio` (formato v1): siguen funcionando, con aviso
+    assert avisos[0].startswith("  aviso: RN-002: `obligatorio` está obsoleto")
 
     body = client.get(f"/api/report/{job['report_id']}/reglas").json()
     assert body["checked"] is True and body["source"] == "reglas_negocio.toml" and body["project"] == "Tienda"
@@ -418,7 +425,8 @@ def test_contradicciones_en_el_analisis_y_al_validar(tmp_path):
     check = reglas.run(tmp_path, ["app.py"], lambda f: (tmp_path / f).read_text(encoding="utf-8").splitlines())
     # Se siguen verificando las dos; el aviso explica por qué una siempre falla
     assert [r.status for r in check.results] == ["no_cumple", "cumple"]
-    assert len(check.warnings) == 1 and "se contradicen" in check.warnings[0]
+    # (y el de `obligatorio` obsoleto, del formato v1)
+    assert len(check.warnings) == 2 and "obsoleto" in check.warnings[0] and "se contradicen" in check.warnings[1]
     assert "se contradicen" in reglas.summary_line(check)
     # Sigue con el aviso después de agregar las pruebas
     assert reglas.with_tests(check, None, "sin sandbox").warnings == check.warnings

@@ -153,8 +153,16 @@ def _plain(text: str) -> str:
 
 def rule_hash(rule: reglas.BusinessRule) -> str:
     """Cambia si cambia lo que la prueba verifica: la prueba aprobada de otra versión de la regla queda desactualizada."""
-    text = "\n".join([rule.id, rule.title, rule.description, rule.criterion or ""])
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    parts = [rule.id, rule.title, rule.description, rule.criterion or ""]
+    # Formato v2: el tipo y los escenarios también cambian lo que se verifica (las reglas v1 conservan su hash)
+    if rule.tipo or (rule.scenarios and not reglas.criterion_scenario(rule.criterion)):
+        parts += [rule.tipo or "", *(s.text() for s in rule.scenarios)]
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def rule_words(rule: reglas.BusinessRule) -> str:
+    """El texto de la regla para buscarla en el código: título, descripción, criterio y escenarios."""
+    return " ".join([rule.title, rule.description, rule.criterion or "", *(s.text() for s in rule.scenarios)])
 
 
 def test_path(rule: reglas.BusinessRule) -> str:
@@ -210,7 +218,7 @@ def snippets(
     los archivos de endpoints, modelos e integraciones del mapa). `endpoint_bonus` = cuánto se prefieren los endpoints
     (para generar la prueba importan las rutas; para la evidencia, la lógica, que suele estar en otro módulo). `classes` = también las clases sin métodos (esquemas).
     """
-    wanted = _words(" ".join([rule.title, rule.description, rule.criterion or ""]))
+    wanted = _words(rule_words(rule))
     if not wanted:
         return []
     endpoint_fns = {e.function: e for e in project_map.endpoints}
@@ -258,7 +266,12 @@ def _map_context(project_map: mapa.ProjectMap) -> dict:
 
 def _rule_text(rule: reglas.BusinessRule) -> str:
     parts = [f"id: {rule.id}", f"titulo: {rule.title}", f"descripcion: {rule.description}", f"severidad: {rule.severity}"]
-    if rule.criterion:
+    if rule.tipo:
+        parts.append(f"tipo: {rule.tipo}")
+    if rule.scenarios:
+        parts.append("escenarios (una prueba por escenario):")
+        parts += [f"  - dado {s.given} · cuando {s.when} · entonces {s.then}" for s in rule.scenarios]
+    elif rule.criterion:
         parts.append(f"criterio: {rule.criterion}")
     if rule.story:
         parts.append(f"historia: {rule.story}")
@@ -376,7 +389,10 @@ def generate(
     """
     Bloqueante (red). LlmError si Gemini falla; GenerationError si la respuesta no sirve. Si la prueba no pasa la
     validación (sintaxis, fixtures, nombres), se le devuelven los errores a la IA una vez para que la corrija.
+    Una regla con `tipo = "proceso"` no llama a la IA: es fuera del código.
     """
+    if rule.process:
+        return Generated("fuera_del_codigo", "proceso", "", [], [], "", 'Regla de proceso (tipo = "proceso"): no está en el código')
     question = Turn("user", prompt(root, project_map, harness_code, rule))
     data, model = _answer(llm, [question])
     code = add_missing_imports(_clean_code(str(data.get("codigo") or "")))
@@ -628,19 +644,22 @@ def context(conn, settings: Settings, repo_id: str) -> Context:
 
 
 def active_rules(ws: Workspace, conn, repo_id: str) -> tuple[list[reglas.BusinessRule], str | None, str | None, str | None]:
-    """(reglas activas, de dónde salen, su texto, error) con el mismo criterio que el análisis: el archivo válido del repo gana."""
+    """
+    (reglas activas, de dónde salen, su texto, error) con el mismo criterio que el análisis: el archivo válido del repo
+    gana. Solo las aprobadas: a un borrador no se le genera prueba (primero se resuelven sus dudas y se aprueba).
+    """
     repo_error = None
     if ws.exists():
         try:
             found = reglas.find(ws.root)
             if found:
-                return reglas.parse(found[1]).rules, found[0], found[1], None
+                return reglas.parse(found[1]).approved, found[0], found[1], None
         except reglas.RulesError as exc:
             repo_error = str(exc)
     uploaded = RulesStore(conn).uploaded_text(repo_id)
     if uploaded:
         try:
-            return reglas.parse(uploaded).rules, reglas.APP_SOURCE, uploaded, None
+            return reglas.parse(uploaded).approved, reglas.APP_SOURCE, uploaded, None
         except reglas.RulesError as exc:
             return [], reglas.APP_SOURCE, None, str(exc)
     return [], None, None, repo_error

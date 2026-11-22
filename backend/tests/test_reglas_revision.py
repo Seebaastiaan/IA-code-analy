@@ -68,7 +68,9 @@ def test_revisar_repo_con_reglas_validas(client, fake):
     f = body["file"]
     assert f["path"] == "reglas_negocio.toml" and f["project"] == "Tienda" and len(f["rules"]) == 4 and f["content"] == REGLAS
     # `rutas` revisadas contra el árbol de la rama
-    assert f["warnings"] == ["RN-002: la ruta `app/admin/` no existe en ana/api-pagos", "RN-004: la ruta `app/pago/` no existe en ana/api-pagos"]
+    # Primero el aviso de `obligatorio` obsoleto (REGLAS es formato v1)
+    assert f["warnings"][0].startswith("RN-002: `obligatorio` está obsoleto")
+    assert f["warnings"][1:] == ["RN-002: la ruta `app/admin/` no existe en ana/api-pagos", "RN-004: la ruta `app/pago/` no existe en ana/api-pagos"]
 
 
 def test_revisar_repo_con_reglas_invalidas(client, fake):
@@ -82,7 +84,7 @@ def test_revisar_repo_con_reglas_invalidas(client, fake):
 def test_revisar_valida_el_contenido_del_formulario(client, fake):
     fake.set_file("reglas_negocio.toml", INVALIDO)
     ok = revisar(client, content=REGLAS.replace('["app/admin/"]', '["app/core/"]')).json()
-    assert ok["checked"]["valid"] and ok["checked"]["warnings"] == ["RN-004: la ruta `app/pago/` no existe en ana/api-pagos"]
+    assert ok["checked"]["valid"] and ok["checked"]["warnings"][1:] == ["RN-004: la ruta `app/pago/` no existe en ana/api-pagos"]
     mal = revisar(client, content="[proyecto").json()["checked"]
     assert mal["valid"] is False and "TOML" in mal["error"]
 

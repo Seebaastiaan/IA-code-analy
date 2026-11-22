@@ -102,7 +102,9 @@ def test_toml_generado_es_valido_y_numerado():
     rs = reglas.parse(content)
     assert [r.id for r in rs.rules] == ["RN-001", "RN-002"] and rs.project == "ana/api-pagos"
     assert rs.rules[0].criterion.startswith("Dado un pago") and rs.rules[1].criterion is None
-    assert "# Fuente: pág. 4 · §3.2\n[[regla]]" in content and "«Requerimientos.pdf»" in content
+    # Formato v2: la fuente es un campo y todo entra en borrador
+    assert rs.format == 2 and rs.rules[0].source == "pág. 4 · §3.2" and "«Requerimientos.pdf»" in content
+    assert {r.status for r in rs.rules} == {"borrador"} and rs.approved == []
     # Sin rutas ni patrones: se verifican con pruebas
     assert all(not r.paths and not r.forbidden and not r.required for r in rs.rules)
 
@@ -113,7 +115,7 @@ def test_toml_escapa_y_recorta_textos():
     rule = reglas.parse(content).rules[0]
     assert len(rule.title) == reglas.MAX_TITLE and rule.title.startswith('Comillas " y \\ y salto') and rule.title.endswith("…")
     assert rule.description == "a bc d"
-    assert "# Fuente: pág. 1\n" in content
+    assert rule.source == "pág. 1"
     tomllib.loads(content)
 
 
@@ -234,7 +236,7 @@ def test_contradicciones_se_marcan_y_bloquean_el_archivo(client, llm):
     v = body["validation"]
     assert not v["valid"] and "RN-001 y RN-003 se contradicen según el documento" in v["error"] and "Deja solo la regla que vale" in v["error"]
     # El equipo deja la de 24 h: válido (la marca que queda ya no estorba)
-    sin_48 = body["content"].split("\n\n# Fuente: §7.1")[0] + "\n"
+    sin_48 = body["content"].split(f'\n\n{marca}\n[[regla]]\nid          = "RN-003"')[0] + "\n"
     assert reglas.parse(sin_48).rules[-1].id == "RN-002"
     # O decide que no se contradicen y borra los comentarios
     sin_marca = "\n".join(line for line in body["content"].splitlines() if not line.startswith("# CONTRADICCIÓN")) + "\n"

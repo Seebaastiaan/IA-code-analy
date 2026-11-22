@@ -291,7 +291,7 @@ def test_cargar_reglas_desde_configuracion(client, cloner):
     cloner.contenido = None
     rid = repo_id(client)
     vacio = client.get(f"/api/projects/{rid}/reglas").json()
-    assert vacio == {"active": None, "repo": None, "uploaded": None, "cloned": True, "commit": vacio["commit"], "documents": [], "can_import": False}
+    assert vacio == {"active": None, "repo": None, "uploaded": None, "cloned": True, "commit": vacio["commit"], "documents": [], "can_import": False, "messages": []}
 
     malo = client.put(f"/api/projects/{rid}/reglas", json={"content": regla(id='"RN-1"')})
     assert malo.status_code == 422 and malo.json()["error"]["code"] == "invalid_rules"

@@ -89,7 +89,7 @@ class Evidence:
 
 
 def _rule_query(rule: reglas.BusinessRule) -> str:
-    return " ".join(x for x in (rule.title, rule.description, rule.criterion or "") if x)
+    return pruebas.rule_words(rule)
 
 
 def fragments(

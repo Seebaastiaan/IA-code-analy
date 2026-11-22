@@ -1,12 +1,14 @@
-# reglas_negocio.toml — reglas de negocio de api-pagos (formato: docs/PROPUESTA_REGLAS_NEGOCIO.md)
+# reglas_negocio.toml — reglas de negocio de api-pagos (formato v2: docs/PROPUESTA_REGLAS_VERIFICABLES.md §5)
 #
 # Cada regla dice, en palabras del negocio, qué debe pasar siempre. IA voy la comprueba de una de dos formas:
 #   - con una PRUEBA marcada @pytest.mark.regla("RN-00X") (o llamada test_rn00X_…) que simula el criterio;
-#   - con un PATRÓN: un texto que NO debe aparecer en el código (prohibido) o que SÍ debe aparecer (obligatorio).
+#   - con un PATRÓN: un texto que NO debe aparecer en el código (prohibido).
+# Sin `estado` una regla cuenta como aprobada; las que se importan de un documento entran en borrador.
 
 [proyecto]
 nombre  = "API de pagos"
 version = "1.0"
+formato = 2
 
 [[regla]]
 id          = "RN-001"
@@ -37,8 +39,9 @@ titulo      = "La clave secreta de los tokens no está escrita en el código"
 descripcion = "La clave con la que se firman las sesiones se lee del servidor (variable de entorno). Si estuviera en el código, cualquiera con acceso al repositorio podría hacerse pasar por un cliente."
 severidad   = "media"
 rutas       = ["auth.py"]
-# PATRÓN: auth.py debe leer la clave con  os.environ  u  os.getenv
-obligatorio = 'os\.(environ|getenv)'
+tipo        = "datos"
+# PATRÓN: en auth.py no debe haber una clave (SECRET…, …KEY) asignada a un texto; se lee con os.environ u os.getenv
+prohibido   = '(SECRET|KEY)\w*\s*=\s*["\x27]'
 historia    = "HU-01"
 
 [[regla]]

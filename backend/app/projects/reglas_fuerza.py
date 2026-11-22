@@ -338,7 +338,7 @@ def mutants(
     funciones que se parecen a la regla (si ninguna se parece, no hay mutantes: la prueba de fuerza no aplica).
     """
     found = targets(root, project_map, endpoints, ev)
-    words = pruebas._words(" ".join([rule.title, rule.description, rule.criterion or ""]))
+    words = pruebas._words(pruebas.rule_words(rule))
 
     def score(ts: list[Target]) -> list[tuple]:
         """(−relevancia, tipo, archivo, línea, candidato, código, líneas, ¿hay que filtrarlo por palabras?)"""

@@ -58,8 +58,18 @@ TEST_NAME_RE = re.compile(r"^test_rn(\d{3})(?:_|$)", re.IGNORECASE)
 SEVERITIES = ("alta", "media", "baja")
 REQUIRED = ("id", "titulo", "descripcion", "severidad")
 OPTIONAL_TEXT = ("historia", "responsable", "criterio")
-RULE_FIELDS = {*REQUIRED, *OPTIONAL_TEXT, "rutas", "prohibido", "obligatorio", "ia"}
-PROJECT_FIELDS = {"nombre", "version"}
+# Formato v2 (docs/PROPUESTA_REGLAS_VERIFICABLES.md §5): todos opcionales, un archivo v1 sigue siendo válido
+TYPES = ("datos", "flujo", "calculo", "permisos", "auditoria", "integracion", "proceso")
+STATES = ("borrador", "aprobada")
+V2_FIELDS = {"tipo", "estado", "fuente", "dudas", "escenario"}
+RULE_FIELDS = {*REQUIRED, *OPTIONAL_TEXT, "rutas", "prohibido", "obligatorio", "ia", *V2_FIELDS}
+PROJECT_FIELDS = {"nombre", "version", "formato"}
+SCENARIO_FIELDS = ("dado", "cuando", "entonces")
+MAX_SCENARIOS = 10
+MAX_DOUBTS = 10
+MAX_DOUBT = 300
+# «Dado …, cuando …, entonces …» en un `criterio` v1: se lee como un escenario
+CRITERION_RE = re.compile(r"^\s*dad[oa]s?\s+(?P<dado>.+?)\s*,\s*cuando\s+(?P<cuando>.+?)\s*,\s*entonces\s+(?P<entonces>.+?)\s*\.?\s*$", re.IGNORECASE | re.DOTALL)
 
 # PROPUESTA_REGLAS_VERIFICABLES.md §9. prueba_rota = falló la prueba o su arnés, no el código (no se culpa al código);
 # no_implementada = la acción del escenario no existe en el código; fuera_del_codigo = regla de proceso (no se verifica)
@@ -72,39 +82,56 @@ Origin = Literal["repo", "app"]
 APP_SOURCE = "Configuración (cargadas en la app)"
 
 
-# Plantilla que se descarga desde Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §3.3)
-TEMPLATE = '''# reglas_negocio.toml — reglas de negocio del proyecto (IA voy, docs/PROPUESTA_REGLAS_NEGOCIO.md)
+# Plantilla que se descarga desde Configuración → Reglas de negocio (formato v2, docs/PROPUESTA_REGLAS_VERIFICABLES.md §5)
+TEMPLATE = '''# reglas_negocio.toml — reglas de negocio del proyecto (IA voy, docs/PROPUESTA_REGLAS_VERIFICABLES.md §5)
 # Va en la raíz del repositorio (o en docs/) y se sube con commit, como el resto del código.
-# Cada regla se verifica con una prueba (@pytest.mark.regla("RN-001") o test_rn001_…) y/o con un patrón.
+# Cada regla se verifica con una prueba (@pytest.mark.regla("RN-002") o test_rn002_…): IA voy la puede escribir a partir
+# de sus escenarios. Solo cuentan las reglas con estado = "aprobada".
 
 [proyecto]
 nombre  = "Mi proyecto"
 version = "1.0"
+formato = 2
 
+# Avanzado · patrón: para lo que se ve en el texto del código (`prohibido` no se genera solo)
 [[regla]]
 id          = "RN-001"                       # RN- + 3 dígitos, único
 titulo      = "Montos con Decimal"
 descripcion = "Todo monto de dinero se calcula con Decimal; nunca con float."
 severidad   = "alta"                         # alta | media | baja
+estado      = "aprobada"                     # borrador | aprobada (solo cuentan las aprobadas)
 rutas       = ["app/pagos/"]                 # opcional · vacío = todo el repo
 prohibido   = 'float\\('                      # opcional · regex que NO debe aparecer
-historia    = "HU-01"                        # opcional · trazabilidad
-criterio    = "Dado un pago de $0.10, cuando se cobra, entonces el total es exactamente $0.10"
 
 [[regla]]
 id          = "RN-002"
 titulo      = "Un pedido cancelado no vuelve a pagado"
 descripcion = "Una vez cancelado, el estado de un pedido no puede cambiar a 'pagado'."
 severidad   = "alta"
-# Sin patrón: la verifica una prueba marcada @pytest.mark.regla("RN-002")
+tipo        = "flujo"                        # datos | flujo | calculo | permisos | auditoria | integracion | proceso
+estado      = "aprobada"
+fuente      = "Requisitos.docx · §3.2"       # opcional · de dónde sale la regla
+historia    = "HU-01"                        # opcional · trazabilidad
+dudas       = []                             # lo ambiguo del documento: con dudas no se aprueba desde la app
+
+  [[regla.escenario]]                        # uno o más (máx. 10): la prueba sale de aquí
+  dado     = "un pedido cancelado"
+  cuando   = "se intenta marcar como pagado"
+  entonces = "se rechaza y el pedido sigue cancelado"
 
 [[regla]]
 id          = "RN-003"
-titulo      = "Rutas de administración protegidas"
-descripcion = "Toda ruta bajo /admin exige el decorador @requiere_admin."
+titulo      = "Solo administración borra usuarios"
+descripcion = "Borrar un usuario lo puede hacer solo un administrador; los demás roles reciben 403."
 severidad   = "media"
+tipo        = "permisos"
+estado      = "borrador"                     # todavía no cuenta: apruébala cuando esté lista
 rutas       = ["app/admin/"]
-obligatorio = '@requiere_admin'              # opcional · regex que DEBE aparecer en cada archivo
+
+  [[regla.escenario]]
+  dado     = "un usuario con rol vendedor"
+  cuando   = "intenta borrar otro usuario"
+  entonces = "se rechaza con 403 y el usuario sigue existiendo"
 '''
 
 
@@ -233,6 +260,18 @@ class RulesError(ValueError):
 
 
 @dataclass(frozen=True)
+class Scenario:
+    """Un escenario *Dado / Cuando / Entonces* (`[[regla.escenario]]`): el puente entre el documento y la prueba."""
+
+    given: str
+    when: str
+    then: str
+
+    def text(self) -> str:
+        return f"Dado {self.given}, cuando {self.when}, entonces {self.then}"
+
+
+@dataclass(frozen=True)
 class BusinessRule:
     id: str
     title: str
@@ -245,6 +284,23 @@ class BusinessRule:
     story: str | None = None
     owner: str | None = None
     criterion: str | None = None
+    # Formato v2
+    tipo: str | None = None
+    # borrador | aprobada (sin `estado`: aprobada, por compatibilidad con v1). Solo las aprobadas se verifican
+    status: str = "aprobada"
+    source: str | None = None
+    doubts: tuple[str, ...] = ()
+    # Los de `[[regla.escenario]]` o, si no hay, el `criterio` leído como escenario
+    scenarios: tuple[Scenario, ...] = ()
+
+    @property
+    def approved(self) -> bool:
+        return self.status == "aprobada"
+
+    @property
+    def process(self) -> bool:
+        """Regla humana u organizacional: fuera del código, no se verifica ni cuenta."""
+        return self.tipo == "proceso"
 
 
 @dataclass(frozen=True)
@@ -252,6 +308,18 @@ class RuleSet:
     project: str
     version: str | None
     rules: list[BusinessRule]
+    # 1 o 2 (`formato` en [proyecto]; 1 si falta)
+    format: int = 1
+    # Campos obsoletos y reglas aprobadas con dudas abiertas: no invalidan el archivo
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def approved(self) -> list[BusinessRule]:
+        return [r for r in self.rules if r.approved]
+
+    @property
+    def drafts(self) -> list[BusinessRule]:
+        return [r for r in self.rules if not r.approved]
 
 
 @dataclass(frozen=True)
@@ -305,6 +373,9 @@ class RulesCheck:
     # Internos (no se guardan): resultado del patrón por regla y pruebas encontradas leyendo el código
     patterns: list[RuleResult] = field(default_factory=list, repr=False)
     declared: list[LinkedTest] = field(default_factory=list, repr=False)
+    # Avisos del archivo (campos obsoletos, borradores) y reglas en borrador: no se verifican ni salen en el reporte
+    notes: list[str] = field(default_factory=list, repr=False)
+    drafts: tuple[str, ...] = field(default=(), repr=False)
 
     def count(self, status: Status) -> int:
         return sum(r.status == status for r in self.results)
@@ -388,6 +459,52 @@ def _pattern(rule: dict, key: str, where: str) -> str | None:
     return pattern
 
 
+def _scenarios(raw: dict, where: str) -> tuple[Scenario, ...]:
+    items = raw.get("escenario", [])
+    if isinstance(items, dict):
+        raise RulesError(f"{where}: cada escenario va en su propia tabla [[regla.escenario]] (doble corchete)")
+    if not isinstance(items, list):
+        raise RulesError(f"{where}: `escenario` debe ser una lista de tablas [[regla.escenario]]")
+    if len(items) > MAX_SCENARIOS:
+        raise RulesError(f"{where}: máximo {MAX_SCENARIOS} escenarios por regla (tiene {len(items)})")
+    out: list[Scenario] = []
+    for n, item in enumerate(items, start=1):
+        at = f"{where} · escenario {n}"
+        if not isinstance(item, dict):
+            raise RulesError(f"{at}: cada escenario va en una tabla [[regla.escenario]] con dado, cuando y entonces")
+        unknown = sorted(set(item) - set(SCENARIO_FIELDS))
+        if unknown:
+            raise RulesError(f"{at}: campo desconocido `{unknown[0]}` (campos válidos: dado, cuando, entonces)")
+        given, when, then = (_text(item, k, at, MAX_TEXT, required=True) for k in SCENARIO_FIELDS)
+        out.append(Scenario(given, when, then))
+    return tuple(out)
+
+
+def criterion_scenario(criterion: str | None) -> Scenario | None:
+    """El `criterio` v1 como escenario, si tiene la forma «Dado …, cuando …, entonces …»."""
+    m = CRITERION_RE.match(criterion or "")
+    return Scenario(m.group("dado"), m.group("cuando"), m.group("entonces")) if m else None
+
+
+def _doubts(raw: dict, where: str) -> tuple[str, ...]:
+    items = raw.get("dudas", [])
+    if not isinstance(items, list) or not all(isinstance(d, str) for d in items):
+        raise RulesError(f"{where}: `dudas` debe ser una lista de textos, p. ej. [\"¿Se avisa o se bloquea?\"]")
+    if len(items) > MAX_DOUBTS:
+        raise RulesError(f"{where}: máximo {MAX_DOUBTS} dudas por regla")
+    for d in items:
+        if len(d.strip()) > MAX_DOUBT:
+            raise RulesError(f"{where}: cada duda admite máximo {MAX_DOUBT} caracteres")
+    return tuple(dict.fromkeys(d.strip() for d in items if d.strip()))
+
+
+def _choice(raw: dict, key: str, where: str, options: tuple[str, ...]) -> str | None:
+    value = _text(raw, key, where, 20, required=False)
+    if value is not None and value not in options:
+        raise RulesError(f"{where}: `{key}` debe ser {', '.join(options[:-1])} o {options[-1]} (no «{value}»)")
+    return value
+
+
 def _rule(raw: object, where: str) -> BusinessRule:
     if not isinstance(raw, dict):
         raise RulesError(f"{where}: cada regla va en su propia tabla [[regla]]")
@@ -409,6 +526,10 @@ def _rule(raw: object, where: str) -> BusinessRule:
     ai = raw.get("ia", False)
     if not isinstance(ai, bool):
         raise RulesError(f"{where}: `ia` debe ser true o false")
+    criterion = _text(raw, "criterio", where, MAX_TEXT, required=False)
+    scenarios = _scenarios(raw, where)
+    if not scenarios and (from_criterion := criterion_scenario(criterion)):
+        scenarios = (from_criterion,)
     return BusinessRule(
         id=rule_id,
         title=_text(raw, "titulo", where, MAX_TITLE, required=True),
@@ -420,8 +541,28 @@ def _rule(raw: object, where: str) -> BusinessRule:
         ai=ai,
         story=_text(raw, "historia", where, MAX_TITLE, required=False),
         owner=_text(raw, "responsable", where, MAX_TITLE, required=False),
-        criterion=_text(raw, "criterio", where, MAX_TEXT, required=False),
+        criterion=criterion,
+        tipo=_choice(raw, "tipo", where, TYPES),
+        status=_choice(raw, "estado", where, STATES) or "aprobada",
+        source=_text(raw, "fuente", where, MAX_TITLE, required=False),
+        doubts=_doubts(raw, where),
+        scenarios=scenarios,
     )
+
+
+def _rule_warnings(rule: BusinessRule, raw: dict) -> list[str]:
+    """Avisos que no invalidan el archivo: campos obsoletos y reglas aprobadas con dudas abiertas."""
+    out: list[str] = []
+    if "obligatorio" in raw:
+        out.append(
+            f"{rule.id}: `obligatorio` está obsoleto (un archivo que no lo tenga, como un __init__.py vacío, ya no cumple); "
+            "verifica la regla con una prueba"
+        )
+    if "ia" in raw:
+        out.append(f"{rule.id}: `ia` ya no se usa y se ignora; la evidencia de apoyo existe para todas las reglas")
+    if rule.approved and rule.doubts:
+        out.append(f"{rule.id} está aprobada con {len(rule.doubts)} duda(s) abierta(s): resuélvelas o vuélvela a borrador")
+    return out
 
 
 def parse(text: str) -> RuleSet:
@@ -441,11 +582,14 @@ def parse(text: str) -> RuleSet:
         raise RulesError(f"{FILENAME}: falta la sección [proyecto] con su `nombre`")
     extra = sorted(set(project) - PROJECT_FIELDS)
     if extra:
-        raise RulesError(f"[proyecto]: campo desconocido `{extra[0]}` (campos válidos: nombre, version)")
+        raise RulesError(f"[proyecto]: campo desconocido `{extra[0]}` (campos válidos: nombre, version, formato)")
     name = _text(project, "nombre", "[proyecto]", MAX_TITLE, required=True)
     version = project.get("version")
     if version is not None and not isinstance(version, (str, int, float)):
         raise RulesError("[proyecto]: `version` debe ser texto, p. ej. \"1.2\"")
+    fmt = project.get("formato", 1)
+    if fmt not in (1, 2) or isinstance(fmt, bool):
+        raise RulesError("[proyecto]: `formato` debe ser 1 o 2")
 
     raw_rules = data.get("regla", [])
     if isinstance(raw_rules, dict):
@@ -455,6 +599,7 @@ def parse(text: str) -> RuleSet:
 
     lines = _rule_lines(text)
     rules: list[BusinessRule] = []
+    warnings: list[str] = []
     seen: set[str] = set()
     for i, raw in enumerate(raw_rules):
         where = f"línea {lines[i]}" if i < len(lines) else f"regla #{i + 1}"
@@ -463,8 +608,83 @@ def parse(text: str) -> RuleSet:
             raise RulesError(f"{where}: {rule.id} está repetida")
         seen.add(rule.id)
         rules.append(rule)
+        warnings += _rule_warnings(rule, raw)
     _check_marked_contradictions(text, seen)
-    return RuleSet(project=name, version=None if version is None else str(version), rules=rules)
+    return RuleSet(project=name, version=None if version is None else str(version), rules=rules, format=fmt, warnings=warnings[:MAX_WARNINGS])
+
+
+# ───────────────────────── Editar campos v2 en el texto ─────────────────────────
+
+# Una clave de la tabla de la regla: `estado = "x"`, `dudas = [...]` (también en varias líneas)
+_KEY_LINE = re.compile(r"^(\s*)([A-Za-z_]+)\s*=")
+_TABLE_LINE = re.compile(r"^\s*\[")
+
+
+def _toml_value(value: str | list[str]) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_str(v) for v in value) + "]"
+    return _toml_str(value)
+
+
+def set_fields(text: str, rule_id: str, updates: dict[str, str | list[str] | None]) -> str:
+    """
+    El texto con los campos de una regla cambiados (`None` = quitarlo), sin tocar lo demás: comentarios, orden, el
+    resto de las reglas. Es lo que usa la app para aprobar, volver a borrador o resolver dudas en las reglas cargadas.
+    RulesError si la regla no está o el resultado no es válido.
+    """
+    lines = text.splitlines()
+    heads = [n - 1 for n in _rule_lines(text)]
+    block = None
+    for i, start in enumerate(heads):
+        end = heads[i + 1] if i + 1 < len(heads) else len(lines)
+        # La tabla de la regla termina en su primer [[regla.escenario]] (o en cualquier otra tabla)
+        own_end = next((j for j in range(start + 1, end) if _TABLE_LINE.match(lines[j])), end)
+        if any(re.match(rf'^\s*id\s*=\s*["\']{re.escape(rule_id)}["\']', lines[j]) for j in range(start + 1, own_end)):
+            block = (start, own_end)
+            break
+    if block is None:
+        raise RulesError(f"{rule_id} no está en las reglas")
+    start, end = block
+    keys: dict[str, tuple[int, int]] = {}
+    j = start + 1
+    while j < end:
+        m = _KEY_LINE.match(lines[j])
+        if not m:
+            j += 1
+            continue
+        last = j
+        # Un arreglo en varias líneas sigue hasta su `]`
+        if "[" in lines[j].split("=", 1)[1] and "]" not in lines[j].split("=", 1)[1]:
+            while last + 1 < end and "]" not in lines[last]:
+                last += 1
+        keys[m.group(2)] = (j, last)
+        j = last + 1
+    # Las líneas nuevas van después de `severidad` (o de la última clave de la regla)
+    anchor = keys.get("severidad", max(keys.values(), default=(start, start)))[1]
+    inserts: list[str] = []
+    replaced: dict[int, tuple[int, str | None]] = {}
+    for key, value in updates.items():
+        line = None if value is None else f"{key.ljust(11)} = {_toml_value(value)}"
+        if key in keys:
+            replaced[keys[key][0]] = (keys[key][1], line)
+        elif line is not None:
+            inserts.append(line)
+    out: list[str] = []
+    skip_to = -1
+    for n, line in enumerate(lines):
+        if n in replaced:
+            last, new = replaced[n]
+            skip_to = last
+            if new is not None:
+                out.append(new)
+        elif n > skip_to:
+            out.append(line)
+        # El ancla puede ser la última línea de una clave reemplazada: lo nuevo va igual después
+        if n == anchor:
+            out += inserts
+    result = "\n".join(out) + ("\n" if text.endswith("\n") else "")
+    parse(result)
+    return result
 
 
 def find(root: Path) -> tuple[str, str] | None:
@@ -688,6 +908,8 @@ def combine(pattern: RuleResult, tests: list[LinkedTest], reason: str | None, no
     ejecutar (no implementada, fuera del código); solo se usa si la regla no tiene pruebas ni patrón.
     """
     rule = pattern.rule
+    if rule.process and not tests and pattern.level == "ninguno":
+        return RuleResult(rule, "fuera_del_codigo", "ninguno", 'Regla de proceso (tipo = "proceso"): no está en el código, no se verifica')
     if note is not None and not tests and pattern.level == "ninguno":
         return RuleResult(rule, note.status, "ninguno", note.detail, pattern.evidence, pattern.evidence_total)
     has_pattern = pattern.level != "ninguno"
@@ -723,13 +945,13 @@ def combine(pattern: RuleResult, tests: list[LinkedTest], reason: str | None, no
     return RuleResult(rule, status, level, detail, pattern.evidence, pattern.evidence_total, ordered[:MAX_TESTS])
 
 
-def _warnings(source: str, rule_ids: set[str], tests: list[LinkedTest]) -> list[str]:
+def _warnings(source: str, rule_ids: set[str], tests: list[LinkedTest], drafts: tuple[str, ...] = ()) -> list[str]:
     out: list[str] = []
     for t in tests:
         for rid in t.rules:
             if not ID_RE.match(rid):
                 out.append(f"{t.name} usa «{rid}», que no cumple el formato RN-###")
-            elif rid not in rule_ids:
+            elif rid not in rule_ids and rid not in drafts:
                 out.append(f"{t.name} usa {rid}, que no está en {source}")
     return list(dict.fromkeys(out))[:MAX_WARNINGS]
 
@@ -738,8 +960,15 @@ def _with(check: RulesCheck, tests: list[LinkedTest], reason: str | None, notes:
     notes = notes or {}
     results = [combine(p, [t for t in tests if p.rule.id in t.rules], reason, notes.get(p.rule.id)) for p in check.patterns]
     ids = {p.rule.id for p in check.patterns}
-    warnings = conflicts([p.rule for p in check.patterns]) + _warnings(check.source or FILENAME, ids, tests)
-    return replace(check, results=results, warnings=warnings[:MAX_WARNINGS], tests_ran=reason is None)
+    warnings = check.notes + conflicts([p.rule for p in check.patterns]) + _warnings(check.source or FILENAME, ids, tests, check.drafts)
+    return replace(check, results=results, warnings=list(dict.fromkeys(warnings))[:MAX_WARNINGS], tests_ran=reason is None)
+
+
+def drafts_note(drafts: list[BusinessRule]) -> str | None:
+    if not drafts:
+        return None
+    ids = ", ".join(r.id for r in drafts[:8]) + ("…" if len(drafts) > 8 else "")
+    return f"{len(drafts)} regla(s) en borrador no se verifican ni salen en el reporte ({ids}): apruébalas en Configuración → Reglas de negocio"
 
 
 # Sin sandbox (o sin que pytest corra) las pruebas ligadas se encuentran leyendo el código
@@ -826,9 +1055,12 @@ def run(
             cache[file] = read_lines(file)
         return cache[file]
 
-    patterns = [check_rule(r, files, cached) for r in ruleset.rules]
+    # Solo las aprobadas cuentan (PROPUESTA_REGLAS_VERIFICABLES.md §9): los borradores se ven en Configuración
+    patterns = [check_rule(r, files, cached) for r in ruleset.approved]
+    notes = [*ruleset.warnings, *filter(None, [drafts_note(ruleset.drafts)])]
     check = RulesCheck(
         source=source, project=ruleset.project, origin=origin, repo_error=repo_error, patterns=patterns, declared=declared_tests(files, cached),
+        notes=notes, drafts=tuple(r.id for r in ruleset.drafts),
     )
     return _with(check, check.declared, PENDING)
 

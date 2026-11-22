@@ -43,12 +43,34 @@ class RulesContent(BaseModel):
     content: str = Field(max_length=reglas.MAX_BYTES)
 
 
+class ScenarioOut(BaseModel):
+    given: str
+    when: str
+    then: str
+
+
 class RulePreview(BaseModel):
     id: str
     title: str
     severity: str
     # Tiene `prohibido` u `obligatorio`; sin patrón la verifican sus pruebas
     pattern: bool
+    # Formato v2 (PROPUESTA_REGLAS_VERIFICABLES.md §5): la tabla de aprobación
+    description: str = ""
+    tipo: str | None = None
+    # borrador | aprobada: solo las aprobadas se verifican
+    status: Literal["borrador", "aprobada"] = "aprobada"
+    source: str | None = None
+    doubts: list[str] = Field(default_factory=list)
+    scenarios: list[ScenarioOut] = Field(default_factory=list)
+
+
+def preview(r: reglas.BusinessRule) -> RulePreview:
+    return RulePreview(
+        id=r.id, title=r.title, severity=r.severity, pattern=bool(r.forbidden or r.required), description=r.description,
+        tipo=r.tipo, status=r.status, source=r.source or r.story, doubts=list(r.doubts),
+        scenarios=[ScenarioOut(given=s.given, when=s.when, then=s.then) for s in r.scenarios],
+    )
 
 
 class Validation(BaseModel):
@@ -87,6 +109,18 @@ class ProjectRules(BaseModel):
     # Documentos de requisitos de la copia del repo (se pueden importar) y si hay IA para importarlos
     documents: list[str] = Field(default_factory=list)
     can_import: bool = False
+    # Avisos de la última acción (reglas que no se pudieron aprobar y por qué)
+    messages: list[str] = Field(default_factory=list)
+
+
+class RuleStates(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=reglas.MAX_RULES)
+    status: Literal["borrador", "aprobada"]
+
+
+class RuleDoubts(BaseModel):
+    # Las dudas que siguen abiertas (quitar una = resolverla)
+    doubts: list[str] = Field(max_length=reglas.MAX_DOUBTS)
 
 
 def validate(text: str, files: list[str] | None = None, project: str = "") -> Validation:
@@ -96,9 +130,8 @@ def validate(text: str, files: list[str] | None = None, project: str = "") -> Va
     except reglas.RulesError as exc:
         return Validation(valid=False, error=str(exc))
     return Validation(
-        valid=True, project=rs.project,
-        rules=[RulePreview(id=r.id, title=r.title, severity=r.severity, pattern=bool(r.forbidden or r.required)) for r in rs.rules],
-        warnings=(reglas.conflicts(rs.rules) + (reglas.missing_paths(rs, files, project) if files is not None else []))[: reglas.MAX_WARNINGS],
+        valid=True, project=rs.project, rules=[preview(r) for r in rs.rules],
+        warnings=(rs.warnings + reglas.conflicts(rs.rules) + (reglas.missing_paths(rs, files, project) if files is not None else []))[: reglas.MAX_WARNINGS],
     )
 
 
@@ -168,6 +201,68 @@ def upload_rules(project_id: str, body: RulesContent, store: Analyses, user_id: 
 def delete_rules(project_id: str, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
     require_repo(store, user_id, project_id)
     RulesStore(store.conn).delete_upload(project_id)
+    return _project_rules(store, settings, project_id)
+
+
+def _editable(store: Analyses, settings: Config, project_id: str) -> tuple[str, reglas.RuleSet]:
+    """
+    El texto de las reglas cargadas en la app, que es lo único que la app edita. Si el análisis usa las del repo, se
+    editan en el repo (su archivo manda) o se cargan en la app.
+    """
+    current = _project_rules(store, settings, project_id)
+    if current.active == "repo":
+        raise ApiError(
+            409, "repo_rules",
+            f"El análisis usa el {current.repo.path if current.repo else reglas.FILENAME} del repositorio: cambia `estado` y `dudas` ahí "
+            "(o carga las reglas en la app)",
+        )
+    text = RulesStore(store.conn).uploaded_text(project_id)
+    if not text:
+        raise ApiError(409, "no_rules", "El proyecto no tiene reglas cargadas en la app")
+    try:
+        return text, reglas.parse(text)
+    except reglas.RulesError as exc:
+        raise ApiError(422, "invalid_rules", str(exc)) from exc
+
+
+@router.post("/api/projects/{project_id}/reglas/estado", response_model=ProjectRules)
+def set_states(project_id: str, body: RuleStates, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
+    """
+    Aprueba (o vuelve a borrador) las reglas de `ids` en las reglas cargadas en la app. Una regla con dudas abiertas no se
+    aprueba: se dice por qué en `messages` (PROPUESTA_REGLAS_VERIFICABLES.md §5).
+    """
+    require_repo(store, user_id, project_id)
+    text, rs = _editable(store, settings, project_id)
+    by_id = {r.id: r for r in rs.rules}
+    unknown = [i for i in body.ids if i not in by_id]
+    if unknown:
+        raise ApiError(404, "unknown_rule", f"{', '.join(unknown)} no está en las reglas del proyecto")
+    messages: list[str] = []
+    for rid in dict.fromkeys(body.ids):
+        rule = by_id[rid]
+        if rule.status == body.status:
+            continue
+        if body.status == "aprobada" and rule.doubts:
+            messages.append(f"{rid}: tiene {len(rule.doubts)} duda(s) abierta(s); resuélvelas antes de aprobarla")
+            continue
+        text = reglas.set_fields(text, rid, {"estado": body.status})
+    RulesStore(store.conn).save_upload(project_id, text, user_id)
+    return _project_rules(store, settings, project_id).model_copy(update={"messages": messages})
+
+
+@router.put("/api/projects/{project_id}/reglas/{rule_id}/dudas", response_model=ProjectRules)
+def set_doubts(project_id: str, rule_id: str, body: RuleDoubts, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
+    """Las dudas que siguen abiertas de una regla: quitar una es resolverla (la respuesta va en la descripción)."""
+    require_repo(store, user_id, project_id)
+    text, rs = _editable(store, settings, project_id)
+    if rule_id not in {r.id for r in rs.rules}:
+        raise ApiError(404, "unknown_rule", f"{rule_id} no está en las reglas del proyecto")
+    doubts = [d.strip()[: reglas.MAX_DOUBT] for d in body.doubts if d.strip()]
+    try:
+        text = reglas.set_fields(text, rule_id, {"dudas": doubts})
+    except reglas.RulesError as exc:
+        raise ApiError(422, "invalid_rules", str(exc)) from exc
+    RulesStore(store.conn).save_upload(project_id, text, user_id)
     return _project_rules(store, settings, project_id)
 
 
