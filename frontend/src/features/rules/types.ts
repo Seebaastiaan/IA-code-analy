@@ -72,6 +72,24 @@ export interface RulePreview {
   severity: Severity
   /** Tiene `prohibido` u `obligatorio` */
   pattern: boolean
+  /** Formato v2 (docs/PROPUESTA_REGLAS_VERIFICABLES.md §5): lo que muestra la tabla de aprobación */
+  description?: string
+  tipo?: RuleKind | null
+  /** Solo las aprobadas se verifican; lo importado entra como borrador */
+  status?: RuleApproval
+  source?: string | null
+  /** Ambigüedades abiertas: con alguna no se puede aprobar */
+  doubts?: string[]
+  scenarios?: RuleScenario[]
+}
+
+export type RuleKind = 'datos' | 'flujo' | 'calculo' | 'permisos' | 'auditoria' | 'integracion' | 'proceso'
+export type RuleApproval = 'borrador' | 'aprobada'
+
+export interface RuleScenario {
+  given: string
+  when: string
+  then: string
 }
 
 export interface RulesValidation {
@@ -99,6 +117,8 @@ export interface ProjectRules {
   documents: string[]
   /** Hay IA (Gemini) para importar reglas desde un documento */
   can_import: boolean
+  /** Avisos de la última acción (reglas que no se pudieron aprobar y por qué) */
+  messages?: string[]
 }
 
 /** Archivo de reglas del repo: valid | invalid | missing. unavailable = no se pudo leer sin clonar (acceso, rama, GitHub) */

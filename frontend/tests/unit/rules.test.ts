@@ -41,7 +41,18 @@ describe('validación simulada de reglas_negocio.toml', () => {
   const base = '[proyecto]\nnombre = "Tienda"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n'
 
   it('acepta un archivo válido', () => {
-    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false }], warnings: [] })
+    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false, description: 'D', tipo: null, status: 'aprobada', source: null, doubts: [], scenarios: [] }], warnings: [] })
+  })
+
+  it('lee el formato v2: tipo, estado, dudas y escenarios', () => {
+    const v2 = base + ['tipo = "flujo"', 'estado = "borrador"', 'fuente = "§2"', 'dudas = ["¿Y si falta?"]', '', '  [[regla.escenario]]', '  dado = "a"', '  cuando = "b"', '  entonces = "c"', ''].join('\n')
+    const rule = validate(v2).rules[0]
+    expect(rule).toMatchObject({ tipo: 'flujo', status: 'borrador', source: '§2', doubts: ['¿Y si falta?'], scenarios: [{ given: 'a', when: 'b', then: 'c' }] })
+  })
+
+  it('no deja aprobar una regla con dudas abiertas', () => {
+    const result = validate(base + 'dudas = ["¿?"]\n')
+    expect(result.valid).toBe(false)
   })
 
   it('indica la línea del error, como el backend', () => {

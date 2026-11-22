@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { download, http } from '@/shared/api/http'
-import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, MatrixCell, PermissionMatrix, ProjectRules, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
+import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, MatrixCell, PermissionMatrix, ProjectRules, RuleApproval, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
 
 export const RULES_FILENAME = 'reglas_negocio.toml'
 
@@ -10,6 +10,8 @@ export const rulesApi = {
   project: (repoId: string) => http.get<ProjectRules>(EP.rules.project(repoId)),
   upload: (repoId: string, content: string) => http.put<ProjectRules>(EP.rules.project(repoId), { content }),
   remove: (repoId: string) => http.delete<ProjectRules>(EP.rules.project(repoId)),
+  setStates: (repoId: string, ids: string[], status: RuleApproval) => http.post<ProjectRules>(EP.rules.states(repoId), { ids, status }),
+  setDoubts: (repoId: string, ruleId: string, doubts: string[]) => http.put<ProjectRules>(EP.rules.doubts(repoId, ruleId), { doubts }),
   validate: (repoId: string, content: string) => http.post<RulesValidation>(EP.rules.validate(repoId), { content }),
   template: (repoId: string) => download(EP.rules.template(repoId), {}, RULES_FILENAME),
   /** `content` = valida ese texto contra el repo en vez de leer su archivo */

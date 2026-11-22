@@ -4,7 +4,7 @@
  * En la revisión de Nuevo análisis, `ana-lopez/scraper-precios` (aún no es proyecto) trae un archivo con errores, y
  * los repos CRUD de prueba (fixtures/crudRules.ts) traen su archivo real.
  */
-import type { BusinessRuleResult, BusinessRules, ImportedRules, ImportRulesRequest, ProjectRules, RulePreview, RulesPrecheck, RulesValidation } from '@/features/rules/types'
+import type { BusinessRuleResult, BusinessRules, ImportedRules, ImportRulesRequest, ProjectRules, RuleApproval, RulePreview, RulesPrecheck, RulesValidation } from '@/features/rules/types'
 import type { Severity } from '@/shared/types/common'
 import { findRepoByName, getRepo } from './db'
 import { CRUD_REPOS } from './fixtures/crudRules'
@@ -126,8 +126,9 @@ interface ParsedRule extends RulePreview {
 
 class RulesError extends Error {}
 
-const PROJECT_FIELDS = ['nombre', 'version']
-const RULE_FIELDS = ['criterio', 'descripcion', 'historia', 'ia', 'id', 'obligatorio', 'prohibido', 'responsable', 'rutas', 'severidad', 'titulo']
+const PROJECT_FIELDS = ['nombre', 'version', 'formato']
+const KINDS = ['datos', 'flujo', 'calculo', 'permisos', 'auditoria', 'integracion', 'proceso']
+const RULE_FIELDS = ['criterio', 'descripcion', 'dudas', 'estado', 'fuente', 'historia', 'ia', 'id', 'obligatorio', 'prohibido', 'responsable', 'rutas', 'severidad', 'tipo', 'titulo']
 
 const value = (block: string, key: string) => new RegExp(`^\\s*${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'm').exec(block)?.slice(1).find((v) => v !== undefined)
 const keys = (block: string) => [...block.matchAll(/^\s*([A-Za-z_]+)\s*=/gm)].map((m) => m[1])
@@ -155,7 +156,9 @@ function parse(text: string): { project: string; rules: ParsedRule[] } {
   if (!project) throw new RulesError('[proyecto]: falta `nombre`')
   const seen = new Set<string>()
   const rules = starts.map((start, i) => {
-    const block = lines.slice(start + 1, starts[i + 1] ?? lines.length).join('\n')
+    const whole = lines.slice(start + 1, starts[i + 1] ?? lines.length).join('\n')
+    // Los escenarios ([[regla.escenario]]) van después de los campos de la regla
+    const [block, ...scenarioBlocks] = whole.split(/^\s*\[\[\s*regla\.escenario\s*\]\]/m)
     const where = `línea ${start + 1}`
     const unknown = keys(block).filter((k) => !RULE_FIELDS.includes(k)).sort()
     if (unknown.length) throw new RulesError(`${where}: campo desconocido \`${unknown[0]}\` (campos válidos: ${RULE_FIELDS.join(', ')})`)
@@ -168,6 +171,13 @@ function parse(text: string): { project: string; rules: ParsedRule[] } {
     if (!['alta', 'media', 'baja'].includes(severity)) throw new RulesError(`${ruleWhere}: \`severidad\` debe ser alta, media o baja (no «${severity}»)`)
     if (/^\s*rutas\s*=\s*[^[\s]/m.test(block)) throw new RulesError(`${ruleWhere}: \`rutas\` debe ser una lista, p. ej. ["app/pagos/"]`)
     for (const key of ['titulo', 'descripcion']) if (!value(block, key)) throw new RulesError(`${ruleWhere}: falta \`${key}\``)
+    const tipo = value(block, 'tipo')
+    if (tipo && !KINDS.includes(tipo)) throw new RulesError(`${ruleWhere}: \`tipo\` debe ser ${KINDS.join(', ')} (no «${tipo}»)`)
+    const status = value(block, 'estado') ?? 'aprobada'
+    if (status !== 'borrador' && status !== 'aprobada') throw new RulesError(`${ruleWhere}: \`estado\` debe ser borrador o aprobada (no «${status}»)`)
+    const doubts = [...(/^\s*dudas\s*=\s*\[(.*)\]\s*$/m.exec(block)?.[1] ?? '').matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse(`"${m[1]}"`) as string)
+    if (status === 'aprobada' && doubts.length) throw new RulesError(`${ruleWhere}: está aprobada pero tiene dudas abiertas; resuélvelas o déjala en borrador`)
+    const scenarios = scenarioBlocks.map((b) => ({ given: value(b, 'dado') ?? '', when: value(b, 'cuando') ?? '', then: value(b, 'entonces') ?? '' }))
     const forbidden = pattern(block, 'prohibido', ruleWhere)
     const required = pattern(block, 'obligatorio', ruleWhere)
     if (seen.has(id)) throw new RulesError(`${where}: ${id} está repetida`)
@@ -175,6 +185,7 @@ function parse(text: string): { project: string; rules: ParsedRule[] } {
     return {
       id, title: value(block, 'titulo')!, description: value(block, 'descripcion')!, severity: severity as Severity,
       pattern: Boolean(forbidden ?? required), forbidden, required,
+      tipo: (tipo ?? null) as RulePreview['tipo'], status: status as RuleApproval, source: value(block, 'fuente') ?? null, doubts, scenarios,
       paths: [...(/^\s*rutas\s*=\s*\[([^\]]*)\]/m.exec(block)?.[1] ?? '').matchAll(/["']([^"']+)["']/g)].map((m) => m[1].replace(/^\.?\/+/, '')),
     }
   })
@@ -262,7 +273,7 @@ export function conflicts(rules: ParsedRule[]): string[] {
 export function validate(content: string): RulesValidation {
   try {
     const { project, rules } = parse(content)
-    return { valid: true, error: null, project, rules: rules.map(({ id, title, severity, pattern }) => ({ id, title, severity, pattern })), warnings: conflicts(rules) }
+    return { valid: true, error: null, project, rules: rules.map(({ id, title, severity, pattern, description, tipo, status, source, doubts, scenarios }) => ({ id, title, severity, pattern, description, tipo, status, source, doubts, scenarios })), warnings: conflicts(rules) }
   } catch (e) {
     if (e instanceof RulesError) return { valid: false, error: e.message, project: null, rules: [] }
     throw e
@@ -464,6 +475,7 @@ export function importDocument(body: ImportRulesRequest): ImportedRules | string
     '',
     '[proyecto]',
     `nombre = ${q(project)}`,
+    'formato = 2',
   ]
   const rules = body.filename ? [...IMPORTED_RULES, UPLOADED_EXTRA] : IMPORTED_RULES
   const pair = body.filename ? UPLOADED_CONTRADICTION : null
@@ -473,7 +485,13 @@ export function importDocument(body: ImportRulesRequest): ImportedRules | string
     if (pair && (i === pair.a || i === pair.b)) lines.push(`# CONTRADICCIÓN ${rid(pair.a)} ${rid(pair.b)}: ${pair.motivo}`)
     lines.push('[[regla]]', `id          = ${q(rid(i))}`)
     lines.push(`titulo      = ${q(r.titulo)}`, `descripcion = ${q(r.descripcion)}`, `severidad   = ${q(r.severidad)}`)
-    if (r.criterio) lines.push(`criterio    = ${q(r.criterio)}`)
+    // Formato v2: todo entra en borrador, con su fuente y sus dudas (la regla sin criterio no sabe un dato)
+    lines.push('estado      = "borrador"', `fuente      = ${q(r.fuente)}`)
+    lines.push(`dudas       = [${r.criterio ? '' : q('¿Qué dato exacto se debe comprobar? El documento no lo dice')}]`)
+    if (r.criterio) {
+      const [given, when, then] = r.criterio.replace(/^Dado /, '').split(/, cuando |, entonces /)
+      lines.push('', '  [[regla.escenario]]', `  dado     = ${q(given)}`, `  cuando   = ${q(when ?? '')}`, `  entonces = ${q(then ?? '')}`)
+    }
   })
   const content = lines.join('\n') + '\n'
   return {
@@ -491,4 +509,56 @@ export function fromAnalyze(url: string, content: string): string | null {
   const project = findRepoByName(url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, ''))
   if (project) uploads.set(project.id, { content, updated_at: new Date().toISOString() })
   return null
+}
+
+// ─── Aprobación (POST …/reglas/estado y PUT …/reglas/{id}/dudas) ───
+
+/** Cambia (o agrega) un campo de la regla `id` en el texto cargado en la app, antes de sus escenarios. */
+function setField(text: string, id: string, key: string, line: string): string {
+  const lines = text.split('\n')
+  const at = lines.findIndex((l) => new RegExp(`^\\s*id\\s*=\\s*"${id}"`).test(l))
+  let end = at + 1
+  while (end < lines.length && !/^\s*\[\[/.test(lines[end])) end++
+  const field = new RegExp(`^\\s*${key}\\s*=`)
+  const existing = lines.slice(at, end).findIndex((l) => field.test(l))
+  if (existing >= 0) lines[at + existing] = line
+  else lines.splice(at + 1, 0, line)
+  return lines.join('\n')
+}
+
+/** Un texto = error (el handler responde 409/404 con ese mensaje). */
+function editable(repoId: string): { text: string; rules: ParsedRule[] } | string {
+  getRepo(repoId)
+  if (REPO_RULES[repoId]) return `El análisis usa el ${FILENAME} del repositorio: cambia \`estado\` y \`dudas\` ahí (o carga las reglas en la app)`
+  const up = uploads.get(repoId)
+  if (!up) return 'El proyecto no tiene reglas cargadas en la app'
+  return { text: up.content, rules: parse(up.content).rules }
+}
+
+export function setStates(repoId: string, ids: string[], status: RuleApproval): ProjectRules | string {
+  const cur = editable(repoId)
+  if (typeof cur === 'string') return cur
+  let text = cur.text
+  const messages: string[] = []
+  for (const id of new Set(ids)) {
+    const rule = cur.rules.find((r) => r.id === id)
+    if (!rule) return `${id} no está en las reglas del proyecto`
+    if (rule.status === status) continue
+    if (status === 'aprobada' && (rule.doubts ?? []).length) {
+      messages.push(`${id}: tiene ${rule.doubts!.length} duda(s) abierta(s); resuélvelas antes de aprobarla`)
+      continue
+    }
+    text = setField(text, id, 'estado', `estado      = ${q(status)}`)
+  }
+  uploads.set(repoId, { content: text, updated_at: new Date().toISOString() })
+  return { ...projectRules(repoId), messages }
+}
+
+export function setDoubts(repoId: string, ruleId: string, doubts: string[]): ProjectRules | string {
+  const cur = editable(repoId)
+  if (typeof cur === 'string') return cur
+  if (!cur.rules.some((r) => r.id === ruleId)) return `${ruleId} no está en las reglas del proyecto`
+  const text = setField(cur.text, ruleId, 'dudas', `dudas       = [${doubts.map(q).join(', ')}]`)
+  uploads.set(repoId, { content: text, updated_at: new Date().toISOString() })
+  return projectRules(repoId)
 }

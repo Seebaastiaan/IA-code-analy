@@ -44,6 +44,10 @@ export const EP = {
     precheck: '/api/reglas/revisar',
     /** Saca las reglas de un documento de requisitos (PDF, Word, Markdown) con IA */
     import: '/api/reglas/importar',
+    /** POST: aprueba (o vuelve a borrador) reglas de las cargadas en la app */
+    states: (projectId: string) => `/api/projects/${projectId}/reglas/estado`,
+    /** PUT: las dudas que siguen abiertas de una regla (quitar una = resolverla) */
+    doubts: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/dudas`,
     /** Mapa del proyecto (endpoints, modelos, roles) leído del código sin IA */
     map: (projectId: string) => `/api/projects/${projectId}/reglas/mapa`,
     /** Arnés de pruebas: GET / POST (proponer con IA) / PUT (editar) / DELETE */

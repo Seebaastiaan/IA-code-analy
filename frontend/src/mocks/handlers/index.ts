@@ -183,6 +183,16 @@ export const handlers = [
     const saved = rules.upload(params.projectId as string, content)
     return typeof saved === 'string' ? fail(422, 'invalid_rules', saved) : json(saved)
   })),
+  http.post(EP.rules.states(':projectId'), route(async ({ request, params }) => {
+    const { ids, status } = (await request.json()) as { ids: string[]; status: 'borrador' | 'aprobada' }
+    const done = rules.setStates(params.projectId as string, ids, status)
+    return typeof done === 'string' ? fail(409, 'no_rules', done) : json(done)
+  })),
+  http.put(EP.rules.doubts(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { doubts } = (await request.json()) as { doubts: string[] }
+    const done = rules.setDoubts(params.projectId as string, params.ruleId as string, doubts)
+    return typeof done === 'string' ? fail(409, 'no_rules', done) : json(done)
+  })),
   http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
   http.post(EP.rules.validate(':projectId'), route(async ({ request, params }) => json(rules.validateFor(params.projectId as string, ((await request.json()) as { content: string }).content)))),
   http.get(EP.rules.template(':projectId'), route(({ params }) => new HttpResponse(rules.templateFor(params.projectId as string), { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),

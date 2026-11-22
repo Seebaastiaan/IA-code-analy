@@ -246,6 +246,22 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await expect(page.getByLabel('Contenido de reglas_negocio.toml')).toHaveValue(/nombre = "equipo\/bot-soporte"/)
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
+
+  // Tabla de aprobación: lo importado entra en borrador y una regla con dudas no se aprueba
+  const table = page
+  await expect(table.getByText(/3 de 3 reglas son borrador/)).toBeVisible()
+  await table.getByRole('button', { name: /Aprobar las que no tienen dudas/ }).click()
+  await expect(table.getByText(/2 de 3 reglas son borrador/)).toBeVisible()
+  await table.getByLabel('Elegir RN-002').check()
+  await table.getByRole('button', { name: /Aprobar elegidas/ }).click()
+  await expect(table.getByRole('alert')).toContainText('RN-002: tiene 1 duda(s) abierta(s)')
+
+  // Resolver la duda (se quita de la lista) y entonces sí se aprueba
+  await table.getByRole('button', { name: 'Ver RN-002' }).click()
+  await table.getByRole('button', { name: 'Resuelta' }).click()
+  await table.getByLabel('Elegir RN-002').check()
+  await table.getByRole('button', { name: /Aprobar elegidas/ }).click()
+  await expect(table.getByText(/1 de 3 reglas son borrador/)).toBeVisible()
 })
 
 test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
@@ -330,7 +346,7 @@ test('reglas de negocio: pruebas generadas por IA voy (generar, correr, aprobar)
   await expect(card.getByRole('button', { name: /^Aprobar las listas \([1-9]\d*\)$/ })).toBeEnabled({ timeout: 20_000 })
 
   // El detalle de una regla: código, supuestos y la primera corrida
-  await card.getByRole('button', { name: /RN-001/ }).first().click()
+  await card.getByRole('button', { name: /^RN-001 / }).first().click()
   await expect(card.getByText('Primera corrida:')).toBeVisible()
   await expect(card.getByText('Un pago se cobra con POST /pagos/{id}/cobrar')).toBeVisible()
 
@@ -351,7 +367,7 @@ test('reglas de negocio: matriz de permisos, evidencia y prueba de fuerza (fase 
   await harnessCard.getByRole('button', { name: 'Aprobar arnés' }).click()
 
   // RN-004 habla de autorización: la matriz se marca y la prueba sale de la tabla, sin IA
-  await card.getByRole('button', { name: /RN-004/ }).first().click()
+  await card.getByRole('button', { name: /^RN-004 / }).first().click()
   await card.getByRole('button', { name: 'Matriz de permisos' }).click()
   const save = card.getByRole('button', { name: /^Guardar y escribir la prueba/ })
   await expect(save).toBeDisabled()

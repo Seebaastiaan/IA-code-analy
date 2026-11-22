@@ -9,6 +9,7 @@ import { useImportRules } from '../hooks/useImportRules'
 import { HarnessCard } from './HarnessCard'
 import { ImportNotice } from './ImportNotice'
 import { RuleTestsCard } from './RuleTestsCard'
+import { RulesApprovalTable } from './RulesApprovalTable'
 import { ValidationResult } from './ValidationResult'
 
 const MAX_BYTES = 256 * 1024
@@ -208,7 +209,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
 
 const STEPS = [
   'Descarga la plantilla, escribe las reglas aquí o sube el documento de requisitos (PDF, Word o Markdown) para que la IA las saque.',
-  'Escribe las reglas del negocio: salen de los requerimientos y criterios de aceptación.',
+  'Revisa la tabla de aprobación: resuelve las dudas de cada regla y apruébala. Lo importado entra como borrador y solo lo aprobado se verifica.',
   'Por cada regla, una prueba con @pytest.mark.regla("RN-###") (o llamada test_rn###_…) o un patrón prohibido / obligatorio.',
   'Haz commit de reglas_negocio.toml y las pruebas en la raíz del repositorio.',
   'Analiza: el paso 10 dice qué reglas cumplen, cuáles no y cuáles no tienen prueba.',
@@ -235,6 +236,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
         </Card>
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
         <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+        <RulesApprovalTable repoId={repoId} data={data} />
         <HarnessCard repoId={repoId} />
         <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
       </div>
