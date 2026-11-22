@@ -480,3 +480,73 @@ test('reglas de negocio: «Preparar todo» hace solo el arnés, las pruebas y la
   await expect(steps.getByText(/pruebas aprobadas por el programa/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Volver a preparar' })).toBeVisible()
 })
+
+/** Configuración de bot-soporte con las 3 reglas de «Requerimientos.pdf» importadas y guardadas (todas en borrador). */
+async function importedRules(page: Page) {
+  await page.goto('/repos/r3/settings?tab=reglas')
+  await page.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
+  await expect(page.getByText('3 regla(s) sacadas de')).toBeVisible()
+  // Sin abrir «Avanzado»: el aviso de cambios sin guardar trae su propio botón
+  await expect(page.getByLabel('Contenido de reglas_negocio.toml')).toBeHidden()
+  await page.getByRole('button', { name: 'Guardar reglas' }).click()
+  await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
+  return page.getByRole('heading', { name: 'Aprobación de las reglas' }).locator('xpath=../..')
+}
+
+test('reglas de negocio: dudas con sí o no, una regla con tus palabras y casos de control', async ({ page }) => {
+  const table = await importedRules(page)
+  await expect(table.getByText(/3 de 3 reglas son borrador/)).toBeVisible()
+
+  // Una duda se contesta con Sí: la respuesta queda en la regla y ya se puede aprobar
+  await table.getByRole('button', { name: 'Ver RN-002' }).click()
+  await table.getByRole('button', { name: /^Responder sí:/ }).click()
+  await expect(table.getByText(/Aclaración del equipo: .* Sí\./)).toBeVisible()
+  await table.getByLabel('Elegir RN-002').check()
+  await table.getByRole('button', { name: /Aprobar elegidas/ }).click()
+  await expect(table.getByText(/2 de 3 reglas son borrador/)).toBeVisible()
+  await expect(table.getByRole('alert')).toHaveCount(0)
+
+  // «Escribe una regla con tus palabras»: entra en borrador con el siguiente número
+  await page.getByLabel('Regla con tus palabras').fill('Un descuento de más del 20% lo aprueba el gerente')
+  await page.getByRole('button', { name: 'Agregar la regla' }).click()
+  await expect(page.getByText('RN-004 agregada en borrador: revísala y apruébala')).toBeVisible()
+  await expect(table.getByRole('button', { name: 'Ver RN-004' })).toBeVisible()
+
+  // Casos de control: lo que se sabe de una regla, comparado con el último análisis (no cambia ningún resultado)
+  const control = page.getByRole('heading', { name: '¿Se le puede creer al programa?' }).locator('xpath=../..')
+  await expect(control.getByRole('status')).toContainText('Marca las reglas que conoces')
+  await control.getByLabel('Lo que sabes de RN-001').selectOption('cumple')
+  await expect(control.getByRole('status')).toContainText(/Todavía no hay resultado para tus 1 reglas|Acertó|Falló/)
+  await control.getByLabel('Lo que sabes de RN-001').selectOption('')
+  await expect(control.getByRole('status')).toContainText('Marca las reglas que conoces')
+})
+
+test('reglas de negocio: lo que aprueba el programa se marca y se revierte en un clic', async ({ page }) => {
+  test.setTimeout(90_000)
+  const table = await importedRules(page)
+  await page.getByRole('button', { name: 'Preparar todo' }).click()
+  // El primer paso aprueba las reglas sin dudas; el resto no hace falta para esta comprobación
+  await expect(table.getByText('Aprobada por el programa').first()).toBeVisible({ timeout: 30_000 })
+  const stop = page.getByRole('button', { name: 'Detener' })
+  if (await stop.isVisible()) await stop.click()
+
+  const row = table.getByRole('listitem').filter({ hasText: 'Aprobada por el programa' }).first()
+  await row.getByRole('button', { name: /^Ver RN-/ }).click()
+  await expect(row.getByText(/La aprobó el programa/)).toBeVisible()
+  await row.getByRole('button', { name: 'Revertir a borrador' }).click()
+  await expect(table.getByText('Aprobada por el programa')).toHaveCount(0)
+  await expect(table.getByText(/3 de 3 reglas son borrador/)).toBeVisible()
+})
+
+test('reglas de negocio: el resultado en palabras y «el documento manda» para corregir el código', async ({ page }) => {
+  await openReport(page)
+  await page.getByRole('tab', { name: 'Reglas' }).click()
+  // Resumen y una frase por regla, con semáforo
+  await expect(page.getByText(/reglas se cumplen · \d+ no se cumplen?/)).toBeVisible()
+
+  await page.getByRole('button', { name: /RN-002/ }).click()
+  await expect(page.getByText('El documento manda: el código tiene que seguir a la regla.')).toBeVisible()
+  await page.getByRole('button', { name: 'Corregir con IA' }).click()
+  // En la demo no hay IA: el error llega como aviso, sin romper la pantalla
+  await expect(page.getByText('La corrección del código con IA no está disponible en la demo')).toBeVisible()
+})

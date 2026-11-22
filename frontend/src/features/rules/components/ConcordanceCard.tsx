@@ -16,12 +16,12 @@ const CONFIDENCE: Record<string, string> = { alta: 'Confianza alta', media: 'Con
  * Casos de control (docs/PLAN_REGLAS_AUTOMATICO.md, paso 6): lo que el equipo ya sabe de algunas reglas. No cambia ningún
  * resultado: sirve para saber si se le puede creer al programa.
  */
-export function ConcordanceCard({ repoId }: { repoId: string }) {
+export function ConcordanceCard({ repoId, version }: { repoId: string; version: string }) {
   const queryClient = useQueryClient()
-  const { data } = useQuery(concordanceQuery(repoId))
+  const { data } = useQuery(concordanceQuery(repoId, version))
   const set = useMutation({
     mutationFn: ({ id, expected }: { id: string; expected: ControlExpected | null }) => rulesApi.setExpected(repoId, id, expected),
-    onSuccess: (saved) => queryClient.setQueryData(concordanceQuery(repoId).queryKey, saved),
+    onSuccess: (saved) => queryClient.setQueryData(concordanceQuery(repoId, version).queryKey, saved),
     onError: (e) => toast(e.message, { tone: 'err' }),
   })
   if (!data || data.items.length === 0) return null

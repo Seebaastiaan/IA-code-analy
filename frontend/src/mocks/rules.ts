@@ -128,7 +128,7 @@ class RulesError extends Error {}
 
 const PROJECT_FIELDS = ['nombre', 'version', 'formato']
 const KINDS = ['datos', 'flujo', 'calculo', 'permisos', 'auditoria', 'integracion', 'proceso']
-const RULE_FIELDS = ['cita', 'cita_verificada', 'criterio', 'descripcion', 'dudas', 'estado', 'fuente', 'historia', 'ia', 'id', 'obligatorio', 'prohibido', 'responsable', 'rutas', 'severidad', 'tipo', 'titulo']
+const RULE_FIELDS = ['aprobada_por', 'cita', 'cita_verificada', 'criterio', 'descripcion', 'dudas', 'estado', 'fuente', 'historia', 'ia', 'id', 'obligatorio', 'prohibido', 'responsable', 'rutas', 'severidad', 'tipo', 'titulo']
 
 const value = (block: string, key: string) => new RegExp(`^\\s*${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'm').exec(block)?.slice(1).find((v) => v !== undefined)
 const keys = (block: string) => [...block.matchAll(/^\s*([A-Za-z_]+)\s*=/gm)].map((m) => m[1])

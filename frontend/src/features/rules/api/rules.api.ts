@@ -66,7 +66,9 @@ export const projectRulesQuery = (repoId: string) => queryOptions({ queryKey: ['
 
 export const useReportRules = (repoId: string, reportId = 'latest') => useQuery(reportRulesQuery(repoId, reportId))
 
-export const concordanceQuery = (repoId: string) => queryOptions({ queryKey: ['rules', repoId, 'control'], queryFn: () => rulesApi.concordance(repoId) })
+/** `version` cambia cuando cambian las reglas (se agregan, se editan): así el panel no muestra una lista vieja */
+export const concordanceQuery = (repoId: string, version = '') =>
+  queryOptions({ queryKey: ['rules', repoId, 'control', version], queryFn: () => rulesApi.concordance(repoId) })
 
 export const useProjectRules = (repoId: string) => useQuery({ ...projectRulesQuery(repoId), enabled: Boolean(repoId) })
 

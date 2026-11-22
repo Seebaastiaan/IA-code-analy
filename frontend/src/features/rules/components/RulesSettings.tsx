@@ -278,7 +278,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
         <WriteRuleCard repoId={repoId} canWrite={data.can_import} />
         <AutoVerifyCard repoId={repoId} />
         <RulesApprovalTable repoId={repoId} data={data} />
-        <ConcordanceCard repoId={repoId} />
+        <ConcordanceCard repoId={repoId} version={(data.active === 'repo' ? data.repo : data.uploaded)?.rules.map((r) => r.id).join(',') ?? ''} />
         <HarnessCard repoId={repoId} />
         <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
       </div>
