@@ -366,6 +366,50 @@ def check_quotes(rules: list[dict], document: str | None) -> None:
             r["dudas"] = [*(r.get("dudas") or []), "No encontré la cita de esta regla en el documento: confirma que la regla está ahí tal como se escribió."]
 
 
+# Plazos que el documento deja ambiguos. La IA los pregunta a veces y a veces no (en la corrida real, «un día antes» salió como
+# regla sin duda y la prueba escribió 25 h cuando el código avisa a las 24 h): por eso se detectan aquí, de forma determinista.
+# Cada duda es de sí o no y su respuesta queda en la regla (reglas_respuestas).
+TIME_AMBIGUITIES = (
+    (
+        re.compile(r"\b(?:un|1)\s+d[ií]a\s+antes\b|\bel\s+d[ií]a\s+anterior\b|\bla\s+v[ií]spera\b", re.IGNORECASE),
+        "¿«{m}» significa exactamente 24 horas antes? (Sí = 24 horas exactas; No = el día calendario anterior: ¿a qué hora?)",
+    ),
+    (
+        re.compile(r"\b(?:al|el)\s+d[ií]a\s+siguiente\b", re.IGNORECASE),
+        "¿«{m}» significa dentro de las 24 horas siguientes? (Sí = 24 horas exactas; No = el día calendario siguiente: ¿hasta qué hora?)",
+    ),
+    (
+        re.compile(r"\b(?:una|1)\s+(?:semana|mes)\s+antes\b", re.IGNORECASE),
+        "¿«{m}» se cuenta en días exactos (7 días o un mes de calendario a la misma hora)? (Sí = a la misma hora; No = hasta otra hora del día)",
+    ),
+    (
+        re.compile(r"\bd[ií]as?\s+h[aá]biles\b", re.IGNORECASE),
+        "¿Los días hábiles son de lunes a viernes sin contar días festivos? (Sí = lunes a viernes sin festivos; No = otro calendario)",
+    ),
+)
+
+
+def time_doubts(rule: dict) -> list[str]:
+    """Preguntas de sí o no por los plazos ambiguos de la regla que su lista de dudas todavía no menciona."""
+    if rule.get("tipo") == "proceso":
+        return []
+    text = " ".join(_clean(rule.get(k), reglas.MAX_TEXT) for k in ("titulo", "descripcion", "cita"))
+    known = [_fold(d) for d in rule_doubts(rule)]
+    out = []
+    for pattern, template in TIME_AMBIGUITIES:
+        found = pattern.search(text)
+        if found and not any(_fold(found.group(0)) in d for d in known):
+            out.append(template.format(m=found.group(0).lower()))
+    return out
+
+
+def add_time_doubts(rules: list[dict]) -> None:
+    for r in rules:
+        extra = time_doubts(r)
+        if extra:
+            r["dudas"] = [*(r.get("dudas") or []), *extra]
+
+
 def _clean(value: object, limit: int) -> str:
     """Texto de una sola línea (TOML básico), sin caracteres de control y recortado a `limit`."""
     text = " ".join(CONTROL.sub("", str(value or "")).split())
@@ -526,6 +570,7 @@ def extract(llm: LLM, project: str, name: str, data: bytes) -> Imported:
     rules, kept = _rules(answer)
     document = document_text(name, data)
     check_quotes(rules, document)
+    add_time_doubts(rules)
     skipped = omitted(answer, document)
     pairs = _contradictions(answer, rules, kept, reglas.MAX_RULES)
     general = [d for d in (_clean(x, 300) for x in answer.get("dudas") or []) if d]

@@ -35,6 +35,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   evita cifras y formatos inventados y pregunta «¿pasaría igual sin la regla?»; validadores de rechazos sin 409, cifras ajenas, asserts
   sin comparación, nombres con letras raras y dos variables con el mismo usuario; y se insiste cuando dice «no implementada» con
   endpoints que existen y deja el código vacío. Falsos positivos de 3 a 1 o 2 y falsos negativos de 2 a 0 en 2 de 3 corridas.
+- El importador detecta plazos ambiguos («un día antes», «días hábiles»…) y los convierte en dudas de sí o no; con la respuesta, la
+  prueba generada usa el plazo correcto (RN-012 de reservas-demo: de 3 falsos positivos de 3 a 0).
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
 - Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
   de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.

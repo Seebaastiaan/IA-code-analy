@@ -69,3 +69,14 @@ Lo que sigue fallando:
   Es más una duda del documento («un día antes») que un error de la IA: debería salir como duda a contestar.
 - **Variación entre corridas:** falsos negativos del empalme y del bloqueo en 1 de 3 corridas cada uno; una prueba rota de vez en cuando.
 - Solo se probó con un modelo y un repo.
+
+## Tercera ronda: los plazos ambiguos se preguntan
+
+El falso positivo del recordatorio (RN-012) era una ambigüedad del documento: «un día antes» puede ser 24 horas exactas o el día calendario
+anterior. La IA a veces la preguntaba y a veces no, así que ahora el importador la detecta de forma determinista
+(`reglas_importar.TIME_AMBIGUITIES`: «un día antes», «el día anterior», «la víspera», «al día siguiente», «una semana o un mes antes» y
+«días hábiles») y agrega una duda de sí o no, salvo que la regla ya la tenga o sea de proceso. La respuesta queda en la descripción.
+
+Comprobado con Gemini real: al reimportar el PDF, `RN-012` salió con la duda «¿«un día antes» significa exactamente 24 horas antes?».
+Con la respuesta «Sí», la prueba regenerada puso el reloj a las 10:00 del día anterior (24 h exactas) y **pasó 3 de 3 veces**
+(antes: falso positivo 3 de 3 con el reloj a las 9:00, 25 h antes).

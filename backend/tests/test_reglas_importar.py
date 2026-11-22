@@ -252,6 +252,28 @@ def test_contradicciones_se_marcan_y_bloquean_el_archivo(client, llm):
     assert len(reglas.parse(sin_marca).rules) == 3
 
 
+def test_un_plazo_ambiguo_se_convierte_en_una_duda_de_si_o_no():
+    regla = {"titulo": "Recordatorio un día antes", "descripcion": "Un día antes de la cita se envía un recordatorio.", "cita": "Un día antes de la cita el sistema envía un recordatorio", "dudas": []}
+    doubts = importar.time_doubts(regla)
+    assert len(doubts) == 1 and doubts[0].startswith("¿«un día antes» significa exactamente 24 horas antes?") and "(Sí =" in doubts[0]
+    # Si la IA ya la preguntó, no se repite; una regla de proceso no se pregunta; una sin plazo ambiguo, tampoco
+    assert importar.time_doubts({**regla, "dudas": ["¿Un día antes son 24 horas o el día anterior?"]}) == []
+    assert importar.time_doubts({**regla, "tipo": "proceso"}) == []
+    assert importar.time_doubts({"titulo": "Cancelar con 24 horas", "descripcion": "Con al menos 24 horas de anticipación.", "cita": ""}) == []
+    # Otros plazos
+    assert any("días hábiles" in d for d in importar.time_doubts({"titulo": "T", "descripcion": "Se responde en 3 días hábiles.", "cita": ""}))
+    assert any("«el día siguiente»" in d for d in importar.time_doubts({"titulo": "T", "descripcion": "Se cobra el día siguiente.", "cita": ""}))
+
+
+def test_al_importar_la_duda_de_plazo_deja_la_regla_en_borrador_con_duda(client, llm):
+    recordatorio = {**RN_24H, "titulo": "Un recordatorio por cita", "descripcion": "Un día antes de la cita se envía un solo recordatorio.", "dudas": []}
+    llm.reply = {"reglas": [recordatorio], "contradicciones": [], "dudas": []}
+    body = importar_archivo(client, "r.docx", docx("Un día antes de la cita se envía un recordatorio.")).json()
+    assert any("«un día antes» significa exactamente 24 horas antes" in d for d in body["doubts"])
+    regla = reglas.parse(body["content"]).rules[0]
+    assert any("exactamente 24 horas antes" in d for d in regla.doubts) and regla.status == "borrador"
+
+
 def test_la_segunda_pasada_encuentra_lo_que_la_primera_no(client, llm):
     # La primera consulta no vio nada; la segunda recibe la lista final numerada por nosotros y marca el par 1-3
     llm.reply = {"reglas": [RN_24H, RN_PREMIUM, RN_48H], "contradicciones": [], "dudas": []}
