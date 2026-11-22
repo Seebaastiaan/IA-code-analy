@@ -696,8 +696,8 @@ generadas aciertan.
     - `raise` quitados;
     - `and` ↔ `or`;
     - números de comparaciones o cuentas (no los códigos de respuesta);
-    - cuentas con una constante (`precio * PORCENTAJE` → `precio / PORCENTAJE`; no la resta de dos variables, que
-      puede ser de fechas);
+    - cuentas con una constante (`precio * PORCENTAJE` → `precio / PORCENTAJE`), y `*` y `/` también entre variables
+      (`base * producto.ieps_tasa`); no la suma ni la resta de dos variables, que pueden ser de fechas o de texto;
     - llamadas quitadas (`correo.enviar(...)`; no los registros de log);
     - decoradores de permiso quitados (`@requiere("admin")`; no los de rutas);
     - condiciones `a if c else b` invertidas.
@@ -759,9 +759,18 @@ generadas aciertan.
     menos 2 cambios.
   - Los «parcial» que quedan son huecos reales de las pruebas: no prueban el límite exacto (`<=` vs `<`) o un caso
     secundario.
-  - **Queda 1 falsa alarma:** RN-016 de inventario. La evidencia señala la función que también tiene la regla de
-    RN-014, y esa línea comparte «precio» y «base» con RN-016. Por eso el texto de «débil» pide revisar la prueba
-    en vez de afirmar que no verifica la regla.
+  - **La falsa alarma de RN-016 de inventario, resuelta.** La evidencia señalaba la función `salida`, que también trae
+    el aviso de RN-014 (`base < costo_unitario`), y esa línea era lo único que se mutaba: la prueba de RN-016 no la
+    nota y salía «débil» sin serlo. Dos cambios:
+    - una línea de un tramo largo que se parece más a **otra regla** que a esta ya no se muta (`others` en
+      `mutants`: las demás reglas del proyecto);
+    - las cuentas con `*` y `/` entre variables también se mutan (`base * producto.ieps_tasa` → `base / …`): RN-016 no
+      tenía otra cosa que mutar.
+
+    Con eso RN-016 se mide en sus líneas (45 y 46) y salió algo que antes no se veía: una de sus dos pruebas solo
+    comprobaba `iva > 0` y no los montos, y no notaba los cambios (0 de 2). Se reforzó con los montos (IEPS = 8, IVA =
+    17.28) y ahora las dos salen «fuertes» (2 de 2). El texto de «débil» sigue pidiendo revisar la prueba. Solo se volvió a
+    medir RN-016; las cifras de arriba son las de antes del cambio.
 
 ## 15. Riesgos
 

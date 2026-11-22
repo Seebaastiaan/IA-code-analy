@@ -304,7 +304,9 @@ def candidates(source: str, tree: ast.Module, start: int, end: int) -> list[_Can
             out.append(_Candidate(node.test, "condicion", f"not ({test})", f"se invierte la condición `{_short(test)}`", _context(node, parents, lines)))
         elif (
             isinstance(node, ast.BinOp) and single and type(node.op) in ARITH
-            and (_constant_like(node.left) or _constant_like(node.right))
+            # `+` y `-` solo con una constante (la resta de dos variables suele ser de fechas); `*` y `/` también entre
+            # variables: `base * producto.ieps_tasa` es una cuenta de negocio (RN-016 de inventario no tenía otra)
+            and (_constant_like(node.left) or _constant_like(node.right) or type(node.op) in (ast.Mult, ast.Div))
         ):
             new = ast.unparse(ast.BinOp(node.left, ARITH[type(node.op)](), node.right))
             out.append(_Candidate(node, "aritmetica", new, f"`{_short(old)}` → `{_short(new)}`", _context(node, parents, lines, own_line=True)))
@@ -331,14 +333,17 @@ def candidates(source: str, tree: ast.Module, start: int, end: int) -> list[_Can
 
 def mutants(
     root: Path, project_map: mapa.ProjectMap, rule: reglas.BusinessRule, endpoints: list[str], ev: evidencia.Evidence | None = None,
-    limit: int = MAX_MUTANTS,
+    limit: int = MAX_MUTANTS, others: list[reglas.BusinessRule] = (),
 ) -> tuple[list[Mutant], list[Target]]:
     """
     Los mutantes de la regla, deterministas. Con evidencia se mutan sus líneas; sin ella, solo las líneas de las
     funciones que se parecen a la regla (si ninguna se parece, no hay mutantes: la prueba de fuerza no aplica).
+    `others` = las demás reglas del proyecto: una línea que se parece más a otra regla que a esta no se muta (la evidencia
+    de RN-016 era la función que también trae el aviso de RN-014, y esa línea salía como «débil» sin serlo).
     """
     found = targets(root, project_map, endpoints, ev)
     words = pruebas._words(pruebas.rule_words(rule))
+    others_words = [pruebas._words(pruebas.rule_words(o)) for o in others if o.id != rule.id]
 
     def score(ts: list[Target]) -> list[tuple]:
         """(−relevancia, tipo, archivo, línea, candidato, código, líneas, ¿hay que filtrarlo por palabras?)"""
@@ -353,7 +358,12 @@ def mutants(
             # otras reglas, y se filtra por palabras como sin evidencia
             loose = t.source != "evidencia" or t.end - t.start + 1 > PRECISE_LINES
             for c in candidates(source, tree, t.start, t.end):
-                relevance = len(words & pruebas._words(c.context))
+                ctx = pruebas._words(c.context)
+                relevance = len(words & ctx)
+                # De otra regla: se parece más a ella que a esta (solo las líneas de un tramo largo; una línea precisa de
+                # la evidencia se muta siempre)
+                if loose and others_words and max(len(w & ctx) for w in others_words) > relevance:
+                    continue
                 out_.append((-relevance, KINDS.index(c.kind), t.file, c.node.lineno, c, source, lines, loose))
         return out_
 

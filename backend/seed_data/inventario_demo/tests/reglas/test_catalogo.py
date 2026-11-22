@@ -113,7 +113,8 @@ def test_rn016_precio_base_e_impuestos_por_separado(crear_producto):
     assert Decimal(p["precio_base"]) == Decimal("100"), "el precio base incluye impuestos"
     imp = p["impuestos"]
     assert Decimal(imp["iva_tasa"]) == Decimal("0.16") and Decimal(imp["ieps_tasa"]) == Decimal("0.08")
-    assert Decimal(imp["iva"]) > 0 and Decimal(imp["ieps"]) > 0
+    # Los montos también: IEPS = 8 % de 100 e IVA = 16 % de (100 + 8)
+    assert Decimal(imp["ieps"]) == Decimal("8") and Decimal(imp["iva"]) == Decimal("17.28")
     assert Decimal(p["precio_con_impuestos"]) == Decimal(p["precio_base"]) + Decimal(imp["iva"]) + Decimal(imp["ieps"])
 
 

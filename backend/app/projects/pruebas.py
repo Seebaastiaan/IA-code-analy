@@ -672,7 +672,7 @@ async def strength_tests(project_id: str, body: Ids, store: Analyses, user_id: U
     left = fuerza.MAX_TOTAL
     for r in chosen:
         ev = evidencia.loads(evidences[r.id]["data"]) if r.evidence and not r.evidence.stale else None
-        ms, found = await asyncio.to_thread(fuerza.mutants, ctx.ws.root, mp, by_id[r.id], r.test.endpoints, ev, max(0, min(fuerza.MAX_MUTANTS, left)))
+        ms, found = await asyncio.to_thread(fuerza.mutants, ctx.ws.root, mp, by_id[r.id], r.test.endpoints, ev, max(0, min(fuerza.MAX_MUTANTS, left)), list(by_id.values()))
         left -= len(ms)
         plan[r.id] = (ms, found)
     hashes = {r.id: arnes.code_hash(r.test.code) for r in chosen if r.test}

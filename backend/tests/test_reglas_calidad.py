@@ -34,6 +34,7 @@ from tests.test_analysis import URL, wait_done
 from tests.test_reglas_arnes import RESERVAS, harness_of
 from tests.test_reglas_generadas import OK, PLUGINS, hand_test
 
+SEED_ROOT = RESERVAS.parent
 RULES = {r.id: r for r in reglas.parse((RESERVAS / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8")).rules}
 WEAK = (RESERVAS / "referencia" / "pruebas_debiles" / "test_rn004_debil.py").read_text(encoding="utf-8")
 # Lo que dice RN-015 (y lo que hace el código del demo, que la cumple)
@@ -254,6 +255,23 @@ def test_evidencia_sin_fragmentos_no_llama_a_la_ia(tmp_path):
 
 
 # ───────────────────────── Prueba de fuerza ─────────────────────────
+
+
+def test_no_se_muta_la_linea_de_otra_regla():
+    # RN-016 de inventario: su evidencia es la función `salida`, que también trae el aviso de RN-014 (`base < costo`).
+    # Antes solo se mutaba esa línea (la de otra regla) y la prueba buena salía «débil»
+    inventario = SEED_ROOT / "inventario_demo"
+    reglas_inv = reglas.parse((inventario / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8")).rules
+    rn016 = next(r for r in reglas_inv if r.id == "RN-016")
+    ev = evidencia.Evidence("implementada", "", [evidencia.Place("inventario/servicios.py", 43, 54, "")])
+    mp_inv = mapa.build(inventario)
+
+    sin_otras, _ = fuerza.mutants(inventario, mp_inv, rn016, [], ev)
+    assert {m.line for m in sin_otras} == {45, 46, 47}  # sin saber de las otras reglas, 47 también entra
+    con_otras, _ = fuerza.mutants(inventario, mp_inv, rn016, [], ev, others=reglas_inv)
+    assert {m.line for m in con_otras} == {45, 46} and all(m.kind == "aritmetica" for m in con_otras)
+    # La línea del aviso (47) es de RN-014: con las demás reglas a la vista, nadie la muta por RN-016
+    assert 47 not in {m.line for m in con_otras}
 
 
 def test_mutantes_dirigidos_a_las_lineas_de_la_regla(mp):
