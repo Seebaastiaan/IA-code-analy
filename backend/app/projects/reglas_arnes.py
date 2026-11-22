@@ -17,6 +17,7 @@ La IA solo propone (ADR-001): el veredicto sale de ejecutar el arnés.
 """
 
 import ast
+import builtins
 import hashlib
 import json
 import re
@@ -315,6 +316,38 @@ def code_checks(tree: ast.Module, project_map: mapa.ProjectMap, allowed: set[str
     return errors, warnings
 
 
+def undefined_names(tree: ast.Module) -> list[str]:
+    """
+    Nombres que el arnés usa sin importarlos ni definirlos (`NameError` al cargarlo: pasó con `os` y `Callable` en
+    arneses de Gemini sobre repos ajenos). Sin esto la IA no se entera y la prueba de humo falla con un error confuso.
+    """
+    bound: set[str] = set(dir(builtins)) | {"__file__", "__name__", "__doc__"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names):
+            return []  # `from x import *`: no se sabe qué trae
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update((a.asname or a.name).split(".")[0] for a in node.names)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.MatchAs) and node.name or isinstance(node, ast.MatchStar) and node.name:
+            bound.add(node.name)
+    out: list[str] = []
+    seen: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id not in bound and node.id not in seen:
+            seen.add(node.id)
+            out.append(f"línea {node.lineno}: `{node.id}` no está importado ni definido (¿falta un import?)")
+    return sorted(out, key=lambda e: int(e.split(":")[0].split()[1]))
+
+
 def validate(code: str, project_map: mapa.ProjectMap, allowed: set[str] = frozenset()) -> HarnessCheck:
     """
     Revisa el conftest.py del arnés sin ejecutarlo. `allowed` = imports extra permitidos (dependencias del repo).
@@ -346,6 +379,7 @@ def validate(code: str, project_map: mapa.ProjectMap, allowed: set[str] = frozen
     elif any(i.kind == "http" for i in project_map.integrations) and not re.search(r"\b(respx|responses)\b", code):
         warnings.append("El proyecto llama a servicios HTTP y el arnés no usa `respx` ni `responses`: esas llamadas dejarán la prueba rota (la red está bloqueada)")
 
+    errors += undefined_names(tree)
     more_errors, more_warnings = code_checks(tree, project_map, allowed)
     errors += more_errors
     warnings += more_warnings
@@ -374,6 +408,7 @@ def _strip_base(code: str) -> str:
 KNOWN_IMPORTS = {
     "pytest": "import pytest", "Decimal": "from decimal import Decimal", "datetime": "from datetime import datetime",
     "timedelta": "from datetime import timedelta", "date": "from datetime import date", "json": "import json", "re": "import re",
+    "timezone": "from datetime import timezone", "os": "import os", "itertools": "import itertools", "uuid": "import uuid",
 }
 
 
@@ -533,7 +568,7 @@ def read_smoke(junit: str | None, phases: dict[str, tuple[int | None, str]]) -> 
     if venv[0] != 0:
         return SmokeResult("fallo", f"No se pudo preparar el entorno del sandbox: {_tail(venv[1])}")
     if install[0] not in (0, None):
-        return SmokeResult("fallo", f"No se pudieron instalar las dependencias del proyecto: {_tail(install[1])}")
+        return SmokeResult("fallo", install_problem(install[1]))
     cases: list[SmokeTest] = []
     # junit.xml lo escribe pytest dentro del sandbox, donde corre código del repo: no se confía en él. Un junit normal
     # no declara entidades; se rechaza antes de parsear (expansión de entidades), como el lector de .docx
@@ -576,6 +611,19 @@ def _tail(log: str) -> str:
         if re.search(r"Error|error:|Exception|No module|not found|failed", line) and not line.startswith("="):
             return line[:400]
     return lines[-1][:400] if lines else ""
+
+
+def install_problem(log: str) -> str:
+    """
+    El aviso de una instalación fallida, con la causa probable (PROPUESTA_REGLAS_VERIFICABLES.md §7.6): sin compilador en
+    la imagen de Docker, o una dependencia fijada a una versión que no se compila con Python 3.12.
+    """
+    text = f"No se pudieron instalar las dependencias del proyecto: {_tail(log)}"
+    if re.search(r"No such file or directory: '(gcc|cc|g\+\+|c\+\+)'|command '(gcc|cc)' not found|unable to execute '(gcc|cc)'", log or ""):
+        return text + " · Una dependencia se compila y la imagen del sandbox no trae compilador: con Docker usa SANDBOX_DOCKER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm."
+    if re.search(r"Failed to build|build_wheel|error: command .gcc. failed", log or "", re.IGNORECASE):
+        return text + " · Una dependencia no se compila con Python 3.12 (suele ser una versión fijada muy antigua): actualízala en requirements.txt."
+    return text
 
 
 # ───────────────────────── El del repo ─────────────────────────

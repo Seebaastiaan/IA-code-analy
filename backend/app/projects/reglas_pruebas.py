@@ -585,7 +585,7 @@ def read_run(data: dict | None, phases: dict[str, tuple[int | None, str]], rules
     if venv[0] != 0:
         problem = f"No se pudo preparar el entorno del sandbox: {arnes._tail(venv[1])}"
     elif install[0] not in (0, None):
-        problem = f"No se pudieron instalar las dependencias del proyecto: {arnes._tail(install[1])}"
+        problem = arnes.install_problem(install[1])
     elif ran is None:
         problem = f"pytest no pudo cargar las pruebas: {arnes._tail(tests[1]) or 'el sandbox no terminó'}"
     out: dict[str, RunResult] = {}

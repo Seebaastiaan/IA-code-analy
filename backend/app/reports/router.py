@@ -134,9 +134,10 @@ def to_markdown(r: Report) -> str:
         "",
         f"Rama `{r.branch}` · commit `{r.commit}` · {r.created_at}",
         "",
-        "| Score global | Seguridad | Pruebas | Buenas prácticas |",
-        "|---|---|---|---|",
-        f"| **{s.global_}** | {s.seg} | {s.test} | {s.prac} |",
+        # Reglas de negocio: solo si el análisis tuvo reglas medibles
+        "| Score global | Seguridad | Pruebas | Buenas prácticas |" + (" Reglas de negocio |" if s.neg is not None else ""),
+        "|---|---|---|---|" + ("---|" if s.neg is not None else ""),
+        f"| **{s.global_}** | {s.seg} | {s.test} | {s.prac} |" + (f" {s.neg} |" if s.neg is not None else ""),
         "",
         (f"Cobertura {r.summary.coverage_total} %" if r.summary.coverage_total is not None else "Cobertura no medida")
         + f" · {r.summary.tests_failed} prueba(s) fallan · complejidad media {r.summary.avg_complexity}",
@@ -155,6 +156,8 @@ def to_markdown(r: Report) -> str:
 def to_html(r: Report) -> str:
     e = html.escape
     s = r.scores
+    # Reglas de negocio: solo si el análisis tuvo reglas medibles
+    neg_kpi = f"<div>Reglas de negocio<br>{s.neg}</div>" if s.neg is not None else ""
     rows = "".join(
         f"<tr class='{e(f.status)}'><td>{e(SEV_LABEL[f.sev])}</td><td>{e(CAT_LABEL[f.cat])}</td><td>{e(f.tool)} <code>{e(f.rule)}</code></td>"
         f"<td><code>{e(f.file)}:{f.line}</code></td><td>{e(f.msg)}<br><small>{e(f.rec)}</small></td></tr>"
@@ -171,7 +174,7 @@ tr.resolved{{opacity:.6;text-decoration:line-through}}small{{color:#475569}}
 </style></head><body>
 <h1>{e(r.repo_name)} · análisis #{r.num}</h1>
 <p>Rama <code>{e(r.branch)}</code> · commit <code>{e(r.commit)}</code> · {e(r.created_at)}</p>
-<div class="kpi"><div><b>Score global</b><br>{s.global_}</div><div>Seguridad<br>{s.seg}</div><div>Pruebas<br>{s.test}</div><div>Buenas prácticas<br>{s.prac}</div></div>
+<div class="kpi"><div><b>Score global</b><br>{s.global_}</div><div>Seguridad<br>{s.seg}</div><div>Pruebas<br>{s.test}</div><div>Buenas prácticas<br>{s.prac}</div>{neg_kpi}</div>
 <h2>Hallazgos ({len(r.findings)})</h2>
 <table><thead><tr><th>Severidad</th><th>Categoría</th><th>Regla</th><th>Ubicación</th><th>Detalle</th></tr></thead><tbody>{rows}</tbody></table>
 </body></html>

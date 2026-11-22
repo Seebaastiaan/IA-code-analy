@@ -391,3 +391,18 @@ test('reglas de negocio: matriz de permisos, evidencia y prueba de fuerza (fase 
   await expect(card.getByText(/Prueba de fuerza de \d+ prueba\(s\)/)).toBeVisible()
   await expect(card.getByText(/cambios detectados/)).toBeVisible({ timeout: 20_000 })
 })
+
+test('reglas de negocio en el score: tablero y reporte muestran su nota aunque pese 0 %', async ({ page }) => {
+  await page.goto('/dashboard')
+  // api-pagos trae reglas medibles: su tarjeta lleva a la pestaña Reglas del reporte
+  const card = page.getByRole('link', { name: /Reglas de negocio/ })
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('63/100')
+  await expect(page.getByRole('button', { name: 'Reglas de negocio' })).toBeVisible()
+  await card.click()
+  await expect(page).toHaveURL(/tab=reglas/)
+
+  // En el encabezado del reporte dice que no cuenta (peso 0 %)
+  await openReport(page)
+  await expect(page.getByText(/Reglas de negocio:/)).toContainText('no cuenta en el score')
+})

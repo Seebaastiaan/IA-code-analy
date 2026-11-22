@@ -131,6 +131,8 @@ export default function ComparePage() {
                 {METRICS.map((m) => (
                   <DeltaCard key={m.key} label={m.label} color={m.color} a={diff.data.a[m.key]} b={diff.data.b[m.key]} />
                 ))}
+                {/* Reglas de negocio: solo si los dos análisis tuvieron reglas medibles */}
+                {diff.data.a.neg != null && diff.data.b.neg != null && <DeltaCard label="Reglas de negocio" color="#8b5cf6" a={diff.data.a.neg} b={diff.data.b.neg} />}
               </div>
               <div className="grid lg:grid-cols-2 gap-4 mt-4">
                 <FindingList

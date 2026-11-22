@@ -2,6 +2,25 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [Sin publicar] — Reglas de negocio verificables (docs/PROPUESTA_REGLAS_VERIFICABLES.md)
+
+### Agregado
+- Formato `reglas_negocio.toml` v2 (`tipo`, escenarios Dado/Cuando/Entonces, `estado`, `dudas`, `fuente`); el importador
+  desde un documento saca reglas atómicas en borrador y una tabla de aprobación en Configuración las aprueba (solo las
+  aprobadas se verifican).
+- Mapa del proyecto (FastAPI, Flask y Django) y arnés de pruebas con Gemini, con prueba de humo en el sandbox. Detecta la
+  carpeta del código en repos con `backend/`.
+- Pruebas generadas por regla (con primera corrida, aprobación y exportación), matriz de permisos, evidencia de apoyo y
+  prueba de fuerza (mutación dirigida) que avisa de pruebas débiles.
+- Categoría `neg` (reglas de negocio) en el score, con peso 0 % por defecto: se ve en el reporte, el tablero, la
+  tendencia, la comparativa y las exportaciones; solo mueve el global con un peso (`[pesos] negocio`).
+- Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
+
+### Cambiado
+- `scores` y `weights` del API traen `neg` (puede ser `null` / 0).
+- El sandbox instala también `[project].dependencies` de `pyproject.toml` y las librerías de pruebas de reglas; la red va
+  bloqueada en las pruebas de reglas.
+
 ## [1.0.0] — 24 de noviembre de 2026 (Sprint 9, code freeze)
 
 ### Agregado

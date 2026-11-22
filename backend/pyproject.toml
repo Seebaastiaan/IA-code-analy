@@ -38,3 +38,7 @@ extend-exclude = ["seed_data"]
 [tool.ruff.lint]
 # B008: `Depends(...)` como valor por defecto es el estilo normal de FastAPI
 extend-ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts de medición (se corren a mano): sin tanto rigor
+"scripts/*" = ["BLE001", "B023", "PLW1510"]

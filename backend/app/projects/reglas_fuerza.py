@@ -446,7 +446,7 @@ def read(
     if venv[0] != 0:
         problem = f"No se pudo preparar el entorno del sandbox: {arnes._tail(venv[1])}"
     elif install[0] not in (0, None):
-        problem = f"No se pudieron instalar las dependencias del proyecto: {arnes._tail(install[1])}"
+        problem = arnes.install_problem(install[1])
     elif data is None:
         problem = f"La prueba de fuerza no terminó: {arnes._tail(tests[1]) or 'se agotó el tiempo del sandbox'}"
     by_rule = {str(o.get("regla")): o for o in (data or {}).get("objetivos") or [] if isinstance(o, dict)}

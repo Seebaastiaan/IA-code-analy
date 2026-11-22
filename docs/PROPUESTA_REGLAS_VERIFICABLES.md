@@ -464,6 +464,12 @@ Lo que salió y cómo se resolvió:
   repo. El sandbox, en los modos de reglas (`arnes`, `pruebas`, `fuerza`), instala y corre pytest desde esa carpeta (el
   análisis normal no cambia), y la prueba de fuerza sigue escribiendo los mutantes con rutas del repo
   (`IA_VOY_RAIZ`). Las dependencias y el `.env.example` también se leen de ahí.
+- **Nombres sin importar** (`os`, `Callable`: `NameError` al cargar el arnés, en Clinic-Management-API y microblog). Se
+  agregan los imports conocidos y la validación avisa de los demás (`undefined_names`), así que la ronda de corrección
+  los recibe.
+- **Avisos de instalación con la causa probable:** sin compilador en la imagen de Docker (sugiere
+  `SANDBOX_DOCKER_IMAGE=…bookworm`) o una dependencia fijada que no se compila con Python 3.12.
+- **Scripts de medición** en `backend/scripts/` (`medir_demos.py` y `medir_repo_publico.py`).
 - **Arneses con error de sintaxis o imports inventados.** `generate` valida el arnés y, si falla, se lo devuelve a la IA
   una vez con los errores (como ya hacían las pruebas).
 - **La imagen `-slim` de Docker no trae compilador.** Con dependencias antiguas que se compilan (microblog), la
@@ -472,8 +478,8 @@ Lo que salió y cómo se resolvió:
 
 Límites que **no** se resolvieron (quedan como casos de §10.2):
 
-- **Más de una carpeta con código** (`api/` y `worker/`, cada una con su `requirements.txt`): no se elige ninguna y
-  se trabaja desde la raíz, como antes.
+- **Más de una carpeta con código** (`api/` y `worker/`): se elige la única que declara un framework web (FastAPI, Flask
+  o Django) en sus dependencias; si siguen siendo varias, ninguna y se trabaja desde la raíz.
 - **El análisis normal** (pytest y cobertura del repo, modo `analisis`) sigue instalando solo lo de la raíz: los
   repos con el código en una subcarpeta siguen mostrando sus pruebas como fallidas al importar.
 - **Dependencias que el repo no declara** o **fijadas a versiones que no instalan** en Python 3.12 (django-stock-app):

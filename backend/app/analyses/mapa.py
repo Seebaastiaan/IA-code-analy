@@ -239,16 +239,34 @@ def _unparse(node: ast.AST | None, limit: int = 80) -> str:
 SOURCE_MARKERS = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "manage.py", "Pipfile")
 
 
-def source_root(files: list[str]) -> str:
+WEB_FRAMEWORKS = re.compile(r"\b(fastapi|flask|django|starlette|djangorestframework)\b", re.IGNORECASE)
+
+
+def _is_web(folder: Path) -> bool:
+    """La carpeta declara un framework web en sus archivos de dependencias."""
+    for name in SOURCE_MARKERS:
+        try:
+            if WEB_FRAMEWORKS.search((folder / name).read_text(encoding="utf-8", errors="replace")[:100_000]):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def source_root(files: list[str], root: Path | None = None) -> str:
     """
     Carpeta del repo donde está el código ("" = la raíz). Si la raíz no tiene `requirements.txt`, `pyproject.toml` ni
     parecidos y exactamente UNA carpeta de primer nivel sí (`backend/` en un repo con frontend y backend), ese es el
-    código: sus módulos se importan sin el prefijo (`from agents.x import y`, no `backend.agents.x`).
+    código: sus módulos se importan sin el prefijo (`from agents.x import y`, no `backend.agents.x`). Con varias
+    (`api/` y `worker/`) y la carpeta del repo (`root`), se elige la única que declara un framework web; si siguen siendo
+    varias, ninguna (se trabaja desde la raíz).
     """
     top = {f for f in files if "/" not in f}
     if any(m in top for m in SOURCE_MARKERS):
         return ""
     found = sorted({parts[0] for f in files if len(parts := PurePosixPath(f).parts) == 2 and parts[1] in SOURCE_MARKERS and not parts[0].startswith(".")})
+    if len(found) > 1 and root is not None:
+        found = [d for d in found if _is_web(root / d)]
     return found[0] if len(found) == 1 else ""
 
 
@@ -263,7 +281,7 @@ def find_source_root(root: Path) -> str:
                 files += [f"{entry.name}/{m}" for m in SOURCE_MARKERS if (entry / m).is_file()]
     except OSError:
         return ""
-    return source_root(files)
+    return source_root(files, root)
 
 
 def _module_of(path: str, prefix: str = "") -> str:
@@ -1180,7 +1198,7 @@ def build(root: Path, files: list[str] | None = None) -> ProjectMap:
         files = [p.relative_to(root).as_posix() for p in root.rglob("*.py") if p.is_file()]
         # Los archivos que marcan dónde está el código (source_root): solo la raíz y el primer nivel
         files += [p.relative_to(root).as_posix() for m in SOURCE_MARKERS for pattern in (m, f"*/{m}") for p in root.glob(pattern) if p.is_file()]
-    prefix = source_root(files)
+    prefix = source_root(files, root)
     py = sorted(f for f in files if f.endswith(".py") and not _skip(f))
     warnings: list[str] = []
     if len(py) > MAX_FILES:

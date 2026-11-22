@@ -4,6 +4,7 @@ Arnés de las pruebas de reglas de negocio (app.projects.reglas_arnes y sus endp
 "sandbox" que corre pytest aquí mismo sobre una copia del repo demo.
 """
 
+import ast
 import shutil
 import subprocess
 import sys
@@ -479,3 +480,25 @@ def test_agrega_el_import_que_el_arnes_olvido():
     ok = "import pytest\n\n@pytest.fixture\ndef api():\n    return 1\n"
     assert arnes.add_missing_imports(ok) == ok
     assert arnes.add_missing_imports("def roto(:") == "def roto(:"
+    # Pasó con Clinic-Management-API: `os.environ.setdefault(...)` sin `import os`
+    assert arnes.add_missing_imports("os.environ.setdefault('A', 'b')\n").startswith("import os\n")
+
+
+def test_aviso_de_instalacion_con_la_causa_probable():
+    sin_compilador = arnes.install_problem("error: [Errno 2] No such file or directory: 'gcc'")
+    assert "SANDBOX_DOCKER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm" in sin_compilador
+    antigua = arnes.install_problem("× Failed to build `ruamel-yaml-clib==0.2.6`")
+    assert "Python 3.12" in antigua and "SANDBOX_DOCKER_IMAGE" not in antigua
+    assert arnes.install_problem("No matching distribution found") == "No se pudieron instalar las dependencias del proyecto: No matching distribution found"
+
+
+def test_el_validador_avisa_de_nombres_sin_importar():
+    # `NameError` al cargar el arnés (os, Callable…): ahora la validación lo ve y la ronda de corrección lo recibe
+    tree = ast.parse("import pytest\n\n@pytest.fixture\ndef api():\n    return os.environ.get('A'), Callable, [x for x in range(2)]\n")
+    errores = arnes.undefined_names(tree)
+    assert sorted(e.split("`")[1] for e in errores) == ["Callable", "os"]
+    assert "falta un import" in errores[0]
+    # Lo que sí está definido o importado no se marca (comprensiones, `as`, argumentos, star imports)
+    ok = ast.parse("from typing import Any\ntry:\n    pass\nexcept ValueError as exc:\n    print(exc)\nwith open('f') as fh:\n    pass\nlambda q: q\n")
+    assert arnes.undefined_names(ok) == []
+    assert arnes.undefined_names(ast.parse("from x import *\nfoo()\n")) == []

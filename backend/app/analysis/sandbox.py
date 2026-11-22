@@ -79,6 +79,10 @@ MODE="$(cat "$OUT/mode" 2>/dev/null || echo analisis)"
 SUB=""
 if [ "$MODE" != analisis ] && ! ls requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile > /dev/null 2>&1; then
   CANDS="$(for d in */; do d="${d%/}"; for m in requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile; do [ -f "$d/$m" ] && { echo "$d"; break; }; done; done)"
+  # Varias (api/ y worker/): la única que declara un framework web (como mapa.source_root)
+  if [ "$(printf "%s" "$CANDS" | grep -c .)" -gt 1 ]; then
+    CANDS="$(for d in $CANDS; do grep -qiE "(^|[^a-z])(fastapi|flask|django|starlette)([^a-z]|$)" "$d"/requirements.txt "$d"/pyproject.toml "$d"/setup.py "$d"/Pipfile 2>/dev/null && echo "$d"; done)"
+  fi
   [ "$(printf "%s" "$CANDS" | grep -c .)" = 1 ] && SUB="$CANDS"
 fi
 # Archivos de IA voy sobre la copia (el arnés de reglas de negocio y su prueba de humo); el clon no se toca

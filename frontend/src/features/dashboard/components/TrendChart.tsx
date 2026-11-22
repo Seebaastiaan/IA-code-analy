@@ -5,14 +5,18 @@ import { cn } from '@/shared/utils/cn'
 import { f1 } from '@/shared/utils/score'
 import type { HistoryPoint } from '../types'
 
-type SeriesKey = 'global' | 'seg' | 'test' | 'prac'
+type SeriesKey = 'global' | 'seg' | 'test' | 'prac' | 'neg'
 
 const SERIES: { key: SeriesKey; label: string; color: string }[] = [
   { key: 'global', label: 'Global', color: BRAND_HEX },
   { key: 'seg', label: CAT.seg.label, color: CAT.seg.hex },
   { key: 'test', label: CAT.test.label, color: CAT.test.hex },
   { key: 'prac', label: CAT.prac.label, color: CAT.prac.hex },
+  // Solo si algún análisis tuvo reglas de negocio medibles
+  { key: 'neg', label: 'Reglas de negocio', color: '#8b5cf6' },
 ]
+
+const valueOf = (h: HistoryPoint, k: SeriesKey) => (k === 'neg' ? (h.neg ?? null) : h[k])
 
 const W = 640
 const H = 230
@@ -22,8 +26,9 @@ const fmtDate = (d: string) => new Intl.DateTimeFormat('es', { day: '2-digit', m
 /** Tendencia por análisis. Tocar la leyenda oculta o muestra cada serie. */
 export function TrendChart({ history }: { history: HistoryPoint[] }) {
   const [hidden, setHidden] = useState<Set<SeriesKey>>(new Set())
-  const visible = SERIES.filter((s) => !hidden.has(s.key))
-  const values = visible.flatMap((s) => history.map((h) => h[s.key]))
+  const series = SERIES.filter((s) => s.key !== 'neg' || history.some((h) => h.neg != null))
+  const visible = series.filter((s) => !hidden.has(s.key))
+  const values = visible.flatMap((s) => history.map((h) => valueOf(h, s.key))).filter((v): v is number => v !== null)
   const lo = Math.max(0, Math.floor((Math.min(...(values.length ? values : [40])) - 5) / 10) * 10)
   const n = Math.max(history.length - 1, 1)
   const x = (i: number) => PAD.l + (i * (W - PAD.l - PAD.r)) / n
@@ -39,7 +44,8 @@ export function TrendChart({ history }: { history: HistoryPoint[] }) {
       return next
     })
 
-  const points = (k: SeriesKey) => history.map((h, i) => `${x(i)},${y(h[k])}`).join(' ')
+  // Los análisis sin nota de esa serie (reglas de negocio) se saltan
+  const points = (k: SeriesKey) => history.flatMap((h, i) => (valueOf(h, k) === null ? [] : [`${x(i)},${y(valueOf(h, k) as number)}`])).join(' ')
 
   return (
     <>
@@ -69,17 +75,20 @@ export function TrendChart({ history }: { history: HistoryPoint[] }) {
           return (
             <g key={s.key}>
               <polyline points={points(s.key)} fill="none" stroke={s.color} strokeWidth={g ? 3 : 2} strokeLinejoin="round" strokeLinecap="round" opacity={g ? 1 : 0.85} />
-              {history.map((h, i) => (
-                <circle key={i} cx={x(i)} cy={y(h[s.key])} r={g ? 4.5 : 3} fill={s.color} className="stroke-white dark:stroke-slate-900" strokeWidth={2}>
-                  <title>{`${fmtDate(h.date)} · ${s.label}: ${f1(h[s.key])}`}</title>
-                </circle>
-              ))}
+              {history.map((h, i) => {
+                const v = valueOf(h, s.key)
+                return v === null ? null : (
+                  <circle key={i} cx={x(i)} cy={y(v)} r={g ? 4.5 : 3} fill={s.color} className="stroke-white dark:stroke-slate-900" strokeWidth={2}>
+                    <title>{`${fmtDate(h.date)} · ${s.label}: ${f1(v)}`}</title>
+                  </circle>
+                )
+              })}
             </g>
           )
         })}
       </svg>
       <div className="flex flex-wrap gap-2 mt-3">
-        {SERIES.map((s) => (
+        {series.map((s) => (
           <button
             key={s.key}
             type="button"

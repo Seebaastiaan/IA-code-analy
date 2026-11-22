@@ -30,6 +30,33 @@ export function GlobalScoreCard({ name, scores, prev, threshold }: { name: strin
   )
 }
 
+/** Reglas de negocio (solo si el análisis tuvo reglas medibles); clic → pestaña Reglas del reporte. */
+export function BusinessKpiCard({ repoId, reportId, value, prev }: { repoId: string; reportId: string; value: number; prev: number | null }) {
+  return (
+    <Link to={paths.report(repoId, reportId, { tab: 'reglas' })} className={cn(cardClass, 'p-5 text-left hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md transition block')}>
+      <div className="flex items-center gap-3">
+        <span className="w-10 h-10 rounded-xl grid place-items-center bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
+          <Icon name="check" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">Reglas de negocio</p>
+          <p className="text-xs text-slate-400">Reglas aprobadas · prueba o patrón</p>
+        </div>
+      </div>
+      <div className="flex items-end justify-between mt-4">
+        <p className={cn('text-3xl font-bold tabular-nums', TONE[tone(value)].text)}>
+          {Math.round(value)}
+          <span className="text-base text-slate-400 font-medium">/100</span>
+        </p>
+        {prev != null && <DeltaBadge delta={value - prev} />}
+      </div>
+      <div className="mt-3">
+        <ProgressBar value={value} className="bg-violet-500" />
+      </div>
+    </Link>
+  )
+}
+
 /** KPI por categoría; clic → reporte filtrado por esa categoría. */
 export function CategoryKpiCard({ cat, repoId, reportId, value, prev }: { cat: Category; repoId: string; reportId: string; value: number; prev: number | null }) {
   return (

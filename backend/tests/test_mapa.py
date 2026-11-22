@@ -345,6 +345,11 @@ def test_codigo_en_una_subcarpeta_se_importa_sin_el_prefijo(tmp_path):
 def test_raiz_del_codigo_solo_si_es_inequivoca(tmp_path):
     assert mapa.source_root(["requirements.txt", "backend/requirements.txt"]) == ""
     assert mapa.source_root(["backend/requirements.txt", "api/pyproject.toml"]) == ""
+    # Con la carpeta a la vista, la que declara un framework web gana; si las dos lo declaran, ninguna
+    write(tmp_path, {"api/requirements.txt": "fastapi\n", "worker/requirements.txt": "celery\n", "api/main.py": "x = 1"})
+    assert mapa.find_source_root(tmp_path) == "api" and mapa.build(tmp_path).source_root == "api"
+    write(tmp_path, {"worker/requirements.txt": "flask\n"})
+    assert mapa.find_source_root(tmp_path) == ""
     assert mapa.source_root(["backend/main.py"]) == ""
     assert mapa.source_root([".github/pyproject.toml", "app/manage.py"]) == "app"
     write(tmp_path, {"main.py": "x = 1", "requirements.txt": ""})

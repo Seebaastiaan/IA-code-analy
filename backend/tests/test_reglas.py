@@ -340,6 +340,17 @@ def test_neg_se_guarda_y_solo_mueve_el_global_con_peso(client):
     assert after["weights"]["neg"] == 20
 
 
+def test_neg_sale_en_las_exportaciones_el_tablero_y_la_comparativa(client):
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    rid, repo_id = job["report_id"], job["repo_id"]
+    md = client.get(f"/api/report/{rid}/export", params={"format": "md"}).text
+    assert "| Score global | Seguridad | Pruebas | Buenas prácticas | Reglas de negocio |" in md
+    assert "Reglas de negocio<br>0.0" in client.get(f"/api/report/{rid}/export", params={"format": "html"}).text
+    assert client.get(f"/api/report/{rid}/export", params={"format": "json"}).json()["scores"]["neg"] == 0.0
+    dash = client.get("/api/dashboard", params={"repo": repo_id}).json()
+    assert dash["selected"]["scores"]["neg"] == 0.0 and dash["selected"]["history"][-1]["neg"] == 0.0
+
+
 def test_archivo_invalido_no_detiene_el_analisis(client, cloner):
     cloner.contenido = regla(severidad='"urgente"')
     job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
