@@ -204,7 +204,7 @@ async def create_harness(project_id: str, store: Analyses, user_id: UserId, sett
     mp = await asyncio.to_thread(_map, ws)
     hs = HarnessStore(store.conn)
     try:
-        proposed = await asyncio.to_thread(arnes.generate, llm, ws.root, mp)
+        proposed = await asyncio.to_thread(arnes.generate, llm, ws.root, mp, _allowed(ws))
     except arnes.HarnessError as exc:
         raise ApiError(422, exc.code, str(exc)) from exc
     except LlmError as exc:

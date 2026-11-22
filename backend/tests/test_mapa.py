@@ -301,3 +301,51 @@ def test_sin_framework(tmp_path):
     mp = mapa.build(write(tmp_path, {"calc.py": "def suma(a, b):\n    return a + b\n"}))
     assert mp.empty and mp.framework is None
     assert "No se reconoció FastAPI, Flask ni Django" in mp.warnings[0]
+
+
+# ───────────────────────── Código en una subcarpeta ─────────────────────────
+
+BACKEND = {
+    "README.md": "# app",
+    "frontend/package.json": "{}",
+    "backend/requirements.txt": "fastapi\n",
+    "backend/main.py": """
+        from fastapi import FastAPI
+        from agents.rutas import router
+
+        app = FastAPI()
+        app.include_router(router)
+    """,
+    "backend/agents/__init__.py": "",
+    "backend/agents/rutas.py": """
+        from fastapi import APIRouter
+
+        router = APIRouter(prefix="/productos")
+
+
+        @router.get("")
+        def listar():
+            return []
+    """,
+}
+
+
+def test_codigo_en_una_subcarpeta_se_importa_sin_el_prefijo(tmp_path):
+    # Pasó con eugen-goebel/inventory-management: `from agents.x import y` parecía un módulo inexistente
+    write(tmp_path, BACKEND)
+    mp = mapa.build(tmp_path)
+    assert mp.source_root == "backend" and mp.framework == "fastapi"
+    assert mp.packages == ["agents", "main"]
+    assert "GET /productos" in endpoints(mp)
+    # Las rutas del mapa siguen siendo las del repo (el editor y las evidencias las leen desde la raíz)
+    assert {e.file for e in mp.endpoints} == {"backend/agents/rutas.py"}
+    assert mapa.find_source_root(tmp_path) == "backend"
+
+
+def test_raiz_del_codigo_solo_si_es_inequivoca(tmp_path):
+    assert mapa.source_root(["requirements.txt", "backend/requirements.txt"]) == ""
+    assert mapa.source_root(["backend/requirements.txt", "api/pyproject.toml"]) == ""
+    assert mapa.source_root(["backend/main.py"]) == ""
+    assert mapa.source_root([".github/pyproject.toml", "app/manage.py"]) == "app"
+    write(tmp_path, {"main.py": "x = 1", "requirements.txt": ""})
+    assert mapa.find_source_root(tmp_path) == "" and mapa.build(tmp_path).source_root == ""

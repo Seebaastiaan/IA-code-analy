@@ -444,10 +444,10 @@ los repos ajenos) con 5 repos públicos, uno o más por framework. Solo se anali
 | Ad-pkh/Clinic-Management-API (`8466a04`) | FastAPI | 22 endpoints, 4 modelos | válido a la 2.ª | **pasa** (4 comprobaciones) |
 | miguelgrinberg/microblog (`a975ef6`) | Flask | 35 endpoints, 5 modelos | válido | **pasa** (7 comprobaciones; necesita la imagen con compilador) |
 | NewGenesis04/InventoryFlow (`b735d65`) | FastAPI | 37 endpoints, 4 roles | válido | falla: `email-validator` no está en sus dependencias |
-| eugen-goebel/inventory-management (`8f44513`) | FastAPI | 20 endpoints, 3 roles | 0 de 3 válidos | no llega a correr |
+| eugen-goebel/inventory-management (`8f44513`) | FastAPI | 20 endpoints, 3 roles | válido a la 3.ª (con la raíz del código) | **pasa** (7 comprobaciones, 3 roles) |
 | MSKose/django-stock-app (`cf6f7af`) | Django/DRF | 31 endpoints, 5 modelos | válido | falla: sus dependencias de 2022 no instalan en Python 3.12 |
 
-**Resultado:** 2 de 5 pasan de punta a punta (una por framework: FastAPI y Flask). El mapa fue correcto en los 5.
+**Resultado:** 3 de 5 pasan de punta a punta (FastAPI ×2 y Flask). El mapa fue correcto en los 5.
 Lo que salió y cómo se resolvió:
 
 - **Faltaba `import pytest` en un arnés** (microblog, `NameError`). Ahora IA voy agrega los imports que el arnés usa sin
@@ -457,20 +457,29 @@ Lo que salió y cómo se resolvió:
   `os.environ.setdefault(...)` antes de importar la app. Con eso el arnés pasó a fallar por otra cosa.
 - **Dependencias en `pyproject.toml` que `requirements.txt` no trae** (InventoryFlow: `python-dotenv`). El sandbox
   instala también las de `[project].dependencies`.
+- **Código en una subcarpeta** (eugen: todo en `backend/`). El validador veía `agents.auth_service` como un módulo que
+  no existe, porque el mapa nombraba los módulos desde la raíz del repo (`backend.agents…`). Ahora el mapa detecta la
+  **raíz del código** (`mapa.source_root`): si la raíz no tiene `requirements.txt`, `pyproject.toml` ni parecidos y
+  exactamente una carpeta de primer nivel sí, los módulos se nombran desde ahí; las rutas del mapa siguen siendo las del
+  repo. El sandbox, en los modos de reglas (`arnes`, `pruebas`, `fuerza`), instala y corre pytest desde esa carpeta (el
+  análisis normal no cambia), y la prueba de fuerza sigue escribiendo los mutantes con rutas del repo
+  (`IA_VOY_RAIZ`). Las dependencias y el `.env.example` también se leen de ahí.
+- **Arneses con error de sintaxis o imports inventados.** `generate` valida el arnés y, si falla, se lo devuelve a la IA
+  una vez con los errores (como ya hacían las pruebas).
 - **La imagen `-slim` de Docker no trae compilador.** Con dependencias antiguas que se compilan (microblog), la
   instalación falla. Con `SANDBOX_DOCKER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm` (1.5 GB, con `gcc`) pasa. El
   valor por defecto sigue siendo la `-slim` (261 MB): para repos ajenos conviene la completa.
 
 Límites que **no** se resolvieron (quedan como casos de §10.2):
 
-- **Código dentro de una subcarpeta** (`backend/`): el validador y el sandbox tratan la raíz del repo como raíz del
-  código, así que `from agents.x import …` parece un módulo inexistente. Es el caso más común en repos con frontend y
-  backend juntos; hace falta una «raíz del código» detectada (carpeta con `requirements.txt`/`pyproject.toml`) en el
-  mapa, el validador y el sandbox.
+- **Más de una carpeta con código** (`api/` y `worker/`, cada una con su `requirements.txt`): no se elige ninguna y
+  se trabaja desde la raíz, como antes.
+- **El análisis normal** (pytest y cobertura del repo, modo `analisis`) sigue instalando solo lo de la raíz: los
+  repos con el código en una subcarpeta siguen mostrando sus pruebas como fallidas al importar.
 - **Dependencias que el repo no declara** o **fijadas a versiones que no instalan** en Python 3.12 (django-stock-app):
   el arnés no puede arreglarlo; se avisa con el error de la instalación.
 - Gemini 3.5 Flash Lite a veces devuelve un arnés con error de sintaxis o con imports inventados (4 de los 8 primeros
-  intentos de esta prueba; en eugen-goebel, 3 de 3). En la app se vuelve a pedir con «Proponer con IA».
+  intentos de esta prueba). Con la ronda de corrección el arnés de eugen-goebel salió válido a la tercera.
 
 ## 8. Evidencia de apoyo (IA, no cuenta)
 
@@ -524,7 +533,7 @@ en [CRITERIOS_DE_ANALISIS.md](CRITERIOS_DE_ANALISIS.md) §2.
 | Caso | Qué pasa |
 |---|---|
 | Paquete de dominio sin API (solo funciones o clases) | Se generan pruebas unitarias que llaman a las funciones; los tipos `permisos` e `integracion` quedan «sin verificar» |
-| Código en subcarpeta (`backend/`, `src/`) | Funciona si el sandbox instala sus dependencias; hoy solo instala las de la raíz (limitación conocida, [repos-de-prueba.md](repos-de-prueba.md)) |
+| Código en subcarpeta (`backend/`, `src/`) | Funciona para las pruebas de reglas (§7.6): se detecta la carpeta con `requirements.txt`/`pyproject.toml` y se instala y corre desde ahí. El análisis normal sigue instalando solo las de la raíz ([repos-de-prueba.md](repos-de-prueba.md)) |
 | PostgreSQL con funciones propias (JSONB, `ARRAY`, triggers, `CHECK` solo en migraciones SQL) | En SQLite pueden fallar o comportarse distinto → prueba rota con el motivo. A futuro: un servicio PostgreSQL efímero en Docker |
 | SQLAlchemy async | Funciona con `TestClient`; el arnés usa `aiosqlite` |
 | GraphQL (Strawberry, Graphene) | El cliente envía consultas; el mapa no lee el esquema, así que la IA recibe menos contexto |
@@ -569,7 +578,7 @@ corren en el sandbox.
 | Repo | Stack | Para qué sirve | Estado |
 |---|---|---|---|
 | [fastapi/full-stack-fastapi-template](https://github.com/fastapi/full-stack-fastapi-template) | FastAPI + SQLModel + pytest, superusuario y usuarios normales | Probar el arnés con autenticación JWT real y un `conftest.py` existente que se debe reutilizar | Conocido y mantenido; necesita PostgreSQL (caso §10.2) |
-| [eugen-goebel/inventory-management](https://github.com/eugen-goebel/inventory-management) | FastAPI + SQLite + pytest, movimientos de stock con historial | El más parecido al caso de §3 con código ajeno | **Probado** (`8f44513`, MIT): mapa bien (20 endpoints, 3 roles); arnés **no** corre: el código está en `backend/` y Gemini importa `agents.…`, que el validador no ve (§7.6) |
+| [eugen-goebel/inventory-management](https://github.com/eugen-goebel/inventory-management) | FastAPI + SQLite + pytest, movimientos de stock con historial | El más parecido al caso de §3 con código ajeno | **Probado** (`8f44513`, MIT): mapa bien (20 endpoints, 3 roles); arnés válido y **prueba de humo pasa** (7 comprobaciones) con la raíz del código en `backend/` (§7.6) |
 | [Denxhinjo/IMS_Clean](https://github.com/Denxhinjo/IMS_Clean) | FastAPI + SQLAlchemy 2 + Alembic, endpoints de movimientos de stock | Inventario con PostgreSQL: probar los avisos de §10.2 | Por revisar |
 | [NewGenesis04/InventoryFlow](https://github.com/NewGenesis04/InventoryFlow) | FastAPI + SQLAlchemy async | Probar el arnés async | **Probado** (`b735d65`, MIT): mapa bien (37 endpoints, 4 roles); arnés válido, pero la prueba de humo falla: el repo no declara `email-validator` (§7.6) |
 | [MSKose/django-stock-app](https://github.com/MSKose/django-stock-app) | Django REST Framework | Arnés de Django / DRF | **Probado** (`cf6f7af`, sin licencia): mapa bien (31 endpoints DRF); el arnés es válido, pero sus dependencias de 2022 no se instalan en Python 3.12 (`ruamel-yaml-clib==0.2.6`) (§7.6) |

@@ -297,6 +297,33 @@ def test_generar_sin_framework_o_sin_respuesta(tmp_path, inventario_map):
     assert exc.value.code == "empty_harness"
 
 
+class SequenceLLM(FakeLLM):
+    """Responde con una respuesta distinta en cada llamada."""
+
+    def __init__(self, *replies: dict) -> None:
+        super().__init__({})
+        self.replies = list(replies)
+
+    def answer(self, system: str, turns: list, schema: dict, on_delta=None) -> Answer:
+        self.calls.append({"system": system, "turns": turns, "schema": schema})
+        return Answer(self.replies.pop(0), "Gemini 3.8 Flash")
+
+
+def test_generar_corrige_una_vez_si_el_arnes_no_es_valido(inventario_map):
+    roto = {"codigo": "def api(:\n    pass", "supuestos": []}
+    bueno = {"codigo": MINIMO, "supuestos": ["corregido"]}
+    llm = SequenceLLM(roto, bueno)
+    proposed = arnes.generate(llm, INVENTARIO, inventario_map)
+    assert len(llm.calls) == 2 and proposed.assumptions == ["corregido"]
+    # La segunda llamada trae lo que contestó la IA y los errores de la validación
+    again = llm.calls[1]["turns"]
+    assert [t.role for t in again] == ["user", "model", "user"] and "error de sintaxis" in again[2].text
+    # Un arnés válido no gasta la segunda llamada
+    ok = SequenceLLM(bueno)
+    arnes.generate(ok, INVENTARIO, inventario_map)
+    assert len(ok.calls) == 1
+
+
 # ───────────────────────── Endpoints ─────────────────────────
 
 

@@ -179,6 +179,8 @@ class ProjectMap:
     symbols: dict[str, list[str]] = field(default_factory=dict)
     files: int = 0
     warnings: list[str] = field(default_factory=list)
+    # Carpeta del repo donde está el código ("" = la raíz): las pruebas y el sandbox trabajan desde ahí
+    source_root: str = ""
 
     @property
     def empty(self) -> bool:
@@ -233,9 +235,42 @@ def _unparse(node: ast.AST | None, limit: int = 80) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _module_of(path: str) -> str:
+# Archivos que marcan la carpeta donde vive el código de un proyecto Python
+SOURCE_MARKERS = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "manage.py", "Pipfile")
+
+
+def source_root(files: list[str]) -> str:
+    """
+    Carpeta del repo donde está el código ("" = la raíz). Si la raíz no tiene `requirements.txt`, `pyproject.toml` ni
+    parecidos y exactamente UNA carpeta de primer nivel sí (`backend/` en un repo con frontend y backend), ese es el
+    código: sus módulos se importan sin el prefijo (`from agents.x import y`, no `backend.agents.x`).
+    """
+    top = {f for f in files if "/" not in f}
+    if any(m in top for m in SOURCE_MARKERS):
+        return ""
+    found = sorted({parts[0] for f in files if len(parts := PurePosixPath(f).parts) == 2 and parts[1] in SOURCE_MARKERS and not parts[0].startswith(".")})
+    return found[0] if len(found) == 1 else ""
+
+
+def find_source_root(root: Path) -> str:
+    """Lo mismo que `source_root`, mirando la carpeta (solo el primer nivel)."""
+    files: list[str] = []
+    try:
+        for entry in root.iterdir():
+            if entry.is_file():
+                files.append(entry.name)
+            elif entry.is_dir() and not entry.name.startswith("."):
+                files += [f"{entry.name}/{m}" for m in SOURCE_MARKERS if (entry / m).is_file()]
+    except OSError:
+        return ""
+    return source_root(files)
+
+
+def _module_of(path: str, prefix: str = "") -> str:
     p = PurePosixPath(path)
     parts = list(p.with_suffix("").parts)
+    if prefix and parts[: len(PurePosixPath(prefix).parts)] == list(PurePosixPath(prefix).parts) and len(parts) > len(PurePosixPath(prefix).parts):
+        parts = parts[len(PurePosixPath(prefix).parts):]
     if parts and parts[0] == "src" and len(parts) > 1:
         parts = parts[1:]
     if parts and parts[-1] == "__init__":
@@ -343,11 +378,11 @@ def _parse(source: str, path: str) -> ast.Module | None:
         return None
 
 
-def _read_module(path: str, source: str) -> _Module | None:
+def _read_module(path: str, source: str, prefix: str = "") -> _Module | None:
     tree = _parse(source, path)
     if tree is None:
         return None
-    m = _Module(path, _module_of(path), tree, _is_test(path))
+    m = _Module(path, _module_of(path, prefix), tree, _is_test(path))
     is_package = PurePosixPath(path).name == "__init__.py"
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -1143,6 +1178,9 @@ def build(root: Path, files: list[str] | None = None) -> ProjectMap:
     """Mapa del repo en `root`. `files` = rutas relativas (las del clon); None = recorrer la carpeta."""
     if files is None:
         files = [p.relative_to(root).as_posix() for p in root.rglob("*.py") if p.is_file()]
+        # Los archivos que marcan dónde está el código (source_root): solo la raíz y el primer nivel
+        files += [p.relative_to(root).as_posix() for m in SOURCE_MARKERS for pattern in (m, f"*/{m}") for p in root.glob(pattern) if p.is_file()]
+    prefix = source_root(files)
     py = sorted(f for f in files if f.endswith(".py") and not _skip(f))
     warnings: list[str] = []
     if len(py) > MAX_FILES:
@@ -1158,7 +1196,7 @@ def build(root: Path, files: list[str] | None = None) -> ProjectMap:
             source = full.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             continue
-        m = _read_module(path, source)
+        m = _read_module(path, source, prefix)
         if m is None:
             broken += 1
             continue
@@ -1169,7 +1207,7 @@ def build(root: Path, files: list[str] | None = None) -> ProjectMap:
     requirements = ""
     for name in ("requirements.txt", "pyproject.toml", "setup.py", "Pipfile"):
         try:
-            requirements += (root / name).read_text(encoding="utf-8", errors="replace")[:100_000] + "\n"
+            requirements += (root / prefix / name).read_text(encoding="utf-8", errors="replace")[:100_000] + "\n"
         except OSError:
             pass
 
@@ -1184,6 +1222,7 @@ def build(root: Path, files: list[str] | None = None) -> ProjectMap:
     b.symbols()
     b.framework(requirements)
     mp = b.map
+    mp.source_root = prefix
     mp.files = len(modules)
     mp.packages = sorted({m.name.split(".")[0] for m in modules if not m.is_test and m.name and m.name.split(".")[0] not in ("setup", "manage", "conftest", "noxfile")})
     if not mp.framework:

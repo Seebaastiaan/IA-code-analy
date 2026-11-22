@@ -72,9 +72,20 @@ phase venv 300 bash -c '
 cd "$WORK" || { skip install audit tests coverage; exit 0; }
 if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit tests coverage; exit 0; fi
 export VIRTUAL_ENV="$WORK/.venv"; export PATH="$VIRTUAL_ENV/bin:$PATH"
-# Archivos de IA voy sobre la copia (el arnés de reglas de negocio y su prueba de humo); el clon no se toca
-if [ -d "$OUT/overlay" ]; then cp -R "$OUT/overlay/." "$WORK/"; fi
 MODE="$(cat "$OUT/mode" 2>/dev/null || echo analisis)"
+# Código en una subcarpeta (un repo con frontend/ y backend/): si la raíz no tiene requirements.txt ni parecidos y
+# exactamente UNA carpeta de primer nivel sí, las pruebas de reglas se instalan y corren desde ahí (como mapa.source_root).
+# El análisis normal (modo analisis) no cambia.
+SUB=""
+if [ "$MODE" != analisis ] && ! ls requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile > /dev/null 2>&1; then
+  CANDS="$(for d in */; do d="${d%/}"; for m in requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile; do [ -f "$d/$m" ] && { echo "$d"; break; }; done; done)"
+  [ "$(printf "%s" "$CANDS" | grep -c .)" = 1 ] && SUB="$CANDS"
+fi
+# Archivos de IA voy sobre la copia (el arnés de reglas de negocio y su prueba de humo); el clon no se toca
+if [ -d "$OUT/overlay" ]; then mkdir -p "$WORK/$SUB"; cp -R "$OUT/overlay/." "$WORK/${SUB:+$SUB/}"; fi
+[ -n "$SUB" ] && echo "código en $SUB/" > "$OUT/subdir.txt" && cd "$WORK/$SUB"
+# La prueba de fuerza escribe los mutantes con rutas desde la raíz del repo
+export IA_VOY_RAIZ="$WORK"
 
 phase install 600 bash -c '
   if [ -f requirements.txt ]; then

@@ -61,7 +61,8 @@ def main(argv: list[str]) -> int:
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
     # Las pruebas no salen a la red (el plugin ia_voy_reglas la bloquea con esta variable)
     os.environ.setdefault("IA_VOY_SIN_RED", "1")
-    result = run(spec, Path.cwd().resolve())
+    # Con el código en una subcarpeta (backend/) se corre desde ahí, pero las rutas de los mutantes son del repo
+    result = run(spec, Path(os.environ.get("IA_VOY_RAIZ") or Path.cwd()).resolve())
     out_path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     return 0
 
