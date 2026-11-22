@@ -213,6 +213,57 @@ JUNIT = """<testsuites><testsuite>
 OK = {"venv": (0, ""), "install": (0, "")}
 
 
+def test_la_prueba_de_humo_acepta_un_cliente_nuevo_del_mismo_usuario(inventario_map):
+    # Corrida real (reservas-demo sin arnés): `como(rol)` devolvía un cliente nuevo con el mismo token en cada llamada; es el
+    # mismo usuario, y la prueba de humo lo rechazaba por no ser el mismo objeto
+    ns: dict = {}
+    exec(arnes.smoke_test(inventario_map, ["api", "como"]), ns)  # noqa: S102  (la prueba de humo que arma IA voy, no código ajeno)
+
+    class Cliente:
+        def __init__(self, token):
+            self.token = token
+
+        def get(self, ruta):
+            return type("R", (), {"status_code": 200})()
+
+    ns["test_humo_como"](lambda rol: Cliente(f"tok-{rol}"), "gerente")
+
+    def como_con_clase_interna(rol):
+        # Corrida real: la clase del cliente se definía dentro de `como` (otra clase en cada llamada, mismo usuario)
+        class Interno:
+            def __init__(self):
+                self.token = f"tok-{rol}"
+
+            def get(self, ruta):
+                return type("R", (), {"status_code": 200})()
+
+        return Interno()
+
+    ns["test_humo_como"](como_con_clase_interna, "gerente")
+    with pytest.raises(AssertionError, match="siempre el mismo cliente"):
+        tokens = iter(range(10))
+        ns["test_humo_como"](lambda rol: Cliente(next(tokens)), "gerente")
+
+
+def test_la_prueba_de_humo_pide_el_id_del_usuario_al_arnes_de_la_ia(inventario_map):
+    # Corrida real (reservas-demo sin arnés): `como(rol)` no daba el id de su usuario y 8 de 15 pruebas se rompieron al
+    # crear la cita (`cliente_id` debe ser un número entero). Al arnés de la IA se le exige; a uno escrito a mano, no
+    class Cliente:
+        def __init__(self, id=None):
+            self.id = id
+
+        def get(self, ruta):
+            return type("R", (), {"status_code": 200})()
+
+    for require_id, ok, malo in ((True, Cliente(7), Cliente()), (False, Cliente(), None)):
+        ns: dict = {}
+        exec(arnes.smoke_test(inventario_map, ["api", "como"], require_id), ns)  # noqa: S102  (la prueba de humo que arma IA voy, no código ajeno)
+        ns["test_humo_como"](lambda rol, c=ok: c, "gerente")
+        if malo is not None:
+            with pytest.raises(AssertionError, match="debe exponer `.id`"):
+                ns["test_humo_como"](lambda rol, c=malo: c, "gerente")
+
+
 def test_resultado_de_la_prueba_de_humo():
     result = arnes.read_smoke(JUNIT, {**OK, "tests": (1, "")})
     assert result.status == "fallo"
@@ -274,6 +325,19 @@ class FakeLLM:
     def answer(self, system: str, turns: list, schema: dict, on_delta=None) -> Answer:
         self.calls.append({"system": system, "turns": turns, "schema": schema})
         return Answer(self.reply, "Gemini 3.8 Flash")
+
+
+def test_un_arnes_que_no_arranco_se_corrige_con_el_error_de_su_prueba_de_humo(inventario_map):
+    # Corrida real (reservas-demo sin arnés, modelo de respaldo): `como("cliente")` no autenticaba y GET /citas dio 401
+    llm = FakeLLM({"codigo": MINIMO, "supuestos": []})
+    anterior = arnes.assemble(MINIMO)
+    error = "como('cliente'): GET /citas respondió 401, el usuario no quedó autenticado"
+    arnes.generate(llm, INVENTARIO, inventario_map, broken=(anterior, error))
+    turns = llm.calls[0]["turns"]
+    assert [t.role for t in turns] == ["user", "model", "user"]
+    assert "PRUEBA DE HUMO FALLÓ" in turns[2].text and "401" in turns[2].text
+    # Se le devuelve solo el cuerpo (lo de BASE lo pone IA voy)
+    assert "def como" in turns[1].text and "class PreparacionFallida" not in turns[1].text
 
 
 def test_generar_manda_el_mapa_y_los_archivos(inventario_map):

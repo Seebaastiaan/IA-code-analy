@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from app.analyses import analyzers
+from app.analyses import analyzers, familias
 from app.analyses.analyzers import RUFF_SELECT, fix_content, static_findings
+from app.analyses.mensajes import ruff_message
 from app.analyses.models import FindingInput
 from app.analyses.remedies import BANDIT, bandit_remedy, ruff_remedy
 from app.analyses.store import fix_kind_of
+from app.analyses.views import localize
 from app.assistant.llm import Answer, LlmError
 from app.editor.ai_fix import Target, apply_ai_edits, bump_requirement, clean_replacement, fix_version, windows
 from app.editor.router import get_fix_llm
@@ -42,12 +44,32 @@ def test_todas_las_reglas_de_bandit_comunes_tienen_receta():
     assert "Algo raro" in rec and "http" not in rec
 
 
-def test_ruff_fuera_del_catalogo_usa_el_ejemplo_de_ruff():
+def test_ruff_fuera_del_catalogo_se_explica_en_espanol_por_familia():
     _, rec = ruff_remedy("B006", "Do not use mutable data structures for argument defaults")
     assert "None" in rec
-    # SIM113 no está en el catálogo: sale el "Use instead" de la documentación de Ruff
-    _, rec = ruff_remedy("SIM113", "Use `enumerate()` for index variable")
-    assert rec.startswith("Escríbelo así:") and "enumerate" in rec
+    _, rec = ruff_remedy("SIM113", "Use `enumerate()` for index variable `i` in `for` loop")
+    assert "enumerate" in rec
+    # Antes salía el ejemplo genérico de la documentación de Ruff («import numpy as np / import pandas») y el nombre en inglés
+    why, rec = ruff_remedy("I001", "Los imports no están ordenados")
+    assert "biblioteca estándar" in rec and "numpy" not in rec
+    why, rec = ruff_remedy("PLR2004", "Magic value used in comparison")
+    assert "Escríbelo así" not in rec and "Ruff" not in why and not familias.english(why + rec)
+
+
+def test_los_mensajes_que_no_estan_en_el_catalogo_no_salen_en_ingles():
+    assert ruff_message("Import block is un-sorted or un-formatted", "I001") == "Los imports no están ordenados"
+    assert ruff_message("Magic value used in comparison, consider replacing `3` with a constant variable", "PLR2004") == "El código se puede simplificar o tiene un error común"
+    assert ruff_message("`os` se importa y no se usa", "F401") == "`os` se importa y no se usa"
+
+
+def test_los_hallazgos_guardados_en_ingles_se_muestran_en_espanol():
+    # Análisis anteriores a la traducción (la comparativa los mostraba así)
+    msg, _, _ = localize("Bandit", "B110", "Try, Except, Pass detected.", "Bandit B110: Try, Except, Pass detected.", "x")
+    assert msg == "`try`/`except`/`pass`: el error se oculta sin registrarlo"
+    msg, why, rec = localize("Ruff", "I001", "Import block is un-sorted or un-formatted", "Ruff I001 (unsorted-imports): Import block is un-sorted.",
+                             "Escríbelo así:\nimport numpy as np\nimport pandas Corrección automática: Organize imports.", auto_fix=True)
+    assert msg == "Los imports no están ordenados" and "numpy" not in rec and "Organize" not in rec
+    assert rec.endswith("«Aplicar corrección automática» lo hace por ti.") and not familias.english(why)
 
 
 # ─── Reglas de Ruff ───

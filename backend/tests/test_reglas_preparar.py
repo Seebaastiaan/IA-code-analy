@@ -216,3 +216,24 @@ def test_quien_se_aprueba_solo():
     assert not ok("cumple", "parcial", "coincide") and not ok("cumple", "fuerte", "discrepa") and not ok("no_cumple", None, "discrepa")
     assert not ok("no_cumple", None, "sin_revisar") and not ok("prueba_rota", None, "coincide")
     assert not ok("no_cumple", None, "coincide", approved=True) and not ok("cumple", "fuerte", "coincide", blocked="Córrela primero")
+
+
+def test_si_el_arnes_de_la_ia_no_arranca_se_corrige_y_se_prueba_otra_vez(monkeypatch):
+    fake = Rutas()
+    smokes = iter(["fallo", "paso"])
+    state = {"smoke": "pendiente", "proposed": 0}
+    fake.get_harness = lambda *a: NS(
+        cloned=True, repo_harness=None, can_generate=True, sandbox=True,
+        harness=NS(origin="ia", smoke=state["smoke"], approved=False, smoke_message="GET /citas respondió 401"),
+    )
+    fake.run_smoke = lambda *a: state.update(smoke=next(smokes))
+    fake.approve_harness = lambda *a: None
+    fake.create_harness = lambda *a: state.update(proposed=state["proposed"] + 1)
+    for name in ("rule_routes", "harness_routes", "test_routes"):
+        monkeypatch.setattr(preparar, name, fake)
+    monkeypatch.setattr(preparar.db, "session", lambda path: _NoConn())
+    job = preparar.Job(user_id="u1")
+    asyncio.run(preparar._work(preparar.Flow(NS(database_path=""), "r1", job, llm=object())))
+    nota = {s.id: (s.status, s.note) for s in job.steps}
+    assert state["proposed"] == 1 and nota["humo"] == ("hecho", "El entorno arranca y se aprobó (la IA corrigió el entorno tras un primer intento que no arrancó)")
+    assert job.summary == preparar.DONE

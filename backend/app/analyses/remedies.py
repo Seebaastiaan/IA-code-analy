@@ -3,15 +3,11 @@ Recomendaciones concretas por regla (en español) para los hallazgos de Bandit y
 
 Antes la recomendación decía "revisa la documentación de la regla" con un enlace: el usuario (y el asistente,
 que la recibe en su contexto) se quedaba sin saber qué cambiar. Cada entrada dice POR QUÉ es un problema y QUÉ
-cambiar, con el código de reemplazo cuando aplica. Las reglas de Ruff que no están en el catálogo usan el
-ejemplo "Use instead" de la propia documentación de Ruff (`ruff rule --all`), sin enlaces.
+cambiar, con el código de reemplazo cuando aplica. Las reglas de Ruff que no están en el catálogo usan la
+explicación de su familia (app.analyses.familias): el ejemplo de la documentación de Ruff era genérico y en inglés.
 """
 
-import json
-import re
-import subprocess
-import sys
-from functools import lru_cache
+from app.analyses import familias
 
 # (por qué, qué cambiar)
 Remedy = tuple[str, str]
@@ -111,6 +107,13 @@ BANDIT: dict[str, Remedy] = {
 }
 
 RUFF: dict[str, Remedy] = {
+    # isort, pycodestyle y pyupgrade (los activa la configuración del propio repo)
+    "I001": ("Los imports desordenados hacen difícil ver de qué depende el archivo y causan conflictos al juntar ramas.",
+             "Ordénalos en tres grupos separados por una línea en blanco: biblioteca estándar, paquetes instalados y módulos del proyecto, cada uno en orden alfabético."),
+    "E501": ("Una línea muy larga obliga a desplazarse para leerla y se revisa peor.", "Pártela en varias líneas (dentro de paréntesis) o saca una parte a una variable."),
+    "W291": ("Los espacios al final de la línea ensucian los cambios en git.", "Bórralos; la mayoría de los editores lo hace al guardar."),
+    "W293": ("Una línea en blanco con espacios ensucia los cambios en git.", "Deja la línea vacía, sin espacios."),
+    "W292": ("Sin salto de línea al final, git marca la última línea como cambiada cada vez.", "Agrega un salto de línea al final del archivo."),
     # Pyflakes
     "F401": ("Un import que no se usa hace más lento el arranque y confunde sobre las dependencias reales.", "Borra el import (o agrégalo a `__all__` si es una reexportación intencional)."),
     "F403": ("`from x import *` oculta de dónde viene cada nombre y puede pisar otros.", "Importa solo lo que usas: `from x import a, b`."),
@@ -168,6 +171,7 @@ RUFF: dict[str, Remedy] = {
     "SIM102": ("`if` anidados que se pueden unir.", "Únelos con `and` en un solo `if`."),
     "SIM103": ("`if c: return True else: return False` es redundante.", "Escribe `return c` (o `return bool(c)`)."),
     "SIM105": ("`try/except/pass` es más largo de lo necesario.", "Usa `with contextlib.suppress(Error):` (agrega `import contextlib`)."),
+    "SIM113": ("Un contador que se suma a mano dentro del `for` puede desfasarse.", "Usa `for i, x in enumerate(items):` en lugar de llevar el índice a mano."),
     "SIM108": ("Un `if/else` que solo asigna un valor.", "Usa el ternario: `x = a if cond else b`."),
     "SIM110": ("Un ciclo que busca si algún elemento cumple.", "Usa `return any(cond(x) for x in items)`."),
     "SIM115": ("Abrir un archivo sin `with` puede dejarlo abierto si hay un error.", "Usa `with open(ruta) as f:`."),
@@ -187,42 +191,19 @@ RUFF_PREFIX: dict[str, Remedy] = {
 }
 
 
-@lru_cache(maxsize=1)
-def _ruff_docs() -> dict[str, dict]:
-    """Documentación de todas las reglas de Ruff ({código: {name, explanation…}}). Vacía si Ruff no responde."""
-    try:
-        proc = subprocess.run([sys.executable, "-m", "ruff", "rule", "--all", "--output-format", "json"], capture_output=True, timeout=60, check=False)
-        return {r["code"]: r for r in json.loads(proc.stdout.decode("utf-8", errors="replace") or "[]")}
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return {}
-
-
-def _section(markdown: str, title: str) -> str:
-    match = re.search(rf"## {title}\n(.*?)(?=\n## |\Z)", markdown, re.DOTALL)
-    return match.group(1).strip() if match else ""
-
-
-def _use_instead(explanation: str) -> str | None:
-    """El bloque de código de "Use instead:" de la documentación de Ruff."""
-    example = _section(explanation, "Example")
-    match = re.search(r"Use instead:\s*```(?:python|py)?\n(.*?)```", example, re.DOTALL)
-    return match.group(1).strip() if match else None
-
-
 def ruff_remedy(code: str, message: str) -> Remedy:
+    """(por qué, qué hacer) en español: el catálogo, el prefijo conocido o la familia de la regla (app.analyses.familias)."""
     if code in RUFF:
         return RUFF[code]
     prefix = next((p for p in RUFF_PREFIX if code.startswith(p)), None)
-    doc = _ruff_docs().get(code) or {}
-    example = _use_instead(doc.get("explanation") or "")
-    if example:
-        return (f"Ruff {code} ({doc.get('name', code)}): {message}.", f"Escríbelo así:\n{example[:600]}")
     if prefix:
         return RUFF_PREFIX[prefix]
-    return (f"Ruff {code}: {message}.", f"Cambia esa línea para que no aparezca: {message}.")
+    _, why, rec = familias.family(code)
+    return why, rec
 
 
 def bandit_remedy(code: str, message: str) -> Remedy:
     if code in BANDIT:
         return BANDIT[code]
-    return (f"Bandit {code}: {message}.", f"Elimina ese patrón de la línea señalada ({message}). Si es un falso positivo comprobado, ignora {code} en Configuración.")
+    what = "" if familias.english(message) else f" ({message})"
+    return ("Bandit marcó un patrón que puede ser inseguro.", f"Revisa la línea señalada{what} y quita ese patrón. Si es un falso positivo comprobado, ignora {code} en Configuración.")

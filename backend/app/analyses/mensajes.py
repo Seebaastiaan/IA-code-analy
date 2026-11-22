@@ -9,8 +9,25 @@ original: no se pierde información.
 
 import re
 
+from app.analyses import familias
+
 # Ruff: (patrón del mensaje en inglés, plantilla en español con \1, \2… de los grupos del patrón)
 RUFF_PATTERNS: list[tuple[str, str]] = [
+    (r"Import block is un-sorted or un-formatted", "Los imports no están ordenados"),
+    (r"Use `enumerate\(\)` for index variable `(.+)` in `for` loop", r"Usa `enumerate()` para el índice `\1` del `for`"),
+    (r"Missing required import: `(.+)`", r"Falta el import obligatorio `\1`"),
+    (r"Line too long \((\d+) > (\d+)\)", r"Línea demasiado larga (\1 caracteres; el máximo es \2)"),
+    (r"Trailing whitespace", "Espacios al final de la línea"),
+    (r"Blank line contains whitespace", "La línea en blanco tiene espacios"),
+    (r"No newline at end of file", "Falta el salto de línea al final del archivo"),
+    (r"Use `(.+)` instead of `(.+)` for type annotation", r"Usa `\1` en lugar de `\2` en la anotación de tipo"),
+    (r"Use `X \| Y` for type annotations", "Usa `X | Y` en las anotaciones de tipo"),
+    (r"Use `X \| None` for type annotations", "Usa `X | None` en las anotaciones de tipo"),
+    (r"Import from `(.+)` instead: (.+)", r"Importa \2 desde `\1`"),
+    (r"Unnecessary open mode parameters", "El modo de `open` sobra (\"r\" es el de siempre)"),
+    (r"Use f-string instead of `format` call", "Usa un f-string en lugar de `format`"),
+    (r"Use `super\(\)` instead of `super\(__class__, self\)`", "Usa `super()` sin argumentos"),
+    (r"Class `(.+)` inherits from `object`", r"La clase `\1` hereda de `object` sin necesidad"),
     (r"`(.+)` imported but unused; consider using `importlib.util.find_spec` to test for availability", r"`\1` se importa y no se usa; si es para comprobar que existe, usa `importlib.util.find_spec`"),
     (r"`(.+)` imported but unused; consider removing, adding to `__all__`, or using a redundant alias", r"`\1` se importa y no se usa; bórralo, agrégalo a `__all__` o usa un alias redundante"),
     (r"`(.+)` imported but unused", r"`\1` se importa y no se usa"),
@@ -162,13 +179,18 @@ _COMPILED = [(re.compile(f"^(?:{p})$", re.DOTALL), r) for p, r in RUFF_PATTERNS]
 _PASSWORD_VALUE = re.compile(r": (['\"].*['\"])\s*$", re.DOTALL)
 
 
-def ruff_message(message: str) -> str:
-    """Mensaje de Ruff en español; si no está en el catálogo, el original."""
+def ruff_message(message: str, code: str | None = None) -> str:
+    """
+    Mensaje de Ruff en español. Si no está en el catálogo y sigue en inglés, el de la familia de la regla (`code`):
+    nunca se muestra el texto en inglés.
+    """
     text = message.strip()
     for pattern, template in _COMPILED:
         match = pattern.match(text)
         if match:
             return pattern.sub(template, text)
+    if code and familias.english(text):
+        return familias.family(code)[0]
     return message
 
 

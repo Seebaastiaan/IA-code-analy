@@ -123,6 +123,27 @@ Qué se encontró en cada ronda:
 Queda: 4 o 5 reglas con fuerza «parcial» (RN-005, 009, 010, 013, 014) y RN-004 sin cambios que inyectar esperan a una persona; el reporte
 ahora dice «su prueba pasa (no notó todas las violaciones…), pero todavía no cuenta» en lugar de «sin patrón ni pruebas».
 
+## 5c. Con un repo como cualquier otro: `reservas-demo` sin arnés ni pruebas
+
+Los demos ya no traen la clave (pruebas a mano, `conftest.py` listo, reglas resueltas): la IA tiene que escribir el arnés. Se midió
+`reservas-demo` (Flask, 15 reglas, 4 rotas) con las reglas de la clave para comparar con `ESPERADO.md`.
+
+| Corrida | Arnés | Pruebas que aciertan | Aprobadas solas | Aprobadas mal | Rotas que llegan al reporte |
+|---|---|---|---|---|---|
+| 1 | bien al primer intento | 12 de 15 | 8 | 0 | 2 de 4 |
+| 2 | 401: no autenticaba (modelo de respaldo) | — | — | — | se detuvo |
+| 3 · 4 (arnés corregido con el error de la prueba de humo) | bien | 4 · 6 (8 pruebas rotas: no daba el id del usuario) | 1 · 4 | 0 · 0 | 0 · 0 de 4 |
+| 5 · 6 (`como(rol).id` exigido) | bien · rechazado por una comprobación demasiado estricta | 5 (4 falsos positivos, ninguno aprobado) · — | 2 · — | 0 | 1 · — de 4 |
+
+Correcciones que salieron de aquí: el arnés de la IA se reescribe una vez con el error de su prueba de humo; la prueba de humo acepta un
+cliente nuevo del mismo usuario (mismo estado, aunque su clase se defina dentro de `como`) y exige `como(rol).id` al arnés de la IA; las
+pruebas usan `como(rol).id` cuando una ruta pide el usuario.
+
+**Lectura honesta:** en las 11 corridas medidas (`inventario-demo` y `reservas-demo`) el programa nunca aprobó solo una regla con el
+veredicto equivocado. Pero con un repo sin arnés el resultado depende mucho del primer arnés que escribe la IA, y cuando Gemini está saturado
+y responde el modelo de respaldo, baja bastante. Con `reservas-demo` limpio, la mayoría de las reglas todavía terminan esperando a una
+persona. Falta repetir la medición con la última corrección del arnés.
+
 ## 6. Pendientes y riesgos
 
 - **Variación entre corridas** (mitigado: «Preparar todo» escribe de nuevo las pruebas que no coinciden con la lectura del código; falta medir cuánto ayuda con Gemini real). Los falsos negativos del empalme de profesionales y del bloqueo de cuenta aparecen en 1 de cada 3 corridas;

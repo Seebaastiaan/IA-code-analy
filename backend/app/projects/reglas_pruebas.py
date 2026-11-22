@@ -79,6 +79,8 @@ Estructura obligatoria (regla de oro):
   permisos, o el código exacto solo si la regla lo da), y además se comprueba que no se guardó nada (consultando la API).
 - Para reglas de conflictos, cupos o límites (horarios que se empalman, plazos, máximos), prueba el caso que se
   traslapa PARCIALMENTE y el límite EXACTO, no solo el caso idéntico: ahí es donde el código suele fallar.
+- Si una ruta pide el id del usuario en el cuerpo o en la ruta (`cliente_id`, `usuario_id`…), usa `como(rol).id` (el
+  arnés lo expone); nunca inventes un id ni mandes el email o el token en su lugar.
 - `como(rol)` devuelve SIEMPRE el mismo usuario para ese rol. Si la regla necesita dos usuarios distintos del mismo
   rol (dos clientes, un cliente que ve la cita de otro), crea el segundo con el fixture `crear_…` del arnés que crea
   usuarios; si no hay, la regla no se puede probar así: dilo en "supuestos".

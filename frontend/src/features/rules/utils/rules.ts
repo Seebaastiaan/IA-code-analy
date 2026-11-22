@@ -173,6 +173,15 @@ const count = (v: RulesValidation) => `${v.rules.length} regla(s) · ${v.project
  * Lo que dice la revisión de reglas en Nuevo análisis. `form` = reglas escritas o corregidas en el modal
  * (ya validadas): se mandan con el análisis y se usan si el repo no tiene un archivo válido.
  */
+/** Reglas en borrador según el aviso del análisis («13 regla(s) en borrador no se verifican…», app.analyses.reglas.drafts_note). */
+export function draftCount(warnings: string[]): number {
+  for (const w of warnings) {
+    const m = /^(\d+) regla\(s\) en borrador/.exec(w)
+    if (m) return Number(m[1])
+  }
+  return 0
+}
+
 export function precheckView(p: RulesPrecheck, form: RulesValidation | null): PrecheckView {
   const file = p.file
   if (p.status === 'valid' && file)
@@ -198,10 +207,10 @@ export function precheckView(p: RulesPrecheck, form: RulesValidation | null): Pr
     return app
       ? { tone: 'neutral', uses: 'app', title: 'Este repo no declara reglas de negocio', detail: `Se usarán las cargadas en la app (${count(app)}).` }
       : {
-          tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio',
-          detail: p.can_import && p.documents.length
-            ? `Encontré ${p.documents.length === 1 ? p.documents[0] : `${p.documents.length} documentos de requisitos`} en el repositorio: la IA puede sacar las reglas de ahí para que las revises. También puedes descargar la plantilla o escribirlas aquí.`
-            : 'Descarga la plantilla o escríbelas aquí; si no, el análisis no verifica reglas.',
+          tone: 'neutral', uses: null, title: 'Reglas de negocio: después de analizar',
+          detail: p.documents.length
+            ? `Encontré ${p.documents.length === 1 ? baseName(p.documents[0]) : `${p.documents.length} documentos de requisitos`}. Al terminar el análisis, en Configuración → Reglas el programa saca las reglas de ahí y solo te pregunta lo que no puede decidir.`
+            : 'Al terminar el análisis, en Configuración → Reglas puedes subir el documento de requisitos: el programa saca las reglas y solo te pregunta lo que no puede decidir.',
         }
   return { tone: 'neutral', uses: app ? 'app' : null, title: 'No se pudieron revisar las reglas', detail: p.message }
 }

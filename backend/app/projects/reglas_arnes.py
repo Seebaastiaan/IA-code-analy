@@ -117,6 +117,8 @@ Escribe el cuerpo de un `conftest.py` de pytest con estos fixtures de NOMBRE FIJ
   la primera vez (directo con el ORM si no hay endpoint de alta) y devuelve siempre el mismo cliente para el mismo rol.
   Autentica como lo hace el proyecto: el token o cabecera que lee el usuario actual, `app.dependency_overrides` de la
   dependencia del usuario actual en FastAPI, el endpoint de login, `force_authenticate`/`force_login` en Django.
+  El cliente que devuelve expone `cliente.id` con el id de SU usuario (y `cliente.email` si el modelo lo tiene): las
+  pruebas lo necesitan cuando una ruta pide el usuario en el cuerpo (`cliente_id`, `usuario_id`…).
 - `crear_<modelo>` para los modelos principales que las reglas van a necesitar: fixture que devuelve una función que
   crea un registro válido y devuelve sus datos (dict de la respuesta JSON). TODOS sus argumentos son opcionales:
   `crear_producto()` sin argumentos debe funcionar. De preferencia crea por la API (como el rol que puede hacerlo);
@@ -468,7 +470,7 @@ def list_endpoint(project_map: mapa.ProjectMap) -> str | None:
     return gets[0].path if gets else None
 
 
-def smoke_test(project_map: mapa.ProjectMap, fixtures: list[str]) -> str:
+def smoke_test(project_map: mapa.ProjectMap, fixtures: list[str], require_id: bool = False) -> str:
     """Prueba de humo del arnés (§7.4), determinista: depende del mapa y de los fixtures que define el arnés."""
     roles = project_map.roles[:12]
     crear = [f for f in fixtures if f.startswith("crear_")][:30]
@@ -485,6 +487,17 @@ ROLES = {roles!r}
 LISTA = {lista!r}
 CREAR = {crear!r}
 EXTRAS = {extras!r}
+# El arnés lo escribió la IA: el cliente de `como(rol)` expone el id de su usuario (las pruebas lo mandan como `cliente_id`…)
+CON_ID = {require_id!r}
+
+
+def _mismo_usuario(a, b):
+    # Un cliente nuevo con el mismo estado (p. ej. el mismo token) es el mismo usuario: no hace falta que sea el mismo objeto.
+    # Se compara el nombre de la clase, no la clase: la IA suele definirla dentro de `como` y cada llamada crea otra
+    try:
+        return type(a).__qualname__ == type(b).__qualname__ and vars(a) == vars(b)
+    except TypeError:
+        return False
 
 
 def _o_saltar(valores, motivo):
@@ -502,7 +515,12 @@ def test_humo_api(api):
 def test_humo_como(como, rol):
     cliente = como(rol)
     assert cliente is not None, f"como({{rol!r}}) no devolvió un cliente"
-    assert como(rol) is cliente, f"como({{rol!r}}) debe devolver siempre el mismo cliente"
+    otra = como(rol)
+    assert otra is cliente or _mismo_usuario(otra, cliente), f"como({{rol!r}}) debe devolver siempre el mismo cliente"
+    if CON_ID:
+        assert getattr(cliente, "id", None) is not None, (
+            f"como({{rol!r}}) debe exponer `.id` con el id de su usuario (las pruebas lo necesitan para `cliente_id`, `usuario_id`…)"
+        )
     if LISTA is None:
         return
     r = cliente.get(LISTA)
@@ -523,9 +541,9 @@ def test_humo_extras(request, fixture):
 '''
 
 
-def overlay(code: str, project_map: mapa.ProjectMap) -> dict[str, str]:
-    """Archivos que se escriben sobre la copia del repo en el sandbox."""
-    return {CONFTEST: code, SMOKE: smoke_test(project_map, fixtures_of(code))}
+def overlay(code: str, project_map: mapa.ProjectMap, require_id: bool = False) -> dict[str, str]:
+    """Archivos que se escriben sobre la copia del repo en el sandbox. `require_id` = el arnés lo escribió la IA."""
+    return {CONFTEST: code, SMOKE: smoke_test(project_map, fixtures_of(code), require_id)}
 
 
 @dataclass
@@ -732,16 +750,37 @@ def _body(data: dict) -> str:
     return re.sub(r"^```(?:python)?\s*\n|\n```\s*$", "", body)
 
 
-def generate(llm: LLM, root: Path, project_map: mapa.ProjectMap, allowed: set[str] = frozenset()) -> Proposed:
+def repair_turns(code: str, failure: str) -> list[Turn]:
+    """El arnés anterior y por qué falló su prueba de humo: para que la IA lo corrija en vez de empezar de cero."""
+    return [
+        Turn("model", json.dumps({"codigo": _strip_base(code)}, ensure_ascii=False)),
+        Turn(
+            "user",
+            "Este arnés se probó en el sandbox y su PRUEBA DE HUMO FALLÓ:\n"
+            f"{failure[:2000]}\n"
+            "Corrígelo: revisa en el código del proyecto cómo se autentica de verdad un usuario (ruta de login o registro, nombre "
+            "exacto de los campos, cabecera y formato del token) y cómo se crean los datos que usan los fixtures. Mismo formato "
+            "JSON, solo el cuerpo.",
+        ),
+    ]
+
+
+def generate(
+    llm: LLM, root: Path, project_map: mapa.ProjectMap, allowed: set[str] = frozenset(), broken: tuple[str, str] | None = None,
+) -> Proposed:
     """
     Bloqueante (red). HarnessError si el repo no tiene un framework reconocido; LlmError si Gemini falla. Si el arnés no
     pasa la validación (sintaxis, imports que no existen…), se le devuelven los errores a la IA una vez para que lo
     corrija: con repos ajenos, el primer intento salió inválido 4 de cada 8 veces (PROPUESTA_REGLAS_VERIFICABLES.md §7.6).
+    `broken` = (arnés anterior, por qué falló su prueba de humo): se le pide corregirlo (con `reservas-demo` sin arnés, un
+    modelo de respaldo armó `como(rol)` sin autenticar y la prueba de humo dio 401).
     """
     if not project_map.framework:
         raise HarnessError("no_framework", "No se reconoció FastAPI, Flask ni Django en el repo: no se puede armar el arnés automáticamente")
     question = Turn("user", prompt(root, project_map, requirements_text(root)))
-    reply = llm.answer(SYSTEM, [question], SCHEMA)
+    reply = llm.answer(SYSTEM, [question, *repair_turns(*broken)] if broken else [question], SCHEMA)
+    if broken and not _body(reply.data):
+        reply = llm.answer(SYSTEM, [question], SCHEMA)
     body = _body(reply.data)
     if not body:
         raise HarnessError("empty_harness", "La IA no devolvió un arnés; intenta de nuevo")

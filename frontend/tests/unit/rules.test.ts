@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BusinessRuleResult, HarnessView, MapSummary, PermissionMatrix, RulesPrecheck, RuleStatus, RulesValidation, RuleTestsView } from '@/features/rules/types'
 import {
   baseName, crosscheck, EVIDENCE, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, markedCells, matrixFromCode, matrixPayload, nextCell, OUTCOME,
-  concordanceText, parseDoubt, plain, plainSummary, precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
+  concordanceText, parseDoubt, plain, plainSummary, draftCount, precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
 } from '@/features/rules/utils/rules'
 import { friendlyError } from '@/features/rules/utils/errors'
 import { ApiError } from '@/shared/api/errors'
@@ -133,17 +133,23 @@ describe('revisión de reglas en Nuevo análisis', () => {
   })
 
   it('sin archivo o sin acceso: nunca bloquea', () => {
-    expect(precheckView(check({}), null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio' })
+    expect(precheckView(check({}), null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Reglas de negocio: después de analizar' })
     expect(precheckView(check({ uploaded: { ...ok(), content: 'y', updated_at: '' } }), null).uses).toBe('app')
     expect(precheckView(check({ status: 'unavailable', message: 'Sin acceso' }), null)).toMatchObject({ tone: 'neutral', detail: 'Sin acceso' })
   })
 
-  it('sin archivo pero con documento de requisitos: ofrece sacar las reglas con IA (solo si hay IA)', () => {
+  it('sin archivo pero con documento de requisitos: avisa que las reglas se sacan en Configuración después de analizar', () => {
     const docs = check({ documents: ['docs/Requerimientos.pdf'], can_import: true })
-    expect(precheckView(docs, null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Este repo no declara reglas de negocio' })
-    expect(precheckView(docs, null).detail).toContain('Encontré docs/Requerimientos.pdf en el repositorio')
+    expect(precheckView(docs, null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Reglas de negocio: después de analizar' })
+    expect(precheckView(docs, null).detail).toContain('Encontré Requerimientos.pdf. Al terminar el análisis, en Configuración → Reglas')
     expect(precheckView({ ...docs, documents: ['a.md', 'b.pdf'] }, null).detail).toContain('2 documentos de requisitos')
-    expect(precheckView({ ...docs, can_import: false }, null).detail).toContain('Descarga la plantilla')
+    // Sin documento: se dice dónde subirlo, sin plantilla ni TOML
+    expect(precheckView({ ...docs, documents: [] }, null).detail).not.toMatch(/plantilla|toml/i)
+  })
+
+  it('el reporte sabe cuántas reglas quedaron en borrador', () => {
+    expect(draftCount(['13 regla(s) en borrador no se verifican ni salen en el reporte (RN-001…): apruébalas'])).toBe(13)
+    expect(draftCount(['otro aviso'])).toBe(0)
   })
 
   it('simulada: lee el archivo del repo, valida el contenido y guarda las reglas del análisis', () => {

@@ -195,6 +195,14 @@ async def use_repo_harness(project_id: str, store: Analyses, user_id: UserId, se
     return _view(store, settings, project_id)
 
 
+def smoke_failure(row) -> tuple[str, str] | None:
+    """(arnés, por qué falló) si el arnés actual lo propuso la IA y su prueba de humo falló con ese mismo código."""
+    if row is None or row["origin"] != "ia" or row["smoke_status"] != "fallo" or row["smoke_hash"] != arnes.code_hash(row["code"]):
+        return None
+    tests = [f"{t.get('name')}: {t.get('message')}" for t in json.loads(row["smoke_tests"] or "[]") if t.get("message")]
+    return row["code"], "\n".join([row["smoke_message"] or "", *tests]).strip()
+
+
 @router.post("/api/projects/{project_id}/reglas/arnes", response_model=HarnessView)
 async def create_harness(project_id: str, store: Analyses, user_id: UserId, settings: Config, llm: Annotated[LLM, Depends(get_llm)]) -> HarnessView:
     """La IA propone el arnés con el mapa y el código del proyecto. Reemplaza al anterior y deja la prueba de humo pendiente."""
@@ -204,7 +212,7 @@ async def create_harness(project_id: str, store: Analyses, user_id: UserId, sett
     mp = await asyncio.to_thread(_map, ws)
     hs = HarnessStore(store.conn)
     try:
-        proposed = await asyncio.to_thread(arnes.generate, llm, ws.root, mp, _allowed(ws))
+        proposed = await asyncio.to_thread(arnes.generate, llm, ws.root, mp, _allowed(ws), smoke_failure(hs.get(project_id)))
     except arnes.HarnessError as exc:
         raise ApiError(422, exc.code, str(exc)) from exc
     except LlmError as exc:
@@ -283,7 +291,7 @@ async def run_smoke(project_id: str, store: Analyses, user_id: UserId, settings:
         raise ApiError(409, "sandbox_unavailable", f"No se puede usar el sandbox: {reason}")
     current = arnes.code_hash(row["code"])
     HarnessStore(store.conn).running(project_id, current)
-    _running[project_id] = asyncio.create_task(_smoke(settings, project_id, current, arnes.overlay(row["code"], mp)))
+    _running[project_id] = asyncio.create_task(_smoke(settings, project_id, current, arnes.overlay(row["code"], mp, row["origin"] == "ia")))
     return _view(store, settings, project_id)
 
 

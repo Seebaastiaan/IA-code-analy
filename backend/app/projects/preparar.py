@@ -149,6 +149,13 @@ class Flow:
             await asyncio.sleep(POLL_SECONDS)
             waited += POLL_SECONDS
 
+    async def smoke(self) -> harness_routes.HarnessView:
+        """Corre la prueba de humo del arnés actual y espera su resultado."""
+        uid, rid, cfg = self.job.user_id, self.repo_id, self.settings
+        await self.call(lambda s: harness_routes.run_smoke(rid, s, uid, cfg))
+        await self.until(lambda: rid in harness_routes._running)
+        return await self.harness()
+
     def tests(self) -> Awaitable[test_routes.TestsView]:
         return self.call(lambda s: test_routes.list_tests(self.repo_id, s, self.job.user_id, self.settings))
 
@@ -200,14 +207,20 @@ class Flow:
         if not view.sandbox:
             self.fail("humo", "Falta el sandbox: configura SANDBOX=docker o wsl para poder correr pruebas.")
         if view.harness is None or view.harness.smoke != "paso":
-            await self.call(lambda s: harness_routes.run_smoke(rid, s, uid, cfg))
-            await self.until(lambda: rid in harness_routes._running)
-            view = await self.harness()
+            view = await self.smoke()
+        # El arnés de la IA no arrancó: se le da el error y se prueba una vez más (con repos ajenos pasa a menudo)
+        fixed_harness = False
+        if view.harness is not None and view.harness.smoke == "fallo" and view.harness.origin == "ia" and view.can_generate and self.llm is not None:
+            self.check()
+            llm = self.llm
+            await self.call(lambda s: harness_routes.create_harness(rid, s, uid, cfg, llm))
+            view = await self.smoke()
+            fixed_harness = view.harness is not None and view.harness.smoke == "paso"
         if view.harness is None or view.harness.smoke != "paso":
             self.fail("humo", (view.harness.smoke_message if view.harness else None) or "El entorno no arrancó: revisa el arnés en «Avanzado».")
         if not view.harness.approved:
             await self.call(lambda s: harness_routes.approve_harness(rid, s, uid, cfg))
-        self.job.patch("humo", "hecho", "El entorno arranca y se aprobó")
+        self.job.patch("humo", "hecho", "El entorno arranca y se aprobó" + (" (la IA corrigió el entorno tras un primer intento que no arrancó)" if fixed_harness else ""))
         self.check()
 
         # 4 · Una prueba por regla aprobada (las que ya tienen una vigente se conservan)

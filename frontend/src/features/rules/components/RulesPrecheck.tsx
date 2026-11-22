@@ -5,7 +5,7 @@ import { Button, Icon, Modal, Spinner, type IconName } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { rulesApi, RULES_FILENAME } from '../api/rules.api'
 import type { ImportedRules, RulesValidation } from '../types'
-import { baseName, githubRepo, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, precheckView, saveText, type PrecheckTone } from '../utils/rules'
+import { githubRepo, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, precheckView, saveText, type PrecheckTone } from '../utils/rules'
 import { useImportRules } from '../hooks/useImportRules'
 import { DocumentDropzone } from './DocumentDropzone'
 import { ImportNotice } from './ImportNotice'
@@ -145,8 +145,6 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
   const [debouncedUrl, debouncedBranch] = useDebounced(`${url.trim()}\n${branch.trim() || 'main'}`, DEBOUNCE_MS).split('\n')
   const target = { repo: githubRepo(debouncedUrl), url: debouncedUrl, branch: debouncedBranch }
   const [editing, setEditing] = useState<{ initial: string; title: string; imported?: ImportedRules } | null>(null)
-  const [reading, setReading] = useState<string | null>(null)
-  const importRules = useImportRules((imported) => setEditing({ initial: imported.content, title: `Reglas sacadas de ${imported.source}`, imported }))
   const { data, error, isFetching } = useQuery({
     queryKey: ['rules-precheck', target.repo, target.branch],
     queryFn: () => rulesApi.precheck(target.url, target.branch),
@@ -181,15 +179,11 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
   const warnings = rules ? rules.validation.warnings : view.uses === 'repo' ? data.file?.warnings : undefined
   const open = (initial: string, title: string) => setEditing({ initial, title })
   const appRules = data.uploaded?.valid ? data.uploaded.content : null
-  // Documentos de requisitos del repo: la IA saca las reglas al hacer clic (nunca sola)
-  const documents = data.can_import && !rules && data.status !== 'valid' ? data.documents.slice(0, 3) : []
-  const fromDocument = (path: string) => {
-    setReading(path)
-    importRules.mutate({ request: { url: target.url, branch: target.branch, path } }, { onSettled: () => setReading(null) })
-  }
 
   return (
     <div>
+      {/* Sacar las reglas del documento se hace después de analizar, en el asistente de Configuración → Reglas (paso a
+          paso, con las preguntas una por una): aquí solo se avisa. El TOML y la importación en bruto abrumaban. */}
       {header}
       <section aria-label="Reglas de negocio" aria-busy={isFetching} className={cn('rounded-xl border p-3.5 text-sm', tone.box)}>
         <div className="flex gap-3">
@@ -202,19 +196,7 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
                 Aviso: {w}
               </p>
             ))}
-            {reading && (
-              <p className="mt-1.5 flex items-center gap-2 text-slate-500">
-                <Spinner className="w-4 h-4" />
-                Leyendo {reading} con IA… puede tardar hasta 30 segundos.
-              </p>
-            )}
             <div className="mt-2.5 flex flex-wrap gap-2">
-              {documents.map((path) => (
-                <Button key={path} variant="secondary" title={path} onClick={() => fromDocument(path)} disabled={importRules.isPending}>
-                  {reading === path ? <Spinner className="w-4 h-4" /> : <Icon name="wand" className="w-4 h-4" />}
-                  Sacar reglas de {baseName(path)}
-                </Button>
-              ))}
               {rules ? (
                 <>
                   <Button variant="secondary" onClick={() => open(rules.text, 'Editar reglas de este análisis')}>
@@ -240,17 +222,6 @@ export function RulesPrecheck({ url, branch, rules, onRulesChange }: {
                       Analizar sin reglas
                     </Button>
                   )}
-                </>
-              ) : data.status !== 'valid' ? (
-                <>
-                  <Button variant="ghost" onClick={() => saveText(RULES_FILENAME, data.template)}>
-                    <Icon name="download" className="w-4 h-4" />
-                    Descargar plantilla
-                  </Button>
-                  <Button variant="secondary" onClick={() => open(appRules ?? data.template, 'Reglas de negocio para este análisis')}>
-                    <Icon name="code" className="w-4 h-4" />
-                    {appRules ? 'Editar las de la app' : 'Cargar reglas'}
-                  </Button>
                 </>
               ) : null}
             </div>

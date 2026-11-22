@@ -6,7 +6,7 @@ import { cn } from '@/shared/utils/cn'
 import { useReportRules } from '../api/rules.api'
 import { useFixRule } from '../hooks/useFixRule'
 import type { BusinessRuleResult, BusinessRules } from '../types'
-import { filterRules, LEVEL, LIGHT, OUTCOME, plain, plainSummary, STATUS, testFunction, testName, type StatusFilter } from '../utils/rules'
+import { draftCount, filterRules, LEVEL, LIGHT, OUTCOME, plain, plainSummary, STATUS, testFunction, type StatusFilter } from '../utils/rules'
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'todas', label: 'Todas' },
@@ -130,11 +130,13 @@ function RuleDetail({ rule, repoId }: { rule: BusinessRuleResult; repoId: string
         </div>
       )}
 
-      {rule.level === 'ninguno' && (
+      {rule.level === 'ninguno' && rule.status === 'sin_verificar' && (
         <p className="text-xs text-slate-500">
-          Para verificarla, márcale una prueba con <code className="font-mono">@pytest.mark.regla("{rule.id}")</code> (o llámala{' '}
-          <code className="font-mono">{testName(rule.id)}</code>) o agrega un patrón <code className="font-mono">prohibido</code> /{' '}
-          <code className="font-mono">obligatorio</code>.
+          Para comprobarla, pulsa «Preparar todo» en{' '}
+          <Link to={paths.settings(repoId, 'reglas')} className="text-brand-600 dark:text-brand-300 hover:underline">
+            Configuración → Reglas
+          </Link>
+          : el programa le escribe una prueba.
         </p>
       )}
     </div>
@@ -166,8 +168,21 @@ export function RulesTab({ repoId, reportId }: { repoId: string; reportId: strin
   if (!data.source)
     return (
       <Card className="mt-4">
-        <EmptyState icon="doc" title="El proyecto no declara reglas de negocio">
-          Agrega <code className="font-mono">reglas_negocio.toml</code> a la raíz del repositorio. La plantilla está en {settings}.
+        <EmptyState icon="doc" title="Este proyecto todavía no tiene reglas de negocio">
+          En {settings} sube el documento de requisitos (o usa el del repositorio): el programa saca las reglas y solo te pregunta lo que no puede decidir.
+        </EmptyState>
+      </Card>
+    )
+  const drafts = draftCount(data.warnings)
+  if (!data.error && data.summary.total === 0 && drafts > 0)
+    return (
+      <Card className="mt-4">
+        <EmptyState icon="clock" title={`Tus ${drafts} reglas todavía no se comprueban`}>
+          <p>Están en borrador. Contesta sus preguntas y pulsa «Preparar todo»; después vuelve a analizar para ver aquí cuáles se cumplen.</p>
+          <Link to={paths.settings(repoId, 'reglas')} className="mt-3 inline-flex items-center gap-1.5 font-medium text-brand-600 dark:text-brand-300 hover:underline">
+            Ir a Reglas
+            <Icon name="arrow" className="w-4 h-4" />
+          </Link>
         </EmptyState>
       </Card>
     )

@@ -234,23 +234,11 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await page.goto('/analyze')
   const rules = page.getByRole('region', { name: 'Reglas de negocio' })
 
-  // Sin reglas_negocio.toml pero con un documento de requisitos: la IA solo se usa al hacer clic
+  // Sin reglas_negocio.toml pero con un documento de requisitos: aquí solo se avisa; las reglas se sacan después de
+  // analizar, en el asistente de Configuración → Reglas (sin TOML ni la importación en bruto)
   await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/bot-soporte')
-  await expect(rules.getByText(/Encontré docs\/Requerimientos.pdf en el repositorio/)).toBeVisible()
-  await rules.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
-  await expect(rules.getByText(/Leyendo docs\/Requerimientos.pdf con IA/)).toBeVisible()
-
-  const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('heading', { name: 'Reglas sacadas de docs/Requerimientos.pdf' })).toBeVisible()
-  await expect(dialog.getByText('3 regla(s) sacadas de')).toBeVisible()
-  await expect(dialog.getByText('Dudas del documento')).toBeVisible()
-  await expect(dialog.getByText('Válido · equipo/bot-soporte · 3 regla(s)')).toBeVisible()
-  await expect(dialog.getByLabel('Reglas de negocio para este análisis')).toHaveValue(/# Fuente: Cap. 2 «Tickets» · pág. 3\n\[\[regla\]\]\nid {10}= "RN-001"/)
-  await dialog.getByRole('button', { name: 'Usar en este análisis' }).click()
-  await expect(dialog).toBeHidden()
-  await expect(rules.getByText('3 regla(s) · equipo/bot-soporte escritas aquí')).toBeVisible()
-  // Ya hay reglas en el formulario: no se vuelve a ofrecer el documento
-  await expect(rules.getByRole('button', { name: /Sacar reglas de/ })).toBeHidden()
+  await expect(rules.getByText(/Encontré Requerimientos.pdf\. Al terminar el análisis, en Configuración → Reglas/)).toBeVisible()
+  await expect(rules.getByRole('button', { name: /Sacar reglas de|Cargar reglas|Descargar plantilla/ })).toHaveCount(0)
 
   // En Configuración, el mismo documento desde la copia del proyecto
   await page.goto('/repos/r3/settings?tab=reglas')

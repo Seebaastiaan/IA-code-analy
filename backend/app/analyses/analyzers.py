@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.analyses.familias import AUTO_FIX_ES
 from app.analyses.mensajes import bandit_message, ruff_message
 from app.analyses.models import ComplexityInput, FindingInput
 from app.analyses.remedies import bandit_remedy, ruff_remedy
@@ -101,10 +102,10 @@ def ruff_finding(path: str, d: dict) -> FindingInput:
     """Hallazgo de Ruff con recomendación concreta. Sin corrección de Ruff, la propone la IA en el editor."""
     code = d["code"] or "E999"
     fix = _auto_fix(d)
-    message = ruff_message(d["message"])
+    message = ruff_message(d["message"], code)
     why, rec = ruff_remedy(code, message)
-    if fix and fix.get("message"):
-        rec += f" Corrección automática: {fix['message']}."
+    if fix:
+        rec += AUTO_FIX_ES
     return FindingInput(
         sev=_ruff_severity(code), cat="prac", tool="Ruff", rule=code, file=path, line=d["location"]["row"],
         msg=message, why=why, rec=rec, fix=True, fix_kind="auto" if fix else "ia",
