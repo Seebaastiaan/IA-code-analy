@@ -61,6 +61,13 @@ Reporte → Reglas (semáforo y regla incumplida abierta).
    en la tabla (problemas 6 y 7).
 6. «Preparar todo»: nombres de pasos en lenguaje normal, «puede tardar 3 a 8 minutos» y un mensaje claro si la IA se satura (problema 8).
 
+## Estado de los cambios
+
+Hechos (2026-11-22): 1 (desbordamiento en celular: tabla en bloque, texto que parte palabras), 2 y 4 (panel «Cómo funciona» de 4 pasos arriba, sin jerga;
+subtítulo y encabezados sin «reglas_negocio.toml»), 3 y problema 9 (un solo camino: importar → dudas y aprobación → «Preparar todo»; escribir una
+regla, arnés, pruebas una por una y casos de control quedan en «Herramientas avanzadas», cerrado). Pendientes: 5 a 6 (una sola entrada para importar,
+dudas más tranquilas, título completo en la tabla, nombres y tiempo estimado en «Preparar todo»).
+
 ## Para validar de verdad
 
 Esta revisión no sustituye una prueba con una persona que no conozca el proyecto: pedirle que importe un documento y llegue a ver un resultado sin

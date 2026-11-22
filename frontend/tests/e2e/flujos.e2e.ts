@@ -16,6 +16,11 @@ async function openReport(page: Page) {
   await expect(page.getByRole('heading', { name: 'equipo/api-pagos', level: 1 })).toBeVisible()
 }
 
+/** Las herramientas avanzadas (arnés, pruebas una por una, regla con tus palabras, control) están en un bloque cerrado */
+async function openAdvanced(page: Page) {
+  await page.getByText(/Herramientas avanzadas/).click()
+}
+
 test('1 · analizar un repositorio y abrir su reporte', async ({ page }) => {
   // Recorre varias páginas diferidas: con Vite en frío y varios navegadores a la vez se acerca a los 30 s
   test.slow()
@@ -166,7 +171,7 @@ test('reglas de negocio: matriz del reporte y carga desde configuración', async
   await expect(page.getByRole('tab', { name: 'Reglas de negocio' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('Sin reglas')).toBeVisible()
   await page.getByText('Avanzado: archivo reglas_negocio.toml').click()
-  const editor = page.getByLabel('Contenido de reglas_negocio.toml')
+  const editor = page.getByLabel('Texto de las reglas')
   await editor.fill('[proyecto]\nnombre = "ETL"\n\n[[regla]]\nid = "RN-1"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n')
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
   await expect(page.getByRole('alert')).toContainText('línea 4: `RN-1` no cumple el formato')
@@ -246,7 +251,7 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await page.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
   await expect(page.getByText('3 regla(s) sacadas de')).toBeVisible()
   await page.getByText('Avanzado: archivo reglas_negocio.toml').click()
-  await expect(page.getByLabel('Contenido de reglas_negocio.toml')).toHaveValue(/nombre = "equipo\/bot-soporte"/)
+  await expect(page.getByLabel('Texto de las reglas')).toHaveValue(/nombre = "equipo\/bot-soporte"/)
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
 
@@ -303,6 +308,7 @@ test('nuevo análisis exige un analizador por categoría', async ({ page }) => {
 
 test('reglas de negocio: mapa del proyecto y arnés de pruebas (proponer, probar, aprobar)', async ({ page }) => {
   await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await openAdvanced(page)
   const card = page.locator('section, div').filter({ has: page.getByRole('heading', { name: 'Mapa y arnés de pruebas' }) }).last()
   await expect(card.getByText('IA voy encontró 14 endpoints, 5 modelos y 4 roles en el código.')).toBeVisible()
   await expect(card.getByText('El arnés sustituye pagos, correo, la hora')).toBeVisible()
@@ -335,6 +341,7 @@ test('reglas de negocio: mapa del proyecto y arnés de pruebas (proponer, probar
 test('reglas de negocio: pruebas generadas por IA voy (generar, correr, aprobar)', async ({ page }) => {
   test.slow()
   await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await openAdvanced(page)
   const harnessCard = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Mapa y arnés de pruebas' }) }).last()
   const card = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Pruebas de las reglas' }) }).last()
   await expect(card.getByText('Aprueba el arnés de pruebas (arriba)')).toBeVisible()
@@ -368,6 +375,7 @@ test('reglas de negocio: pruebas generadas por IA voy (generar, correr, aprobar)
 test('reglas de negocio: matriz de permisos, evidencia y prueba de fuerza (fase 5)', async ({ page }) => {
   test.slow()
   await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await openAdvanced(page)
   const harnessCard = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Mapa y arnés de pruebas' }) }).last()
   const card = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Pruebas de las reglas' }) }).last()
   await harnessCard.getByRole('button', { name: 'Proponer con IA' }).click()
@@ -487,7 +495,7 @@ async function importedRules(page: Page) {
   await page.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
   await expect(page.getByText('3 regla(s) sacadas de')).toBeVisible()
   // Sin abrir «Avanzado»: el aviso de cambios sin guardar trae su propio botón
-  await expect(page.getByLabel('Contenido de reglas_negocio.toml')).toBeHidden()
+  await expect(page.getByLabel('Texto de las reglas')).toBeHidden()
   await page.getByRole('button', { name: 'Guardar reglas' }).click()
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
   return page.getByRole('heading', { name: 'Aprobación de las reglas' }).locator('xpath=../..')
@@ -507,6 +515,7 @@ test('reglas de negocio: dudas con sí o no, una regla con tus palabras y casos 
   await expect(table.getByRole('alert')).toHaveCount(0)
 
   // «Escribe una regla con tus palabras»: entra en borrador con el siguiente número
+  await openAdvanced(page)
   await page.getByLabel('Regla con tus palabras').fill('Un descuento de más del 20% lo aprueba el gerente')
   await page.getByRole('button', { name: 'Agregar la regla' }).click()
   await expect(page.getByText('RN-004 agregada en borrador: revísala y apruébala')).toBeVisible()

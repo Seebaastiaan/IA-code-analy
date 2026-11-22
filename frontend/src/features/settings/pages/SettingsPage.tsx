@@ -36,7 +36,7 @@ export default function SettingsPage() {
         subtitle={
           tab === 'reglas' ? (
             <>
-              Reglas de negocio de <b>{name}</b>. La fuente oficial es <code className="font-mono">reglas_negocio.toml</code> en el repositorio.
+              Reglas de negocio de <b>{name}</b>: importa el documento de requisitos y el programa las prepara y verifica.
             </>
           ) : (
             <>

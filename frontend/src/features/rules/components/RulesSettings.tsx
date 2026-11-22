@@ -47,7 +47,7 @@ function Origin({ data }: { data: ProjectRules }) {
   return (
     <p className="flex flex-wrap items-center gap-2">
       <Chip>Sin reglas</Chip>
-      <span className="text-sm text-slate-500">{data.cloned ? `El repositorio no tiene ${RULES_FILENAME}.` : 'Analiza el repositorio para saber si trae el archivo.'}</span>
+      <span className="text-sm text-slate-500">{data.cloned ? 'El repositorio todavía no trae reglas: importa el documento de requisitos.' : 'Analiza el repositorio para saber si trae el archivo.'}</span>
     </p>
   )
 }
@@ -120,7 +120,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h2 className="font-semibold">{data.uploaded ? 'Reglas cargadas en la app' : `Contenido de ${data.repo?.path ?? RULES_FILENAME}`}</h2>
+        <h2 className="font-semibold">{data.uploaded ? 'Reglas cargadas en la app' : 'Importar las reglas'}</h2>
       </div>
       {data.can_import && !fromRepo && data.documents.length > 0 && (
         <div className="mb-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 text-sm">
@@ -183,7 +183,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
         value={text}
         onChange={(e) => update(e.target.value)}
         spellCheck={false}
-        aria-label="Contenido de reglas_negocio.toml"
+        aria-label="Texto de las reglas"
         placeholder={'[proyecto]\nnombre = "Mi proyecto"\n\n[[regla]]\nid = "RN-001"\n…'}
         className="w-full min-h-80 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-950 text-slate-100 font-mono text-xs leading-relaxed p-4 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15"
       />
@@ -216,13 +216,31 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
 }
 
 const STEPS = [
-  'Descarga la plantilla, escribe las reglas aquí o sube el documento de requisitos (PDF o Word) para que la IA las saque.',
-  'Revisa la tabla de aprobación: resuelve las dudas de cada regla y apruébala. Lo importado entra como borrador y solo lo aprobado se verifica.',
-  'Por cada regla, una prueba con @pytest.mark.regla("RN-###") (o llamada test_rn###_…) o un patrón prohibido / obligatorio.',
-  'Haz commit de reglas_negocio.toml y las pruebas en la raíz del repositorio.',
-  'Analiza: el paso 10 dice qué reglas cumplen, cuáles no y cuáles no tienen prueba.',
-  'Para que IA voy escriba las pruebas: arma el arnés (Mapa y arnés de pruebas), córrele la prueba de humo y apruébalo.',
+  { title: 'Importa el documento', text: 'Sube el PDF o Word de requisitos (o elige el que está en el repositorio): la IA saca las reglas.' },
+  { title: 'Contesta las dudas y aprueba', text: 'Responde Sí o No a lo que el documento deja ambiguo y aprueba las reglas. Solo lo aprobado se verifica.' },
+  { title: 'Pulsa «Preparar todo»', text: 'El programa prepara el entorno, escribe las pruebas y las corre. Puede tardar unos minutos.' },
+  { title: 'Lee el resultado', text: 'Analiza el repositorio: el reporte dice qué reglas se cumplen y cuáles no.' },
 ]
+
+function Steps() {
+  return (
+    <Card className="p-5">
+      <h2 className="font-semibold mb-3">Cómo funciona</h2>
+      <ol className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm text-slate-600 dark:text-slate-300">
+        {STEPS.map((step, i) => (
+          <li key={step.title} className="flex gap-2.5">
+            <span className="w-5 h-5 shrink-0 rounded-full grid place-items-center text-[11px] font-bold bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{i + 1}</span>
+            <span>
+              <b className="block text-slate-800 dark:text-slate-100">{step.title}</b>
+              {step.text}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-xs text-slate-400">Las reglas son de este proyecto. Si el repositorio ya tiene un archivo válido, gana el del repositorio.</p>
+    </Card>
+  )
+}
 
 /** Cómo escribir los patrones `prohibido` y `obligatorio` (expresiones regulares), con ejemplos que se pueden copiar. */
 function RegexHelp() {
@@ -262,42 +280,32 @@ export function RulesSettings({ repoId }: { repoId: string }) {
   if (!data || isPlaceholderData) return <PageLoader />
 
   return (
-    <div className="grid lg:grid-cols-3 gap-4">
-      <div className="lg:col-span-2 space-y-4">
-        <Card className="p-5">
-          <h2 className="font-semibold mb-3">Origen de las reglas</h2>
-          <Origin data={data} />
-          {data.repo && !data.repo.valid && (
-            <p className="mt-3 text-sm text-rose-600 dark:text-rose-400 font-mono">
-              {data.repo.path}: {data.repo.error}
-            </p>
-          )}
-        </Card>
-        {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
-        <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
-        <WriteRuleCard repoId={repoId} canWrite={data.can_import} />
-        <AutoVerifyCard repoId={repoId} />
-        <RulesApprovalTable repoId={repoId} data={data} />
-        <ConcordanceCard repoId={repoId} version={(data.active === 'repo' ? data.repo : data.uploaded)?.rules.map((r) => r.id).join(',') ?? ''} />
-        <HarnessCard repoId={repoId} />
-        <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
-      </div>
-      <div className="space-y-4">
-      <Card className="p-5 h-fit">
-        <h2 className="font-semibold mb-3">Cómo se verifican</h2>
-        <ol className="space-y-2.5 text-sm text-slate-600 dark:text-slate-300">
-          {STEPS.map((s, i) => (
-            <li key={s} className="flex gap-2.5">
-              <span className="w-5 h-5 shrink-0 rounded-full grid place-items-center text-[11px] font-bold bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{i + 1}</span>
-              <span>{s}</span>
-            </li>
-          ))}
-        </ol>
-        <p className="mt-4 text-xs text-slate-400">
-          Las reglas son de este proyecto: no se comparten con otros repositorios. Si el repositorio tiene un archivo válido, gana el del repositorio; si el suyo tiene errores, se usan las corregidas aquí. Las reglas todavía no cuentan en el score.
-        </p>
+    <div className="space-y-4">
+      <Steps />
+      <Card className="p-5">
+        <h2 className="font-semibold mb-3">De dónde vienen las reglas</h2>
+        <Origin data={data} />
+        {data.repo && !data.repo.valid && (
+          <p className="mt-3 text-sm text-rose-600 dark:text-rose-400 font-mono">
+            {data.repo.path}: {data.repo.error}
+          </p>
+        )}
       </Card>
-      </div>
+      {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
+      <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+      <RulesApprovalTable repoId={repoId} data={data} />
+      <AutoVerifyCard repoId={repoId} />
+      <details className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+        <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">
+          Herramientas avanzadas: escribir una regla, arnés, pruebas una por una y comparación con lo que sabes
+        </summary>
+        <div className="mt-4 space-y-4">
+          <WriteRuleCard repoId={repoId} canWrite={data.can_import} />
+          <ConcordanceCard repoId={repoId} version={(data.active === 'repo' ? data.repo : data.uploaded)?.rules.map((r) => r.id).join(',') ?? ''} />
+          <HarnessCard repoId={repoId} />
+          <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
+        </div>
+      </details>
     </div>
   )
 }
