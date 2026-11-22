@@ -599,7 +599,7 @@ resultado se guarda por hash de la regla y commit; el análisis **nunca** llama 
 | **2 · Repos demo** (**hecho**) | `inventario_demo` y `reservas_demo` con sus documentos, pruebas manuales de referencia y tabla de resultados esperados | Con las pruebas **escritas a mano** y el plugin actual, el reporte da 13/5 (inventario) y 11/4 (reservas) ([test_demos_reglas.py](../backend/tests/test_demos_reglas.py)). Es la referencia para todo lo que sigue |
 | **3 · Mapa y arnés** (**hecho**, falta la parte de repos públicos) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno. **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en esos repos quedan pendientes (código ajeno: correrlo en Docker) |
 | **4 · Pruebas generadas** (**hecho**, §6.6) | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo`. **Resultado** con Gemini 3.5 Flash Lite: 17 de 18 sin editar, 5 de 5 rotas detectadas, 0 falsos positivos tras aprobar y 1 prueba rota (6 %). En `reservas_demo`: 15 de 15 y 4 de 4 rotas detectadas |
-| **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (sin Gemini ni WSL, con un modelo falso y pytest local): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más |
+| **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (Gemini real y sandbox WSL): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más; la evidencia señala 7 de 9 errores sembrados; de las pruebas buenas, 16 salen fuertes, 6 parciales (huecos reales) y 1 débil (falsa alarma) |
 | **6 · Score** | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |
 | Después | Pruebas HTTP de caja negra con docker-compose (otros lenguajes); PostgreSQL efímero | — |
 
@@ -645,7 +645,12 @@ generadas aciertan.
     - condiciones invertidas;
     - `raise` quitados;
     - `and` ↔ `or`;
-    - números de comparaciones o cuentas (no los códigos de respuesta).
+    - números de comparaciones o cuentas (no los códigos de respuesta);
+    - cuentas con una constante (`precio * PORCENTAJE` → `precio / PORCENTAJE`; no la resta de dos variables, que
+      puede ser de fechas);
+    - llamadas quitadas (`correo.enviar(...)`; no los registros de log);
+    - decoradores de permiso quitados (`@requiere("admin")`; no los de rutas);
+    - condiciones `a if c else b` invertidas.
   - **Dónde:** en el sandbox (modo `fuerza`). Primero la prueba con el código original y luego con cada mutante,
     restaurando el archivo.
   - **Resultado:**
@@ -675,7 +680,38 @@ generadas aciertan.
   | Rol prohibido que recibe 404 | prueba rota, no «no cumple» |
   | Prueba que sale a internet, aunque el código atrape el error | prueba rota |
 
-  Falta medirlo con Gemini real en el sandbox WSL, como en la fase 4.
+- **Medición con Gemini real** (3.5 Flash Lite, con el modelo de respaldo cuando hubo límite de solicitudes) **en el
+  sandbox WSL**. Evidencia de las 33 reglas de los dos demos; prueba de fuerza, guiada por esa evidencia, de las
+  pruebas escritas a mano de las reglas que cumplen:
+
+  | Métrica | `reservas_demo` | `inventario_demo` |
+  |---|---|---|
+  | La evidencia señala la línea del error sembrado | 4 de 4 | 3 de 5 (no ve el stock negativo de RN-006 ni el cajero de RN-017) |
+  | Reglas implementadas que la evidencia da por «no encontrada» | 0 | 0 (RN-001 sale «no encontrada» y es correcto: no está) |
+  | Prueba de fuerza de las pruebas buenas | 9 fuerte, 2 parcial, 0 débil | 7 fuerte, 4 parcial, 1 débil, 1 no aplica |
+
+  Lo que salió al medir, y cómo se resolvió:
+  - **La prueba de fuerza encontró una prueba débil real en nuestra propia referencia.** RN-011 tomaba
+    `buzon[-1]`, y sin el correo de cancelación ese era el de confirmación (también trae el folio y $240.00). Se
+    corrigió la prueba (`buzon.clear()` antes de cancelar).
+  - **La búsqueda de la evidencia no veía la lógica de negocio.** Los endpoints recibían un bono que desplazaba a
+    funciones como `citas.cancelar`. Para la evidencia ahora el bono es menor, se busca en todo el código y se
+    incluyen las clases sin métodos (esquemas Pydantic: `precio: Field(gt=0)`).
+  - **Muchas reglas daban «no aplica»** porque sus líneas no tenían nada que mutar. Se agregaron mutantes de:
+    - cuentas con constantes;
+    - llamadas quitadas (`correo.enviar`);
+    - decoradores de permiso quitados (`@requiere`);
+    - condiciones `a if c else b`.
+
+    Si las líneas de la evidencia siguen sin nada que mutar, se amplía a su función.
+  - **Mutar funciones enteras daba falsas alarmas.** Si la evidencia señala un tramo de más de 4 líneas, se filtra
+    por palabras (al menos 2 en común con la regla y ¾ de las de la línea más parecida). Además, «débil» pide al
+    menos 2 cambios.
+  - Los «parcial» que quedan son huecos reales de las pruebas: no prueban el límite exacto (`<=` vs `<`) o un caso
+    secundario.
+  - **Queda 1 falsa alarma:** RN-016 de inventario. La evidencia señala la función que también tiene la regla de
+    RN-014, y esa línea comparte «precio» y «base» con RN-016. Por eso el texto de «débil» pide revisar la prueba
+    en vez de afirmar que no verifica la regla.
 
 ## 15. Riesgos
 

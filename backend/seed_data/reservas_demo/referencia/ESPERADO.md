@@ -43,6 +43,10 @@ veredicto de arriba.
 
 La matriz de RN-015 marcada como dice la regla (7 acciones × 3 roles, 21 celdas) da **cumple**.
 
+La prueba de fuerza también encontró una prueba débil **sin sembrar** en esta referencia: la de RN-011 tomaba
+`buzon[-1]`, que sin el correo de cancelación era el de confirmación (también trae el folio y $240.00). Se corrigió en
+[test_avisos.py](../tests/reglas/test_avisos.py) con `buzon.clear()` antes de cancelar.
+
 Lo comprueba [backend/tests/test_reglas_calidad.py](../../../tests/test_reglas_calidad.py).
 
 ## 2. Lo que debe proponer el importador

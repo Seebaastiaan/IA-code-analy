@@ -8,8 +8,12 @@ prueba lo nota:
 - **Qué líneas:** las que señala la evidencia de apoyo (app.projects.reglas_evidencia), si la hay; si no, las de las
   funciones de los endpoints que llama la prueba y las del proyecto que esas funciones llaman, quedándose con las que
   se parecen a la regla (palabras en común con la línea y con lo que hace su `if`).
+  Si las líneas de la evidencia no tienen nada que cambiar, se amplía a la función que las contiene (con el mismo
+  filtro de palabras).
 - **Qué cambios (con `ast`, sin IA):** comparaciones (`<` ↔ `<=`, `==` ↔ `!=`, `in` ↔ `not in`…), condiciones
-  invertidas (`if x` → `if not (x)`), `raise` quitados, `and` ↔ `or` y números (`n` → `n + 1`).
+  invertidas (`if x` → `if not (x)`), `raise` quitados, `and` ↔ `or`, cuentas con constantes (`precio * PORCENTAJE` →
+  `precio / PORCENTAJE`), llamadas quitadas (`correo.enviar(...)`), decoradores de permiso quitados
+  (`@requiere("admin")`) y números (`n` → `n + 1`).
 - **Cómo:** en el sandbox (modo `fuerza`, app.analysis.ia_voy_fuerza): la prueba con el código original y luego con
   cada mutante. Si falla, el mutante muere; si sigue pasando, la prueba no lo notó.
 
@@ -19,6 +23,7 @@ a ninguno: la prueba no verifica la regla). No cambia el estado de la regla: es 
 
 import ast
 import hashlib
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -32,13 +37,27 @@ MAX_MUTANTS = 10
 MAX_TOTAL = 40
 MAX_TARGETS = 8
 MAX_FILE_BYTES = 300_000
+# Una evidencia de hasta 4 líneas es precisa: se mutan todas sus líneas sin filtrar
+PRECISE_LINES = 4
+# Cambios mínimos para llamar «débil» a una prueba que no notó ninguno
+MIN_WEAK = 2
 
 SWAP: dict[type, type] = {
     ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.LtE, ast.LtE: ast.Lt, ast.Gt: ast.GtE, ast.GtE: ast.Gt,
     ast.In: ast.NotIn, ast.NotIn: ast.In, ast.Is: ast.IsNot, ast.IsNot: ast.Is,
 }
 # Orden en que se eligen (los de límite primero: es donde suelen fallar las reglas)
-KINDS = ("comparacion", "excepcion", "condicion", "logico", "constante")
+KINDS = ("comparacion", "excepcion", "condicion", "logico", "aritmetica", "llamada", "decorador", "constante")
+ARITH: dict[type, type] = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mult}
+# Decoradores que no se quitan: registran la ruta o son de Python (quitarlos rompe todo y no dice nada de la regla)
+KEEP_DECORATORS = {
+    "get", "post", "put", "patch", "delete", "head", "options", "route", "api_route", "websocket", "api_view", "action",
+    "fixture", "property", "staticmethod", "classmethod", "cached_property", "wraps", "cache", "lru_cache", "dataclass",
+    "errorhandler", "before_request", "after_request", "teardown_request", "on_event", "middleware", "exception_handler",
+    "validator", "field_validator", "model_validator", "root_validator", "receiver", "register",
+}
+# Llamadas que no se quitan: quitarlas no cambia lo que hace el código (registros)
+KEEP_CALLS = {"log", "logger", "logging", "print", "warnings", "warn"}
 
 
 @dataclass
@@ -46,7 +65,7 @@ class Target:
     file: str
     start: int
     end: int
-    # evidencia | endpoint | llamada
+    # evidencia | evidencia+funcion | endpoint | llamada
     source: str
 
 
@@ -165,6 +184,33 @@ def _splice(lines: list[bytes], node: ast.AST, new: str) -> str:
     return b"".join([*lines[:l0], head + new.encode("utf-8") + tail, *lines[l1 + 1 :]]).decode("utf-8")
 
 
+def _drop_line(lines: list[bytes], node: ast.AST) -> str:
+    """Quita la línea del nodo (un decorador) y deja una vacía, para no mover las demás."""
+    return b"".join([*lines[: node.lineno - 1], b"\n", *lines[node.lineno :]]).decode("utf-8")
+
+
+def _enclosing(root: Path, places: list[Target]) -> list[Target]:
+    """Las funciones que contienen las líneas de la evidencia, o que tienen ahí un decorador (la más interna)."""
+    out: list[Target] = []
+    for t in places:
+        parsed = _parse(root, t.file)
+        if parsed is None:
+            continue
+        fns = _functions(parsed[1])
+
+        def span(f):
+            return min([f.lineno, *(d.lineno for d in f.decorator_list)]), f.end_lineno or f.lineno
+
+        inside = [f for f in fns if span(f)[0] <= t.start and span(f)[1] >= t.end]
+        touching = [f for f in fns if any(t.start <= d.lineno <= t.end for d in f.decorator_list)]
+        for fn in [*sorted(inside, key=lambda f: f.lineno, reverse=True)[:1], *touching]:
+            start, end = span(fn)
+            e = Target(t.file, start, end, "evidencia+funcion")
+            if e not in out:
+                out.append(e)
+    return out
+
+
 def _short(text: str, n: int = 70) -> str:
     text = " ".join(text.split())
     return text if len(text) <= n else text[: n - 1] + "…"
@@ -183,12 +229,16 @@ def _parents(tree: ast.Module) -> dict[ast.AST, ast.AST]:
     return {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
 
 
-def _context(node: ast.AST, parents: dict, lines: list[bytes]) -> str:
+def _context(node: ast.AST, parents: dict, lines: list[bytes], own_line: bool = False) -> str:
     """Texto para saber si la línea tiene que ver con la regla: su sentencia y, si es un `if`, lo primero que hace."""
     stmt = node
     while stmt in parents and not isinstance(stmt, ast.stmt):
         stmt = parents[stmt]
     text = lines[stmt.lineno - 1].decode("utf-8", "replace") if isinstance(stmt, ast.stmt) else ""
+    # Para una cuenta en una sentencia de varias líneas, también su línea (`anticipo=dinero(precio * PORCENTAJE)`); en
+    # las comparaciones no: las consultas largas comparten palabras con casi cualquier regla
+    if own_line and isinstance(stmt, ast.stmt) and node.lineno != stmt.lineno:
+        text += " " + lines[node.lineno - 1].decode("utf-8", "replace")
     if isinstance(stmt, (ast.If, ast.While)) and stmt.body:
         first = stmt.body[0]
         text += " " + b"".join(lines[first.lineno - 1 : (first.end_lineno or first.lineno)]).decode("utf-8", "replace")
@@ -203,10 +253,36 @@ def _in_fstring(node: ast.AST, parents: dict) -> bool:
     return False
 
 
+def _callee(node: ast.AST) -> str:
+    """`@app.post("/x")` → "app.post"; `correo.enviar(...)` → "correo.enviar"."""
+    func = node.func if isinstance(node, ast.Call) else node
+    return mapa._name(func) or ""
+
+
+def _constant_like(node: ast.AST) -> bool:
+    """Un número o una constante del proyecto (`PORCENTAJE_ANTICIPO`, `cfg.LIMITE`): la cuenta es de negocio."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else ""
+    return len(name) > 1 and name.isupper()
+
+
 def candidates(source: str, tree: ast.Module, start: int, end: int) -> list[_Candidate]:
     lines = _byte_lines(source)
     parents = _parents(tree)
     out: list[_Candidate] = []
+    # Decoradores de permiso (no los de rutas): se quita la línea entera
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for d in fn.decorator_list:
+            name = _callee(d)
+            if not start <= d.lineno <= end or name.split(".")[-1] in KEEP_DECORATORS or d.end_lineno != d.lineno:
+                continue
+            line = lines[d.lineno - 1].decode("utf-8", "replace")
+            if not line.lstrip().startswith("@"):
+                continue
+            out.append(_Candidate(d, "decorador", "", f"se quita `@{_short(_segment(lines, d))}`", line + " " + fn.name.replace("_", " ")))
     for node in ast.walk(tree):
         lineno = getattr(node, "lineno", None)
         if lineno is None or not start <= lineno <= end or _in_fstring(node, parents):
@@ -219,9 +295,26 @@ def candidates(source: str, tree: ast.Module, start: int, end: int) -> list[_Can
             out.append(_Candidate(node, "comparacion", new, f"`{_short(old)}` → `{_short(new)}`", _context(node, parents, lines)))
         elif isinstance(node, ast.Raise):
             out.append(_Candidate(node, "excepcion", "pass", f"se quita `{_short(old)}`", _context(node, parents, lines)))
+        elif isinstance(node, ast.IfExp) and node.test.end_lineno == node.test.lineno:
+            # `a if c else b` → `a if not (c) else b` (p. ej. el límite de los clientes premium)
+            test = _segment(lines, node.test)
+            out.append(_Candidate(node.test, "condicion", f"not ({test})", f"se invierte la condición `{_short(test)}`", _context(node, parents, lines)))
         elif isinstance(node, (ast.If, ast.While)) and node.test.end_lineno == node.test.lineno:
             test = _segment(lines, node.test)
             out.append(_Candidate(node.test, "condicion", f"not ({test})", f"se invierte la condición `{_short(test)}`", _context(node, parents, lines)))
+        elif (
+            isinstance(node, ast.BinOp) and single and type(node.op) in ARITH
+            and (_constant_like(node.left) or _constant_like(node.right))
+        ):
+            new = ast.unparse(ast.BinOp(node.left, ARITH[type(node.op)](), node.right))
+            out.append(_Candidate(node, "aritmetica", new, f"`{_short(old)}` → `{_short(new)}`", _context(node, parents, lines, own_line=True)))
+        elif (
+            isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and _callee(node.value).split(".")[0] not in KEEP_CALLS
+        ):
+            call = _segment(lines, node) if single else _callee(node.value) + "(…)"
+            text = b"".join(lines[node.lineno - 1 : node.end_lineno]).decode("utf-8", "replace")
+            out.append(_Candidate(node, "llamada", "pass", f"se quita la llamada `{_short(call)}`", text))
         elif isinstance(node, ast.BoolOp) and single:
             op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
             new = ast.unparse(ast.BoolOp(op, node.values))
@@ -246,26 +339,43 @@ def mutants(
     """
     found = targets(root, project_map, endpoints, ev)
     words = pruebas._words(" ".join([rule.title, rule.description, rule.criterion or ""]))
-    scored: list[tuple[int, int, str, int, _Candidate, str, list[bytes]]] = []
-    for t in found:
-        parsed = _parse(root, t.file)
-        if parsed is None:
-            continue
-        source, tree = parsed
-        lines = _byte_lines(source)
-        for c in candidates(source, tree, t.start, t.end):
-            relevance = len(words & pruebas._words(c.context))
-            scored.append((-relevance, KINDS.index(c.kind), t.file, c.node.lineno, c, source, lines))
-    # Sin evidencia, solo las líneas que se parecen a la regla: las que comparten más palabras con ella (al menos 2 si
-    # alguna llega a 2; una sola palabra en común suele ser casualidad)
-    if found and found[0].source != "evidencia":
-        best = max((-s[0] for s in scored), default=0)
-        scored = [s for s in scored if -s[0] >= min(2, best) and -s[0] > 0]
+
+    def score(ts: list[Target]) -> list[tuple]:
+        """(−relevancia, tipo, archivo, línea, candidato, código, líneas, ¿hay que filtrarlo por palabras?)"""
+        out_ = []
+        for t in ts:
+            parsed = _parse(root, t.file)
+            if parsed is None:
+                continue
+            source, tree = parsed
+            lines = _byte_lines(source)
+            # Una línea precisa de la evidencia se muta siempre; un tramo largo (una función entera) trae líneas de
+            # otras reglas, y se filtra por palabras como sin evidencia
+            loose = t.source != "evidencia" or t.end - t.start + 1 > PRECISE_LINES
+            for c in candidates(source, tree, t.start, t.end):
+                relevance = len(words & pruebas._words(c.context))
+                out_.append((-relevance, KINDS.index(c.kind), t.file, c.node.lineno, c, source, lines, loose))
+        return out_
+
+    scored = score(found)
+    # Las líneas de la evidencia no tienen nada que cambiar (una asignación, una llamada en varias líneas): se amplía a
+    # la función que las contiene, con el mismo filtro de palabras que sin evidencia
+    if found and found[0].source == "evidencia" and not scored:
+        found = _enclosing(root, found)
+        scored = score(found)
+    # Lo que se filtra: solo las líneas que comparten al menos ¾ de las palabras de la más parecida, y al menos 2 (una
+    # palabra suelta, como «cita» o «base», suele ser casualidad). Sin evidencia, 1 basta si ninguna llega a 2
+    loose = [s for s in scored if s[7]]
+    if loose:
+        best = max(-s[0] for s in loose)
+        minimum = 2 if found[0].source.startswith("evidencia") else min(2, best)
+        floor = max(minimum, math.ceil(0.75 * best), 1)
+        scored = [s for s in scored if not s[7] or -s[0] >= floor]
     scored.sort(key=lambda s: s[:4])
     out: list[Mutant] = []
     seen: set[str] = set()
-    for _, _, file, line, c, source, lines in scored:
-        code = _splice(lines, c.node, c.new)
+    for _, _, file, line, c, source, lines, _ in scored:
+        code = _drop_line(lines, c.node) if c.kind == "decorador" else _splice(lines, c.node, c.new)
         digest = hashlib.sha256(f"{file}\n{code}".encode()).hexdigest()
         if code == source or digest in seen:
             continue
@@ -354,11 +464,15 @@ def read(
         if not ran:
             out[rid] = StrengthResult("no_aplica", "No se pudo correr ningún mutante", source=source)
             continue
-        status = "fuerte" if not survivors else "debil" if killed == 0 else "parcial"
+        # «Débil» pide al menos MIN_WEAK cambios: con uno solo que no notó (un límite, `gt=0` → `gt=1`) es poca base
+        status = "fuerte" if not survivors else "debil" if killed == 0 and len(ran) >= MIN_WEAK else "parcial"
         detail = {
             "fuerte": f"La prueba detectó los {len(ran)} cambios a las líneas de la regla",
             "parcial": f"La prueba detectó {killed} de {len(ran)} cambios; revisa los que no notó",
-            "debil": f"La prueba siguió pasando con los {len(ran)} cambios: no verifica lo que dice la regla",
+            "debil": (
+                f"La prueba siguió pasando con los {len(ran)} cambios: revisa si de verdad verifica lo que dice la regla "
+                "(o si esas líneas no son de esta regla)"
+            ),
         }[status]
         out[rid] = StrengthResult(status, detail, killed, len(ran), survivors, source)
     return out

@@ -202,11 +202,13 @@ def project_files(root: Path) -> list[str]:
 
 def snippets(
     root: Path, project_map: mapa.ProjectMap, rule: reglas.BusinessRule, limit: int = MAX_SNIPPETS, files: list[str] | None = None,
+    endpoint_bonus: float = 1.0, classes: bool = False,
 ) -> list[Snippet]:
     """
     Las funciones del proyecto que más se parecen a la regla (palabras en común con el nombre, la ruta del endpoint y
     el cuerpo), con preferencia por los endpoints. Determinista y sin embeddings. `files` = dónde buscar (por omisión,
-    los archivos de endpoints, modelos e integraciones del mapa).
+    los archivos de endpoints, modelos e integraciones del mapa). `endpoint_bonus` = cuánto se prefieren los endpoints
+    (para generar la prueba importan las rutas; para la evidencia, la lógica, que suele estar en otro módulo). `classes` = también las clases sin métodos (esquemas).
     """
     wanted = _words(" ".join([rule.title, rule.description, rule.criterion or ""]))
     if not wanted:
@@ -226,7 +228,9 @@ def snippets(
         lines = source.splitlines()
         module = mapa._module_of(rel)
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name.startswith("__"):
+            # Clases sin métodos (esquemas Pydantic, serializers, modelos): ahí viven reglas como `precio: Field(gt=0)`
+            is_schema = classes and isinstance(node, ast.ClassDef) and not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in node.body)
+            if not (is_schema or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))) or node.name.startswith("__"):
                 continue
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             end = min(node.end_lineno or node.lineno, start + MAX_SNIPPET_LINES - 1)
@@ -236,7 +240,7 @@ def snippets(
             common = len(wanted & words)
             if not common:
                 continue
-            found.append(Snippet(rel, start, end, text, common / (len(wanted) ** 0.5) + (1.0 if endpoint else 0.0)))
+            found.append(Snippet(rel, start, end, text, common / (len(wanted) ** 0.5) + (endpoint_bonus if endpoint else 0.0)))
     found.sort(key=lambda s: (-s.score, s.file, s.start))
     return found[:limit]
 

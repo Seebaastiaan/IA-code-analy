@@ -114,7 +114,7 @@ def fragments(
     if out:
         search.append("indice")
     before = len(out)
-    for s in pruebas.snippets(root, project_map, rule, limit=MAX_FRAGMENTS, files=pruebas.project_files(root)):
+    for s in pruebas.snippets(root, project_map, rule, limit=MAX_FRAGMENTS, files=pruebas.project_files(root), endpoint_bonus=0.25, classes=True):
         add(s.file, s.start, s.end, s.text)
     if len(out) > before:
         search.append("palabras")

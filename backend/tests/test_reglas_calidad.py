@@ -274,15 +274,41 @@ def test_mutantes_dirigidos_a_las_lineas_de_la_regla(mp):
 
 
 def test_mutar_respeta_los_acentos_de_la_linea():
-    source = 'def f(x):\n    if "acción" and x > 3:\n        raise ValueError("número")\n'
+    source = (
+        '@app.post("/x")\n@requiere("admin")\ndef f(x, precio):\n    if "acción" and x > 3:\n        raise ValueError("número")\n'
+        '    log.info("x")\n    correo.enviar("a", "b")\n    total = precio * PORCENTAJE\n    resta = x - precio\n'
+        '    return 1 if x.premium else 2\n'
+    )
     import ast
 
-    out = fuerza.candidates(source, ast.parse(source), 1, 3)
+    out = fuerza.candidates(source, ast.parse(source), 1, 10)
     kinds = {c.kind for c in out}
-    assert {"comparacion", "excepcion", "condicion", "logico", "constante"} <= kinds
+    assert set(fuerza.KINDS) <= kinds
+    described = {c.description for c in out}
+    # El decorador de permiso sí, el de la ruta no; la llamada al correo sí, el registro no; la cuenta con una
+    # constante sí, la resta de dos variables no (puede ser de fechas: cambiarla solo rompería el código)
+    assert 'se quita `@requiere("admin")`' in described and not any("app.post" in d for d in described)
+    assert any("correo.enviar" in d for d in described) and not any("log.info" in d for d in described)
+    assert "`precio * PORCENTAJE` → `precio / PORCENTAJE`" in described and not any("x - precio" in d for d in described)
+    assert "se invierte la condición `x.premium`" in described
     lines = fuerza._byte_lines(source)
     for c in out:
-        compile(fuerza._splice(lines, c.node, c.new), "x.py", "exec")
+        code = fuerza._drop_line(lines, c.node) if c.kind == "decorador" else fuerza._splice(lines, c.node, c.new)
+        compile(code, "x.py", "exec")
+        assert code.count("\n") == source.count("\n")
+
+
+def test_si_la_evidencia_no_tiene_que_mutar_se_amplia_a_su_funcion(mp):
+    # RN-006: la evidencia señala la creación de la cita (una asignación en varias líneas, sin nada que cambiar)
+    ev = evidencia.Evidence("implementada", "", [evidencia.Place("reservas/citas.py", 66, 67, "")])
+    ms, found = fuerza.mutants(RESERVAS, mp, RULES["RN-006"], [], ev)
+    assert found[0].source == "evidencia+funcion" and any(m.kind == "aritmetica" and "PORCENTAJE_ANTICIPO" in m.description for m in ms)
+
+
+def test_la_evidencia_busca_la_logica_fuera_de_los_endpoints(mp):
+    """citas.cancelar (donde está el error de RN-007) no es un endpoint: debe llegar a la IA."""
+    frags, _ = evidencia.fragments(RESERVAS, mp, RULES["RN-007"])
+    assert any(f.file == "reservas/citas.py" and f.start <= 87 <= f.end for f in frags)
 
 
 def test_la_prueba_de_fuerza_detecta_la_prueba_debil(tmp_path, mp, harness):
@@ -301,7 +327,7 @@ def test_la_prueba_de_fuerza_detecta_la_prueba_debil(tmp_path, mp, harness):
     results = fuerza.read(data, OK, plan)
     assert (results["RN-004"].status, results["RN-004"].killed, results["RN-004"].total) == ("fuerte", 3, 3)
     weak = results["RN-004-D"]
-    assert (weak.status, weak.killed, weak.total) == ("debil", 0, 3) and "no verifica lo que dice la regla" in weak.detail
+    assert (weak.status, weak.killed, weak.total) == ("debil", 0, 3) and "verifica lo que dice la regla" in weak.detail
     assert [s.line for s in weak.survivors] == [51, 51, 52]
     # El archivo original quedó como estaba después de mutarlo
     assert (tmp_path / "repo" / "reservas" / "citas.py").read_text(encoding="utf-8") == (RESERVAS / "reservas" / "citas.py").read_text(encoding="utf-8")
@@ -317,9 +343,13 @@ def test_resultado_de_la_prueba_de_fuerza_sin_correr():
     res = fuerza.read(data, OK, plan)
     assert res["RN-001"].status == "no_aplica" and "no pasa con el código actual" in res["RN-001"].detail
     assert res["RN-002"].status == "no_aplica" and "evidencia" in res["RN-002"].detail
-    parcial = fuerza.read({"objetivos": [{"regla": "RN-001", "base": 0, "mutantes": [{"id": "RN-001-1", "codigo_salida": 0}]}]}, OK, {"RN-001": ([m, dataclasses.replace(m, id="RN-001-2")], t)})
-    assert parcial["RN-001"].status == "debil" and parcial["RN-001"].total == 1
-    assert fuerza.loads(json.dumps(parcial["RN-001"].to_dict())) == parcial["RN-001"]
+    # Solo corrió 1 de los 2 mutantes y la prueba no lo notó: es poca base para llamarla débil
+    m2 = dataclasses.replace(m, id="RN-001-2")
+    uno = fuerza.read({"objetivos": [{"regla": "RN-001", "base": 0, "mutantes": [{"id": "RN-001-1", "codigo_salida": 0}]}]}, OK, {"RN-001": ([m, m2], t)})
+    assert (uno["RN-001"].status, uno["RN-001"].killed, uno["RN-001"].total) == ("parcial", 0, 1)
+    dos = fuerza.read({"objetivos": [{"regla": "RN-001", "base": 0, "mutantes": [{"id": "RN-001-1", "codigo_salida": 0}, {"id": "RN-001-2", "codigo_salida": 0}]}]}, OK, {"RN-001": ([m, m2], t)})
+    assert dos["RN-001"].status == "debil"
+    assert fuerza.loads(json.dumps(dos["RN-001"].to_dict())) == dos["RN-001"]
 
 
 # ───────────────────────── Endpoints (reservas_demo de punta a punta) ─────────────────────────

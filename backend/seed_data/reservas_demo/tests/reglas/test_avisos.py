@@ -28,8 +28,12 @@ def test_rn010_sin_correo_si_la_reserva_se_rechaza(como, reservar, buzon):
 @pytest.mark.regla("RN-011")
 def test_rn011_correo_de_cancelacion_con_reembolso(como, cita, buzon):
     c = cita(inicio=JUEVES_10)
+    # Sin vaciarlo, buzon[-1] sería el correo de confirmación (también trae el folio y $240.00): la prueba pasaría
+    # aunque no se mandara el de cancelación (lo encontró la prueba de fuerza)
+    buzon.clear()
     como("cliente").post(f"/citas/{c['id']}/cancelar")
-    m = buzon[-1]
+    assert len(buzon) == 1, f"se esperaba 1 correo de cancelación, se enviaron {len(buzon)}"
+    m = buzon[0]
     assert m["para"] == como("cliente").usuario["email"] and c["folio"] in m["asunto"] + m["cuerpo"]
     assert "$240.00" in m["cuerpo"]
 
