@@ -32,12 +32,14 @@ from pydantic import BaseModel, Field
 from app import db
 from app.analyses import mapa, reglas
 from app.analyses.access import Analyses, UserId, require_repo
-from app.analyses.reglas_store import EvidenceStore, RuleTestsStore
+from app.analyses.analyzers import diff_patches
+from app.analyses.reglas_store import EvidenceStore, RulesStore, RuleTestsStore
 from app.analysis import sandbox
 from app.analysis.router import Config
 from app.assistant.llm import LLM, LlmError
 from app.assistant.router import get_llm
 from app.config import Settings
+from app.editor.ai_fix import Target, ai_fix
 from app.errors import ApiError
 from app.projects import reglas_arnes as arnes
 from app.projects import reglas_evidencia as evidencia
@@ -642,6 +644,88 @@ async def explain_rule(
         raise ApiError(503, code, message) from exc
     EvidenceStore(store.conn).save(project_id, rule.id, pruebas.rule_hash(rule), _commit(store.conn, project_id), ev.to_dict(), user_id)
     return _view(store.conn, settings, project_id)
+
+
+# ───────────────────────── El documento manda: corregir el código ─────────────────────────
+
+# Lugares del código que se proponen corregir a la vez, y estados en que el código viola la regla
+MAX_FIX_PLACES = 3
+VIOLATED = ("no_cumple", "no_implementada")
+
+
+class RuleFix(BaseModel):
+    patches: list[dict]
+    notes: list[str] = Field(default_factory=list)
+    # Los lugares del código que se corrigieron («archivo:línea»)
+    places: list[str]
+
+
+@router.post("/api/projects/{project_id}/reglas/pruebas/{rule_id}/corregir", response_model=RuleFix)
+async def fix_code_for_rule(
+    project_id: str, rule_id: str, store: Analyses, user_id: UserId, settings: Config, llm: Annotated[LLM, Depends(get_llm)],
+) -> RuleFix:
+    """
+    Caso 2 del plan de reglas automáticas: el código y el documento se contradicen y **el documento manda**. La IA propone
+    el cambio mínimo en el código para que cumpla la regla; nunca toca la regla ni su prueba. Nada se guarda: el editor
+    muestra el diff y la persona decide.
+    """
+    require_repo(store, user_id, project_id)
+    if not settings.gemini_api_key:
+        raise ApiError(409, "no_llm", "Las correcciones con IA necesitan GEMINI_API_KEY en backend/.env")
+    ctx = pruebas.context(store.conn, settings, project_id)
+    rule = _rule(ctx, rule_id)
+    latest = store.latest_report(project_id)
+    result = next((r for r in RulesStore(store.conn).results(latest["id"]) if r["rule_id"] == rule_id), None) if latest else None
+    if result is None or result["status"] not in VIOLATED:
+        raise ApiError(409, "not_violated", f"{rule_id} no aparece como incumplida en el último análisis: no hay nada que corregir")
+
+    # Dónde corregir: el patrón que la regla prohíbe, o dónde parece estar implementada según la IA
+    places: list[tuple[str, int]] = [(e["file"], int(e["line"])) for e in json.loads(result["evidence"] or "[]")]
+    if not places:
+        saved = EvidenceStore(store.conn).get(project_id, rule_id)
+        ev = evidencia.loads(saved["data"]) if saved and saved["rule_hash"] == pruebas.rule_hash(rule) else None
+        if ev is None:
+            mp = await asyncio.to_thread(mapa.build, ctx.ws.root, ctx.ws.list_files([]))
+            hits = await asyncio.to_thread(evidencia.index_hits, store.conn, llm, project_id, rule)
+            try:
+                ev = await asyncio.to_thread(evidencia.collect, llm, ctx.ws.root, mp, rule, hits)
+            except LlmError as exc:
+                code, message = LLM_ERRORS.get(exc.kind or "", ("llm_unavailable", f"La IA no pudo revisar el código: {exc}"))
+                raise ApiError(503, code, message) from exc
+            EvidenceStore(store.conn).save(project_id, rule_id, pruebas.rule_hash(rule), _commit(store.conn, project_id), ev.to_dict(), user_id)
+        places = [(p.file, p.start) for p in ev.places]
+    places = list(dict.fromkeys(places))[:MAX_FIX_PLACES]
+    if not places:
+        raise ApiError(422, "no_place", f"No encontré en el código dónde corregir {rule_id}: ábrelo en el editor o pregúntale a la IA en el asistente")
+
+    msg = f"La regla {rule.id} «{rule.title}» no se cumple en el código: {rule.description}"
+    rec = "El documento de requisitos manda: cambia el CÓDIGO para que cumpla la regla. No cambies la regla ni sus pruebas."
+    by_file: dict[str, list[int]] = {}
+    for path, line in places:
+        by_file.setdefault(path, []).append(line)
+    patches: list[dict] = []
+    notes: list[str] = []
+    for path, lines in by_file.items():
+        try:
+            content = ctx.ws.read(path)
+        except (OSError, ApiError):
+            continue
+        targets = [Target(0, "Regla de negocio", rule.id, line, msg, rec) for line in lines]
+        try:
+            fixed, note = await asyncio.to_thread(ai_fix, llm, path, content, targets)
+        except LlmError as exc:
+            code, message = LLM_ERRORS.get(exc.kind or "", ("llm_unavailable", f"La IA no pudo proponer la corrección: {exc}"))
+            raise ApiError(503, code, message) from exc
+        except ApiError as exc:
+            if exc.status == 409:
+                continue
+            raise
+        patches += diff_patches(path, content, fixed)
+        if note:
+            notes.append(f"{path}: {note}")
+    if not patches:
+        raise ApiError(409, "fix_unavailable", f"La IA no encontró un cambio en el código que cumpla {rule_id}: revísalo a mano")
+    return RuleFix(patches=patches, notes=notes, places=[f"{p}:{n}" for p, n in places])
 
 
 # ───────────────────────── Fase 5: prueba de fuerza ─────────────────────────

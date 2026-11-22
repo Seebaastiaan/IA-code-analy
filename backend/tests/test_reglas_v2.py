@@ -381,6 +381,36 @@ def test_lo_que_aprueba_el_programa_se_marca_y_se_revierte(client, rid):
     assert {r["id"]: r for r in body["uploaded"]["rules"]}["RN-001"]["approved_by"] is None
 
 
+def test_el_documento_manda_la_ia_corrige_el_codigo_no_la_regla(client, rid, settings):
+    from app import db
+    from app.analyses.reglas_store import RulesStore
+    from app.analysis.clone import clone_dir
+    from tests.test_reglas import REGLAS
+    from tests.test_reglas import repo as write_repo
+
+    settings.gemini_api_key = "clave"
+    # El código del repo de prueba y sus reglas, y el resultado del análisis (RN-001 no se cumple: usa float)
+    root = clone_dir(settings, rid)
+    files = write_repo(root, {"reglas_negocio.toml": REGLAS, "app/pagos/cobro.py": "def cobrar(m):\n    return float(m)\n"})[1]
+    with db.session(settings.database_path) as conn:
+        report = conn.execute("SELECT id FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (rid,)).fetchone()["id"]
+        RulesStore(conn).save(report, reglas.run(root, files, lambda f: (root / f).read_text(encoding="utf-8").split("\n")))
+    llm = FakeLLM({"edits": [{"start_line": 2, "end_line": 2, "replacement": "    return Decimal(str(m))"}], "imports": ["from decimal import Decimal"], "explanation": "Usé Decimal para no perder centavos."})
+    client.app.dependency_overrides[assistant_router.get_llm] = lambda: llm
+    try:
+        # RN-001 («float» prohibido en app/pagos/) no se cumple en el repo de prueba
+        res = client.post(f"/api/projects/{rid}/reglas/pruebas/RN-001/corregir")
+        assert res.status_code == 200, res.json()
+        body = res.json()
+        assert body["places"] == ["app/pagos/cobro.py:2"] and "Decimal" in "".join(p["text"] or "" for p in body["patches"])
+        assert {p["file"] for p in body["patches"]} == {"app/pagos/cobro.py"} and body["notes"] == ["app/pagos/cobro.py: Usé Decimal para no perder centavos."]
+        # Una regla que no está incumplida no se corrige; una que no existe, tampoco
+        assert client.post(f"/api/projects/{rid}/reglas/pruebas/RN-002/corregir").json()["error"]["code"] == "not_violated"
+        assert client.post(f"/api/projects/{rid}/reglas/pruebas/RN-099/corregir").status_code == 404
+    finally:
+        client.app.dependency_overrides.pop(assistant_router.get_llm, None)
+
+
 def test_el_programa_acierta_si_coincide_con_lo_que_el_equipo_sabe():
     out = concordancia.outcome
     assert (out("cumple", "cumple"), out("viola", "no_cumple"), out("viola", "no_implementada")) == ("acerto", "acerto", "acerto")

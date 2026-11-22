@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { paths } from '@/shared/constants/paths'
-import { Card, Chip, EmptyState, ErrorState, Icon, PageLoader, SegmentedControl, SeverityBadge } from '@/shared/ui'
+import { Button, Card, Chip, EmptyState, ErrorState, Icon, PageLoader, SegmentedControl, SeverityBadge, Spinner } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { useReportRules } from '../api/rules.api'
+import { useFixRule } from '../hooks/useFixRule'
 import type { BusinessRuleResult, BusinessRules } from '../types'
 import { filterRules, LEVEL, LIGHT, OUTCOME, plain, plainSummary, STATUS, testFunction, testName, type StatusFilter } from '../utils/rules'
 
@@ -62,11 +63,25 @@ function Notices({ data, repoId }: { data: BusinessRules; repoId: string }) {
 }
 
 function RuleDetail({ rule, repoId }: { rule: BusinessRuleResult; repoId: string }) {
+  const fix = useFixRule(repoId)
+  const violated = rule.status === 'no_cumple' || rule.status === 'no_implementada'
   return (
     <div className="px-5 pb-4 pt-1 space-y-3 text-sm bg-slate-50/60 dark:bg-slate-950/30">
       <p className="font-medium">
         {LIGHT[plain(rule).light].dot} {plain(rule).text}
       </p>
+      {violated && (
+        <div className="rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50/60 dark:bg-rose-500/10 p-3.5">
+          <p className="font-medium text-rose-700 dark:text-rose-300">El documento manda: el código tiene que seguir a la regla.</p>
+          <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
+            La IA propone el cambio mínimo en el código (nunca en la regla ni en su prueba) y lo ves como diff en el editor antes de guardar.
+          </p>
+          <Button className="mt-2" onClick={() => fix.mutate(rule.id)} disabled={fix.isPending}>
+            {fix.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="sparkle" className="w-4 h-4" />}
+            Corregir con IA
+          </Button>
+        </div>
+      )}
       <p className="text-slate-600 dark:text-slate-300">{rule.description}</p>
       {rule.criterion && (
         <p>

@@ -24,6 +24,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 - Casos de control opcionales («sé que se cumple / se viola») y panel de concordancia con el último análisis, con la
   confianza de cada regla.
 - Lo que aprueba «Preparar todo» se marca «Aprobada por el programa» y se revierte a borrador en un clic.
+- «El documento manda»: en una regla que el código no cumple, «Corregir con IA» propone el cambio en el código (no en la
+  regla ni en su prueba) y lo muestra como diff antes de guardar.
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
 - Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
   de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.

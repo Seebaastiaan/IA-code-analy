@@ -208,6 +208,7 @@ export const handlers = [
     const done = rules.writeRule(params.projectId as string, text)
     return typeof done === 'string' ? fail(422, 'invalid_sentence', done) : json(done)
   })),
+  http.post(EP.rules.testFixCode(':projectId', ':ruleId'), route(() => fail(409, 'fix_unavailable', 'La corrección del código con IA no está disponible en la demo'))),
   http.post(EP.rules.answer(':projectId', ':ruleId'), route(async ({ request, params }) => {
     const { doubt, answer } = (await request.json()) as { doubt: string; answer: 'si' | 'no' }
     const done = rules.answerDoubt(params.projectId as string, params.ruleId as string, doubt, answer)

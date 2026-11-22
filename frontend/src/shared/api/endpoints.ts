@@ -72,6 +72,8 @@ export const EP = {
     testMatrix: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/matriz`,
     /** POST: dónde parece estar implementada la regla (IA, no cuenta) */
     testEvidence: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/evidencia`,
+    /** POST: la IA propone el cambio en el CÓDIGO para que cumpla la regla (el documento manda); no guarda nada */
+    testFixCode: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/corregir`,
     /** POST: prueba de fuerza con mutación dirigida (en segundo plano) */
     testsStrength: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/fuerza`,
     /** Zip con reglas_negocio.toml, el arnés y las pruebas aprobadas */

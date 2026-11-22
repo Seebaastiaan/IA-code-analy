@@ -1,6 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { download, http, openDocument } from '@/shared/api/http'
+import type { FixResponse } from '@/features/findings/types'
 import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, ControlExpected, Concordance, DoubtAnswer, MatrixCell, PermissionMatrix, ProjectRules, RuleApproval, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
 
 export const RULES_FILENAME = 'reglas_negocio.toml'
@@ -16,6 +17,8 @@ export const rulesApi = {
   answerDoubt: (repoId: string, ruleId: string, doubt: string, answer: DoubtAnswer) => http.post<ProjectRules>(EP.rules.answer(repoId, ruleId), { doubt, answer }),
   /** «Escribe una regla con tus palabras»: la IA la redacta y se agrega en borrador */
   writeRule: (repoId: string, text: string) => http.post<ProjectRules>(EP.rules.write(repoId), { text }),
+  /** El documento manda: parches de la IA para que el código cumpla la regla */
+  fixCode: (repoId: string, ruleId: string) => http.post<FixResponse>(EP.rules.testFixCode(repoId, ruleId)),
   concordance: (repoId: string) => http.get<Concordance>(EP.rules.control(repoId)),
   setExpected: (repoId: string, ruleId: string, expected: ControlExpected | null) => http.put<Concordance>(EP.rules.expected(repoId, ruleId), { expected }),
   validate: (repoId: string, content: string) => http.post<RulesValidation>(EP.rules.validate(repoId), { content }),
