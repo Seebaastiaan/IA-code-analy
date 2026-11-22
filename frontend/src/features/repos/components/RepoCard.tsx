@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { CAT } from '@/shared/constants/categories'
 import { paths } from '@/shared/constants/paths'
@@ -5,10 +6,12 @@ import { CATEGORIES } from '@/shared/types/common'
 import { Card, Icon, ProgressBar, ScoreRing, Spinner, StatusChip, buttonClass } from '@/shared/ui'
 import { timeAgo } from '@/shared/utils/format'
 import { useReanalyze } from '../hooks/useReanalyze'
+import { DeleteRepoDialog } from './DeleteRepoDialog'
 import type { Repo } from '../types'
 
 export function RepoCard({ repo }: { repo: Repo }) {
   const reanalyze = useReanalyze()
+  const [confirming, setConfirming] = useState(false)
 
   return (
     <Card className="p-5 flex flex-col">
@@ -72,6 +75,11 @@ export function RepoCard({ repo }: { repo: Repo }) {
               <span className="hidden sm:inline">Archivos</span>
             </Link>
           )}
+          {repo.status !== 'analizando' && (
+            <button type="button" onClick={() => setConfirming(true)} className={buttonClass('ghost', 'hover:text-rose-600 dark:hover:text-rose-400')} title="Eliminar repositorio" aria-label={`Eliminar ${repo.name}`}>
+              <Icon name="trash" className="w-4 h-4" />
+            </button>
+          )}
           {repo.last_report_id && (
             <Link to={paths.report(repo.id, repo.last_report_id)} className={buttonClass('ghost', 'text-brand-600 dark:text-brand-300')}>
               Reporte <Icon name="chevron" className="w-4 h-4" />
@@ -79,6 +87,7 @@ export function RepoCard({ repo }: { repo: Repo }) {
           )}
         </div>
       </div>
+      {confirming && <DeleteRepoDialog repo={repo} onClose={() => setConfirming(false)} />}
     </Card>
   )
 }

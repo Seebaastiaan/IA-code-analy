@@ -4,6 +4,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from app.analysis import fake
+from app.analysis.clone import clone_dir
 from tests.conftest import GH_TOKEN, login
 
 URL = "https://github.com/ana/api-pagos"
@@ -196,3 +197,37 @@ def test_metricas_falsas_coherentes():
     assert all(0 <= c["percent"] <= 100 for c in d["coverage"])
     assert d["summary"]["tests_failed"] == sum(f["rule"] == "FAIL" for f in d["findings"])
     assert fake.global_score(cat) == 61.0  # (50·40 + 30·90 + 20·70) / 100
+
+
+def test_eliminar_repositorio_borra_todo_lo_suyo(client, settings):
+    repo_id = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])["repo_id"]
+    report_id = client.get("/api/repos").json()[0]["last_report_id"]
+    assert clone_dir(settings, repo_id).exists()
+    assert client.delete(f"/api/repos/{repo_id}").status_code == 204
+    assert client.get("/api/repos").json() == []
+    assert client.get(f"/api/report/{report_id}").status_code == 404
+    # No queda nada en las tablas del repo
+    from app.db import connect
+
+    conn = connect(settings.database_path)
+    try:
+        for table in ("reports", "jobs", "project_config"):
+            assert conn.execute(f"SELECT COUNT(*) FROM {table} WHERE repo_id = ?", (repo_id,)).fetchone()[0] == 0
+    finally:
+        conn.close()
+    # La copia de trabajo también se borra
+    assert not clone_dir(settings, repo_id).exists()
+
+
+def test_eliminar_repositorio_inexistente_o_ajeno_da_404(client):
+    assert client.delete("/api/repos/no-existe").status_code == 404
+
+
+def test_no_se_elimina_un_repositorio_con_analisis_en_curso(client, settings):
+    settings.job_step_seconds = 0.2
+    job_id = client.post("/api/analyze", json={"url": URL}).json()["job_id"]
+    repo_id = client.get(f"/api/jobs/{job_id}").json()["repo_id"]
+    res = client.delete(f"/api/repos/{repo_id}")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "analysis_running"
+    wait_done(client, job_id)
+    assert client.delete(f"/api/repos/{repo_id}").status_code == 204

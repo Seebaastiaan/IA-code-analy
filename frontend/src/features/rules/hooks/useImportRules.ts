@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { toast } from '@/shared/hooks/useToast'
 import { rulesApi } from '../api/rules.api'
 import type { ImportedRules, ImportRulesRequest } from '../types'
-import { fileToBase64, isDocument, MAX_DOCUMENT_BYTES } from '../utils/rules'
+import { fileToBase64, INVALID_DOCUMENT, isDocument, MAX_DOCUMENT_BYTES } from '../utils/rules'
 
 export type ImportInput = { request: ImportRulesRequest } | { file: File; extra: ImportRulesRequest }
 
@@ -15,7 +15,7 @@ export function useImportRules(onImported: (imported: ImportedRules) => void) {
     mutationFn: async (input: ImportInput) => {
       if ('request' in input) return rulesApi.importDocument(input.request)
       const { file, extra } = input
-      if (!isDocument(file.name)) throw new Error('Usa un PDF, Word (.docx), Markdown (.md) o texto (.txt)')
+      if (!isDocument(file.name)) throw new Error(INVALID_DOCUMENT)
       if (file.size > MAX_DOCUMENT_BYTES) throw new Error(`El documento pesa más de ${MAX_DOCUMENT_BYTES / (1024 * 1024)} MB`)
       return rulesApi.importDocument({ ...extra, filename: file.name, data: await fileToBase64(file) })
     },

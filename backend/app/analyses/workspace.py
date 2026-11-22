@@ -105,6 +105,24 @@ class Workspace:
                     return found
         return found
 
+    def sizes_by_extension(self, extensions: tuple[str, ...]) -> dict[str, int]:
+        """`ruta → tamaño` de los archivos con esas extensiones (también binarios, como PDF o Word), con las mismas carpetas omitidas."""
+        found: dict[str, int] = {}
+        if not self.exists():
+            return found
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS)
+            rel_dir = Path(dirpath).relative_to(self.root).as_posix()
+            for name in sorted(filenames):
+                if name.startswith(".") or not name.lower().endswith(extensions):
+                    continue
+                rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+                found[rel] = (Path(dirpath) / name).stat().st_size
+                if len(found) >= MAX_TREE_ENTRIES:
+                    return found
+        return found
+
+
 
 def is_excluded(path: str, excluded: list[str]) -> bool:
     """Si `path` es una ruta excluida o está dentro de una carpeta excluida."""

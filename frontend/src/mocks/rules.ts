@@ -431,19 +431,19 @@ const DOCUMENTS: Record<string, string[]> = {
 
 const IMPORTED_RULES = [
   {
-    fuente: 'pág. 3 · §2.1', severidad: 'alta',
+    fuente: 'Cap. 2 «Tickets» · pág. 3', severidad: 'alta',
     titulo: 'Solo un agente de soporte puede cerrar un ticket',
     descripcion: 'Un ticket solo se marca como cerrado si lo cierra un agente de soporte; si lo intenta el cliente o el bot, se rechaza.',
     criterio: 'Dado un ticket abierto, cuando el bot intenta cerrarlo, entonces el ticket sigue abierto',
   },
   {
-    fuente: 'pág. 4 · §2.3', severidad: 'media',
+    fuente: 'Cap. 2 «Tickets» · pág. 4', severidad: 'media',
     titulo: 'Un ticket urgente se responde en menos de una hora',
     descripcion: 'Los tickets marcados como urgentes se asignan a un agente y reciben la primera respuesta en menos de 60 minutos.',
     criterio: null,
   },
   {
-    fuente: 'pág. 5 · §3.1', severidad: 'alta',
+    fuente: 'Cap. 3 «Bot» · pág. 5', severidad: 'alta',
     titulo: 'El bot no muestra datos personales de otros clientes',
     descripcion: 'Al responder, el bot solo usa los datos del cliente que escribe; nunca muestra correos, teléfonos ni tickets de otros clientes.',
     criterio: null,
@@ -452,7 +452,7 @@ const IMPORTED_RULES = [
 
 // Solo en los documentos subidos: el mismo documento da otro plazo para los urgentes (§5.2 contra §2.3)
 const UPLOADED_EXTRA = {
-  fuente: 'pág. 7 · §5.2', severidad: 'media',
+  fuente: 'Cap. 5 «Plazos» · pág. 7', severidad: 'media',
   titulo: 'Un ticket urgente se responde en menos de 4 horas',
   descripcion: 'Los tickets urgentes reciben la primera respuesta en un plazo máximo de 4 horas hábiles.',
   criterio: null,
@@ -464,7 +464,7 @@ const q = (text: string) => JSON.stringify(text)
 /** Un texto = error (el handler responde 422 con ese mensaje). Mismo TOML que arma el backend. */
 export function importDocument(body: ImportRulesRequest): ImportedRules | string {
   const source = body.path ?? body.filename ?? ''
-  if (!/\.(pdf|docx|md|markdown|txt)$/i.test(source)) return 'Usa un PDF, Word (.docx), Markdown (.md) o texto (.txt)'
+  if (!/\.(pdf|docx)$/i.test(source)) return 'Tipo de archivo no válido: sube un PDF o un Word (.docx)'
   const m = body.url ? REPO_URL.exec(body.url.trim()) : null
   const project = m ? `${m[1]}/${m[2]}` : body.project_id ? getRepo(body.project_id).name : 'Mi proyecto'
   const name = source.split('/').pop()

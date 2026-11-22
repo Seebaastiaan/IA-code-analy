@@ -157,6 +157,11 @@ class JobManager:
         alive = [r for r in rows if not _stale(r)]
         return _from_row(alive[0], "") if alive else None
 
+    def forget_repo(self, repo_id: str) -> None:
+        """Olvida los jobs terminados de un repo que se eliminó (los que siguen corriendo no se tocan)."""
+        for job_id in [j.id for j in self._jobs.values() if j.repo_id == repo_id and j.status != "running"]:
+            del self._jobs[job_id]
+
     def is_local(self, job: Job) -> bool:
         return job.id in self._jobs
 

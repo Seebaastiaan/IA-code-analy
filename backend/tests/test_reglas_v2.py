@@ -15,6 +15,7 @@ from app.projects import reglas_importar as importar
 from app.projects import reglas_pruebas as pruebas
 from tests.test_analysis import URL, wait_done
 from tests.test_reglas import correr, repo
+from tests.test_reglas_importar import docx
 
 SEED = Path(__file__).resolve().parent.parent / "seed_data"
 
@@ -208,7 +209,7 @@ class FakeLLM:
 
 def test_el_importador_v2_arma_reglas_atomicas_en_borrador():
     llm = FakeLLM(RESPUESTA)
-    out = importar.extract(llm, "Inventario", "Requerimientos.md", "# Requisitos\nSKU y nombre únicos.".encode())
+    out = importar.extract(llm, "Inventario", "Requerimientos.docx", docx("SKU y nombre únicos."))
     rs = reglas.parse(out.content)
     assert out.count == 4 and rs.format == 2 and {r.status for r in rs.rules} == {"borrador"}
     sku, nombre, firma, rara = rs.rules
@@ -226,7 +227,7 @@ def test_el_importador_v2_arma_reglas_atomicas_en_borrador():
 
 def test_una_respuesta_sin_escenarios_conserva_el_criterio():
     viejo = {"reglas": [{"titulo": "T", "descripcion": "D", "severidad": "alta", "criterio": "Dado a, cuando b, entonces c", "fuente": "§1"}], "dudas": []}
-    rule = reglas.parse(importar.extract(FakeLLM(viejo), "P", "r.md", b"x").content).rules[0]
+    rule = reglas.parse(importar.extract(FakeLLM(viejo), "P", "r.docx", docx("x")).content).rules[0]
     assert rule.criterion == "Dado a, cuando b, entonces c" and rule.scenarios == (reglas.Scenario("a", "b", "c"),)
 
 

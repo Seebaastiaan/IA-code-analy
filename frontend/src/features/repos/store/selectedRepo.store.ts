@@ -14,6 +14,8 @@ interface SelectedRepoState {
   /** Repo activo: lo usan el tablero y los enlaces del sidebar (Reporte, Editor, Asistente…) */
   repoId: string | null
   select: (id: string) => void
+  /** El repo activo se eliminó: vuelve a no haber ninguno elegido */
+  clear: () => void
 }
 
 export const useSelectedRepo = create<SelectedRepoState>((set) => ({
@@ -25,5 +27,13 @@ export const useSelectedRepo = create<SelectedRepoState>((set) => ({
       /* sin almacenamiento: se recuerda solo en memoria */
     }
     set({ repoId })
+  },
+  clear: () => {
+    try {
+      localStorage.removeItem(KEY)
+    } catch {
+      /* sin almacenamiento */
+    }
+    set({ repoId: null })
   },
 }))

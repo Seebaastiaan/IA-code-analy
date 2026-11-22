@@ -128,7 +128,7 @@ test('5 · seguir la evolución: tablero, comparativa y configuración', async (
   await expect(page.getByRole('heading', { name: 'Nuevos en B' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Resueltos en B' })).toBeVisible()
   // La fecha de la etiqueta depende del día en que corre la prueba: se elige por el número del análisis
-  const base = page.getByLabel('Base (A)')
+  const base = page.getByLabel('Base A')
   const option = base.locator('option', { hasText: /^#120 · / })
   await base.selectOption((await option.getAttribute('value'))!)
   await expect(base).toHaveValue(/-120$/)
@@ -232,7 +232,7 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await expect(dialog.getByText('3 regla(s) sacadas de')).toBeVisible()
   await expect(dialog.getByText('Dudas del documento')).toBeVisible()
   await expect(dialog.getByText('Válido · equipo/bot-soporte · 3 regla(s)')).toBeVisible()
-  await expect(dialog.getByLabel('Reglas de negocio para este análisis')).toHaveValue(/# Fuente: pág. 3 · §2.1\n\[\[regla\]\]\nid {10}= "RN-001"/)
+  await expect(dialog.getByLabel('Reglas de negocio para este análisis')).toHaveValue(/# Fuente: Cap. 2 «Tickets» · pág. 3\n\[\[regla\]\]\nid {10}= "RN-001"/)
   await dialog.getByRole('button', { name: 'Usar en este análisis' }).click()
   await expect(dialog).toBeHidden()
   await expect(rules.getByText('3 regla(s) · equipo/bot-soporte escritas aquí')).toBeVisible()
@@ -250,6 +250,8 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   // Tabla de aprobación: lo importado entra en borrador y una regla con dudas no se aprueba
   const table = page
   await expect(table.getByText(/3 de 3 reglas son borrador/)).toBeVisible()
+  // Cada regla dice de qué capítulo y página del documento salió
+  await expect(table.getByText('Cap. 2 «Tickets» · pág. 3').first()).toBeVisible()
   await table.getByRole('button', { name: /Aprobar las que no tienen dudas/ }).click()
   await expect(table.getByText(/2 de 3 reglas son borrador/)).toBeVisible()
   await table.getByLabel('Elegir RN-002').check()
@@ -414,4 +416,35 @@ test('reglas del repositorio: se aprueban en la copia del proyecto y avisa que f
   await page.getByRole('button', { name: 'Volver a borrador' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Guardado en la copia del proyecto' })).toBeVisible()
   await expect(page.getByText(/1 de \d+ reglas son borrador/)).toBeVisible()
+})
+
+test('reglas de negocio: solo se suben PDF y Word, con la fuente de cada regla', async ({ page }) => {
+  await page.goto('/repos/r3/settings?tab=reglas')
+  const upload = page.getByLabel('Documento de requisitos')
+  await expect(upload).toHaveAttribute('accept', '.pdf,.docx')
+
+  // Cualquier otro tipo se rechaza con un aviso, sin llamar a la IA
+  await upload.setInputFiles({ name: 'notas.txt', mimeType: 'text/plain', buffer: Buffer.from('hola') })
+  await expect(page.getByText('Tipo de archivo no válido: sube un PDF o un Word (.docx)')).toBeVisible()
+  await expect(page.getByText(/Leyendo notas.txt/)).toBeHidden()
+
+  // Un PDF sí: la IA saca las reglas (un documento que se contradice trae una más y el aviso)
+  await upload.setInputFiles({ name: 'Requisitos.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 x') })
+  await expect(page.getByText('4 regla(s) sacadas de')).toBeVisible()
+})
+
+test('repositorios: eliminar uno con confirmación', async ({ page }) => {
+  await page.goto('/repos')
+  await expect(page.getByText('equipo/cli-utilidades')).toBeVisible()
+  await page.getByRole('button', { name: 'Eliminar equipo/cli-utilidades' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: '¿Eliminar equipo/cli-utilidades?' })).toBeVisible()
+  // Cancelar no borra nada
+  await dialog.getByRole('button', { name: 'Cancelar' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText('equipo/cli-utilidades')).toBeVisible()
+  await page.getByRole('button', { name: 'Eliminar equipo/cli-utilidades' }).click()
+  await dialog.getByRole('button', { name: 'Eliminar' }).click()
+  await expect(page.getByText('Se eliminó equipo/cli-utilidades')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Eliminar equipo/cli-utilidades' })).toBeHidden()
 })

@@ -1,18 +1,17 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRef, useState, type ChangeEvent } from 'react'
+import { useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, ErrorState, Icon, PageLoader, Spinner } from '@/shared/ui'
 import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '../api/rules.api'
 import type { ImportedRules, ProjectRules, RulesValidation } from '../types'
-import { baseName, DOCUMENT_EXTENSIONS, isDocument, saveText } from '../utils/rules'
+import { baseName, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, saveText } from '../utils/rules'
 import { useImportRules } from '../hooks/useImportRules'
+import { DocumentDropzone } from './DocumentDropzone'
 import { HarnessCard } from './HarnessCard'
 import { ImportNotice } from './ImportNotice'
 import { RuleTestsCard } from './RuleTestsCard'
 import { RulesApprovalTable } from './RulesApprovalTable'
 import { ValidationResult } from './ValidationResult'
-
-const MAX_BYTES = 256 * 1024
 
 function Origin({ data }: { data: ProjectRules }) {
   if (data.active === 'repo' && data.repo)
@@ -57,7 +56,6 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   const [result, setResult] = useState<RulesValidation | null>(null)
   const [notice, setNotice] = useState<ImportedRules | null>(null)
   const [reading, setReading] = useState<string | null>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
   // Reemplaza el contenido del editor: no se guarda hasta "Guardar en la app"
   const importRules = useImportRules((done) => {
     setText(done.content)
@@ -95,22 +93,12 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   })
   const template = useMutation({ mutationFn: () => rulesApi.template(repoId), onError: (e) => toast(e.message, { tone: 'err' }) })
 
-  const upload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    // PDF, Word o Markdown: la IA saca las reglas; un .toml se carga tal cual
-    if (data.can_import && isDocument(file.name)) {
-      setReading(file.name)
-      importRules.mutate({ file, extra: { project_id: repoId } }, { onSettled: () => setReading(null) })
-      return
-    }
-    if (file.size > MAX_BYTES) {
-      toast(`El archivo pesa más de ${MAX_BYTES / 1024} KB`, { tone: 'err' })
-      return
-    }
-    update(await file.text())
-    setNotice(null)
+  // Solo PDF o Word: la IA saca las reglas para que se revisen y aprueben aquí
+  const upload = (file: File) => {
+    if (!isDocument(file.name)) return toast(INVALID_DOCUMENT, { tone: 'err' })
+    if (!data.can_import) return toast(NO_AI_FOR_DOCUMENTS, { tone: 'err' })
+    setReading(file.name)
+    importRules.mutate({ file, extra: { project_id: repoId } }, { onSettled: () => setReading(null) })
   }
 
   const busy = validate.isPending || save.isPending || importRules.isPending
@@ -128,18 +116,6 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
             <Icon name="download" className="w-4 h-4" />
             Descargar plantilla
           </Button>
-          <Button variant="ghost" onClick={() => fileInput.current?.click()} disabled={importRules.isPending}>
-            <Icon name="file" className="w-4 h-4" />
-            {data.can_import ? 'Subir archivo o documento' : 'Subir archivo'}
-          </Button>
-          <input
-            ref={fileInput}
-            type="file"
-            accept={data.can_import ? ['.toml', ...DOCUMENT_EXTENSIONS].join(',') : '.toml,text/plain'}
-            className="hidden"
-            aria-label="Archivo de reglas"
-            onChange={(e) => void upload(e)}
-          />
         </div>
       </div>
       {data.can_import && !fromRepo && data.documents.length > 0 && (
@@ -155,6 +131,11 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
               </Button>
             ))}
           </div>
+        </div>
+      )}
+      {!fromRepo && (
+        <div className="mb-3">
+          <DocumentDropzone onFile={upload} busy={importRules.isPending} />
         </div>
       )}
       {reading && (
@@ -208,13 +189,44 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
 }
 
 const STEPS = [
-  'Descarga la plantilla, escribe las reglas aquí o sube el documento de requisitos (PDF, Word o Markdown) para que la IA las saque.',
+  'Descarga la plantilla, escribe las reglas aquí o sube el documento de requisitos (PDF o Word) para que la IA las saque.',
   'Revisa la tabla de aprobación: resuelve las dudas de cada regla y apruébala. Lo importado entra como borrador y solo lo aprobado se verifica.',
   'Por cada regla, una prueba con @pytest.mark.regla("RN-###") (o llamada test_rn###_…) o un patrón prohibido / obligatorio.',
   'Haz commit de reglas_negocio.toml y las pruebas en la raíz del repositorio.',
   'Analiza: el paso 10 dice qué reglas cumplen, cuáles no y cuáles no tienen prueba.',
   'Para que IA voy escriba las pruebas: arma el arnés (Mapa y arnés de pruebas), córrele la prueba de humo y apruébalo.',
 ]
+
+/** Cómo escribir los patrones `prohibido` y `obligatorio` (expresiones regulares), con ejemplos que se pueden copiar. */
+function RegexHelp() {
+  const code = 'font-mono text-xs bg-slate-100 dark:bg-slate-800 rounded px-1 py-0.5'
+  return (
+    <Card className="p-5 h-fit">
+      <h2 className="font-semibold mb-1">Cómo escribir un patrón (regex)</h2>
+      <p className="text-sm text-slate-500 mb-3">
+        <code className={code}>prohibido</code> es un texto que <b>no</b> debe aparecer en el código de la regla y <code className={code}>obligatorio</code> uno que <b>sí</b> debe aparecer. Se escriben como expresión regular.
+      </p>
+      <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+        <li>
+          <b>Texto tal cual:</b> <code className={code}>@requiere_admin</code> busca exactamente eso.
+        </li>
+        <li>
+          <b>Los símbolos <code className={code}>{'. ( ) [ ] { } * + ? | ^ $'}</code> son especiales:</b> para buscarlos como texto ponles una barra antes. Para encontrar <code className={code}>float(</code> escribe <code className={code}>{'float\\('}</code>.
+        </li>
+        <li>
+          <b>Cualquier carácter:</b> <code className={code}>{'.*'}</code>. Ejemplo: <code className={code}>{'descuento.*0\\.5'}</code>.
+        </li>
+        <li>
+          <b>Uno u otro:</b> <code className={code}>{'md5|sha1'}</code>.
+        </li>
+        <li>
+          <b>En el archivo .toml usa comillas simples</b> (<code className={code}>{"prohibido = 'float\\('"}</code>): así la barra no se duplica.
+        </li>
+      </ul>
+      <p className="mt-3 text-xs text-slate-400">Pulsa «Validar»: si el patrón no es una expresión regular válida, te dice en qué regla está el error.</p>
+    </Card>
+  )
+}
 
 /** Configuración → Reglas de negocio (docs/PROPUESTA_REGLAS_NEGOCIO.md §6). */
 export function RulesSettings({ repoId }: { repoId: string }) {
@@ -240,6 +252,7 @@ export function RulesSettings({ repoId }: { repoId: string }) {
         <HarnessCard repoId={repoId} />
         <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
       </div>
+      <div className="space-y-4">
       <Card className="p-5 h-fit">
         <h2 className="font-semibold mb-3">Cómo se verifican</h2>
         <ol className="space-y-2.5 text-sm text-slate-600 dark:text-slate-300">
@@ -254,6 +267,8 @@ export function RulesSettings({ repoId }: { repoId: string }) {
           Las reglas son de este proyecto: no se comparten con otros repositorios. Si el repositorio tiene un archivo válido, gana el del repositorio; si el suyo tiene errores, se usan las corregidas aquí. Las reglas todavía no cuentan en el score.
         </p>
       </Card>
+      <RegexHelp />
+      </div>
     </div>
   )
 }

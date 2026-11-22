@@ -1,7 +1,7 @@
 """
 Reglas de negocio desde un documento del proyecto (docs/PLAN_IMPORTAR_REGLAS_DOCUMENTO.md).
 
-Gemini lee el documento de requisitos (PDF, Word, Markdown o texto) y devuelve las reglas en JSON con esquema; aquí
+Gemini lee el documento de requisitos (PDF o Word) y devuelve las reglas en JSON con esquema; aquí
 se arma el `reglas_negocio.toml` en formato v2 (docs/PROPUESTA_REGLAS_VERIFICABLES.md §5, fase 1) y se valida con el
 parser de siempre: reglas **atómicas** (una comprobación cada una), con su `tipo`, sus escenarios *Dado / Cuando /
 Entonces* con datos concretos, su `fuente` y sus `dudas`, todas en `estado = "borrador"`. El equipo resuelve las dudas y
@@ -25,7 +25,7 @@ from app.analyses import reglas
 from app.assistant.llm import LLM, Attachment, Turn
 
 MAX_DOC_BYTES = 10 * 1024 * 1024
-# Texto que se manda de un .docx, .md o .txt (≈ 75 mil tokens)
+# Texto que se manda de un .docx (≈ 75 mil tokens)
 MAX_DOC_TEXT = 300_000
 # document.xml descomprimido de un .docx (contra archivos zip "bomba")
 MAX_DOCX_XML = 30 * 1024 * 1024
@@ -35,7 +35,8 @@ MAX_CONTRADICTIONS = 10
 MAX_SOURCE = 120
 
 PDF = "application/pdf"
-TYPES = {".pdf": PDF, ".docx": "docx", ".md": "text", ".markdown": "text", ".txt": "text"}
+# Solo PDF y Word (.docx): son los documentos en que los equipos escriben sus requisitos
+TYPES = {".pdf": PDF, ".docx": "docx"}
 EXTENSIONS = tuple(TYPES)
 
 # Nombres de archivo que suelen tener las reglas (sin acentos ni mayúsculas)
@@ -43,8 +44,6 @@ DOC_NAME = re.compile(r"requerim|requisit|regla|negocio|srs|historia|especificac
 # Carpetas que nunca tienen el documento del proyecto
 SKIP_DIRS = {"node_modules", ".venv", "venv", "tests", "test", ".git", "site-packages", "dist", "build"}
 SKIP_NAMES = {"changelog", "license", "licencia", "contributing", "code_of_conduct"}
-# requirements.txt, requirements-dev.txt, test_requirements.txt…: dependencias de pip, no requisitos
-PIP_REQUIREMENTS = re.compile(r"(^|[-_.])requirements([-_.]|$)")
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -62,6 +61,7 @@ Reglas:
   comprueban por separado, son varias reglas.
 - "titulo": máximo 100 caracteres, afirmativo ("Un pago mayor al límite necesita autorización de finanzas").
 - "descripcion": la regla completa en palabras del negocio, en español, sin inventar datos que el documento no da.
+  NUNCA repitas el título: agrega lo que el título no dice (la condición exacta, los valores, las excepciones).
 - "severidad": "alta" si afecta dinero, seguridad, permisos o datos personales; "media" si afecta la operación;
   "baja" en otro caso.
 - "tipo" (elige la prueba que la comprobaría):
@@ -79,7 +79,8 @@ Reglas:
 - "dudas" de cada regla: lo ambiguo o incompleto que impide verificarla (un límite que no dice si incluye el valor
   exacto, "y/o", "alerta o bloqueo", dos criterios que chocan, montos o tasas sin valor, una matriz de permisos
   incompleta, qué pasa en el caso que no menciona). Pregunta corta con su sección. Una regla sin dudas lleva [].
-- "fuente": dónde está la regla en el documento (página y/o sección, p. ej. "pág. 4 · §3.2").
+- "fuente": dónde está la regla en el documento: el capítulo o sección y la página u hoja (p. ej. "Cap. 3 «Pagos» · pág. 4"
+  o "§3.2 · pág. 4"). Si el documento tiene hojas o pestañas, la hoja (p. ej. "Hoja «Reglas»"). Si hay varias, sepáralas con " · ".
 - "contradicciones": dos reglas del documento que no se pueden cumplir a la vez para el MISMO caso (p. ej. §4 da 24 h
   para cancelar sin cargo y §7 cobra toda cancelación con menos de 48 h). Extrae las DOS reglas, cada una con su fuente,
   y en "reglas" pon sus posiciones en la lista (1 = la primera regla). No decidas cuál gana. NO es contradicción una
@@ -158,10 +159,10 @@ def _plain(text: str) -> str:
 
 
 def kind_of(name: str) -> str:
-    """"application/pdf", "docx" o "text"; DocumentError si la extensión no se admite."""
+    """"application/pdf" o "docx"; DocumentError si la extensión no se admite."""
     kind = TYPES.get(PurePosixPath(name).suffix.lower())
     if not kind:
-        raise DocumentError("unsupported_type", f"«{PurePosixPath(name).name}» no se puede importar: usa un PDF, Word (.docx), Markdown (.md) o texto (.txt)")
+        raise DocumentError("unsupported_type", f"«{PurePosixPath(name).name}» no se puede importar: solo se admiten documentos PDF o Word (.docx)")
     return kind
 
 
@@ -177,7 +178,7 @@ def find_documents(blobs: dict[str, int]) -> list[str]:
             continue
         if any(_plain(part) in SKIP_DIRS for part in p.parts[:-1]) or _plain(p.stem) in SKIP_NAMES:
             continue
-        if not DOC_NAME.search(_plain(p.stem)) or (p.suffix.lower() == ".txt" and PIP_REQUIREMENTS.search(_plain(p.stem))):
+        if not DOC_NAME.search(_plain(p.stem)):
             continue
         rank = 0 if p.parts[0].lower() == "docs" else 1 if len(p.parts) == 1 else 2
         found.append((rank, path))
@@ -209,13 +210,6 @@ def docx_text(data: bytes) -> str:
     return "\n".join(lines)
 
 
-def _decode(data: bytes) -> str:
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        return data.decode("latin-1")
-
-
 def _turn(name: str, project: str, data: bytes) -> tuple[Turn, list[str]]:
     """Turno para Gemini y avisos de lectura (texto recortado)."""
     if not data:
@@ -228,7 +222,7 @@ def _turn(name: str, project: str, data: bytes) -> tuple[Turn, list[str]]:
         if not data.startswith(b"%PDF"):
             raise DocumentError("invalid_document", f"«{PurePosixPath(name).name}» no es un PDF válido")
         return Turn("user", intro + "Extrae las reglas de negocio del documento adjunto.", files=(Attachment(PDF, data),)), []
-    text = docx_text(data) if kind == "docx" else _decode(data)
+    text = docx_text(data)
     if not text.strip():
         raise DocumentError("invalid_document", f"«{PurePosixPath(name).name}» no tiene texto")
     notes = []

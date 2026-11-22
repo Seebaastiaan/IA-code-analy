@@ -93,7 +93,7 @@ export default function ComparePage() {
         <>
           <Card className="p-5 grid sm:grid-cols-[1fr_auto_1fr] gap-3 items-end">
             <div>
-              <Label htmlFor="cmp-a">Base (A)</Label>
+              <Label htmlFor="cmp-a">Base A</Label>
               <Select id="cmp-a" value={a ?? ''} onChange={(e) => setBase(e.target.value)}>
                 {analyses.data.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -106,7 +106,7 @@ export default function ComparePage() {
               <Icon name="arrow" className="w-4 h-4" />
             </span>
             <div>
-              <Label htmlFor="cmp-b">Comparar con (B)</Label>
+              <Label htmlFor="cmp-b">Base B</Label>
               <Select id="cmp-b" value={b ?? ''} onChange={(e) => setTarget(e.target.value)}>
                 {analyses.data.map((o) => (
                   <option key={o.id} value={o.id}>

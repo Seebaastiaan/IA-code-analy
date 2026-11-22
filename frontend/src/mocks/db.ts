@@ -514,6 +514,15 @@ export function startJob(url: string, branch: string, opts: { fail?: boolean; sp
   return job.id
 }
 
+/** Quita el repo con todo lo suyo (como DELETE /api/repos/{id}); con un análisis en curso, un texto = error. */
+export function deleteRepo(repoId: string): string | null {
+  const r = getRepo(repoId)
+  if (r.status === 'analizando') return 'Este repositorio tiene un análisis en curso: espera a que termine o cancélalo antes de eliminarlo'
+  repos.splice(repos.indexOf(r), 1)
+  delete configs[repoId]
+  return null
+}
+
 export const reanalyze = (repoId: string) => {
   const r = getRepo(repoId)
   return startJob(r.url, r.branch)

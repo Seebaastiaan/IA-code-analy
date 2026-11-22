@@ -9,7 +9,7 @@ el suyo no es válido. No hay reglas generales.
 `POST /api/reglas/revisar` revisa las reglas al cargar el repo (Nuevo análisis), antes de clonar: lee el archivo
 con la API de GitHub y lo valida con el mismo parser.
 
-`POST /api/reglas/importar` saca las reglas de un documento de requisitos (PDF, Word, Markdown) con Gemini
+`POST /api/reglas/importar` saca las reglas de un documento de requisitos (PDF o Word) con Gemini
 (app.projects.reglas_importar) y devuelve el `reglas_negocio.toml` para revisarlo en el editor; no guarda nada.
 """
 
@@ -149,11 +149,9 @@ def _files(ws: Workspace) -> list[str] | None:
     return ws.list_files([]) if ws.exists() else None
 
 
-def _documents(ws: Workspace, files: list[str] | None) -> list[str]:
-    """Documentos de requisitos de la copia del repo (los de `docs/` primero)."""
-    if not files:
-        return []
-    return importar.find_documents({f: (ws.root / f).stat().st_size for f in files if f.lower().endswith(importar.EXTENSIONS)})
+def _documents(ws: Workspace) -> list[str]:
+    """Documentos de requisitos (PDF o Word) de la copia del repo, los de `docs/` primero."""
+    return importar.find_documents(ws.sizes_by_extension(importar.EXTENSIONS))
 
 
 def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRules:
@@ -176,7 +174,7 @@ def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRu
     return ProjectRules(
         active=_active(repo_file, uploaded),
         repo=repo_file, uploaded=uploaded, cloned=ws.exists(), commit=latest["commit_sha"] if latest else None,
-        documents=_documents(ws, files), can_import=bool(settings.gemini_api_key),
+        documents=_documents(ws), can_import=bool(settings.gemini_api_key),
     )
 
 
@@ -325,7 +323,7 @@ class Precheck(BaseModel):
     template: str
     # Validación de `content`, si se mandó
     checked: Validation | None = None
-    # Documentos de requisitos del árbol (PDF, Word, Markdown) y si hay IA para importarlos
+    # Documentos de requisitos del árbol (PDF o Word) y si hay IA para importarlos
     documents: list[str] = Field(default_factory=list)
     can_import: bool = False
 

@@ -199,8 +199,9 @@ describe('revisión de reglas en Nuevo análisis', () => {
 
 describe('importar reglas desde un documento', () => {
   it('reconoce los documentos que lee la IA', () => {
-    expect(['Requerimientos.PDF', 'reglas.docx', 'srs.md', 'notas.txt'].every(isDocument)).toBe(true)
-    expect(isDocument('reglas_negocio.toml')).toBe(false)
+    expect(['Requerimientos.PDF', 'reglas.docx'].every(isDocument)).toBe(true)
+    // Solo PDF y Word: ni Markdown, ni texto, ni el .toml, ni el .doc antiguo
+    expect(['srs.md', 'notas.txt', 'reglas_negocio.toml', 'viejo.doc'].some(isDocument)).toBe(false)
     expect(isDocument('foto.png')).toBe(false)
     expect(baseName('docs/sub/Requerimientos.pdf')).toBe('Requerimientos.pdf')
   })
@@ -218,9 +219,9 @@ describe('importar reglas desde un documento', () => {
     if (typeof r === 'string') throw new Error(r)
     expect(r.validation).toMatchObject({ valid: true, project: 'equipo/bot-soporte' })
     expect(r.validation.rules.map((x) => x.id)).toEqual(['RN-001', 'RN-002', 'RN-003'])
-    expect(r.content).toContain('# Fuente: pág. 3 · §2.1\n[[regla]]')
+    expect(r.content).toContain('# Fuente: Cap. 2 «Tickets» · pág. 3\n[[regla]]')
     expect(r.doubts.length).toBeGreaterThan(0)
-    expect(importDocument({ filename: 'virus.exe', data: '' })).toContain('Usa un PDF')
+    expect(importDocument({ filename: 'virus.exe', data: '' })).toContain('Tipo de archivo no válido')
     expect(r.contradictions).toEqual([])
   })
 
@@ -228,12 +229,12 @@ describe('importar reglas desde un documento', () => {
     const r = importDocument({ filename: 'Requisitos.pdf', data: '' })
     if (typeof r === 'string') throw new Error(r)
     expect(r.count).toBe(4)
-    expect(r.contradictions).toEqual([expect.stringMatching(/^RN-002 \(pág\. 4 · §2\.3\) y RN-004 \(pág\. 7 · §5\.2\): /)])
+    expect(r.contradictions).toEqual([expect.stringMatching(/^RN-002 \(Cap\. 2 «Tickets» · pág\. 4\) y RN-004 \(Cap\. 5 «Plazos» · pág\. 7\): /)])
     expect(r.content.match(/# CONTRADICCIÓN RN-002 RN-004: /g)).toHaveLength(2)
     expect(r.validation.valid).toBe(false)
     expect(r.validation.error).toMatch(/RN-002 y RN-004 se contradicen según el documento/)
     // Se deja la de 1 hora: ya es válido
-    const sinRN004 = r.content.split('\n\n# Fuente: pág. 7')[0] + '\n'
+    const sinRN004 = r.content.split('\n\n# Fuente: Cap. 5')[0] + '\n'
     expect(validate(sinRN004)).toMatchObject({ valid: true })
     // O se decide que no se contradicen y se borra el comentario
     expect(validate(r.content.replace(/^# CONTRADICCIÓN.*\n/gm, ''))).toMatchObject({ valid: true })

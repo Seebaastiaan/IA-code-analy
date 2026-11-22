@@ -23,6 +23,10 @@ const FILTERS = [
 ] as const
 type Filter = (typeof FILTERS)[number]['id']
 
+/** Mismo texto sin importar mayúsculas, espacios ni el punto final (la IA a veces repite el título como descripción). */
+const norm = (t: string) => t.trim().replace(/[.\s]+$/, '').replace(/\s+/g, ' ').toLowerCase()
+const sameText = (a: string, b: string) => norm(a) === norm(b)
+
 const approval = (r: RulePreview): RuleApproval => r.status ?? 'aprobada'
 
 function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResolve }: {
@@ -47,6 +51,7 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
           <Icon name="chevron" className={open ? 'w-3.5 h-3.5 shrink-0 rotate-90 transition-transform' : 'w-3.5 h-3.5 shrink-0 transition-transform'} />
           <span className="font-mono text-xs text-slate-500 shrink-0">{rule.id}</span>
           <span className="truncate text-sm">{rule.title}</span>
+          {rule.source && <span className="hidden md:inline shrink-0 max-w-[14rem] truncate text-xs text-slate-400" title={rule.source}>{rule.source}</span>}
         </button>
         <span className="hidden sm:flex items-center gap-1.5 shrink-0">
           <SeverityBadge sev={rule.severity} />
@@ -57,7 +62,7 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
       </div>
       {open && (
         <div className="mt-2 ml-6 space-y-2.5 text-sm text-slate-600 dark:text-slate-300">
-          {rule.description && <p>{rule.description}</p>}
+          {rule.description && !sameText(rule.description, rule.title) && <p>{rule.description}</p>}
           {rule.source && <p className="text-xs text-slate-400">Fuente: {rule.source}</p>}
           {scenarios.length > 0 && (
             <ul className="space-y-1.5">

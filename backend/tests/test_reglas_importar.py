@@ -77,21 +77,21 @@ def test_detecta_documentos_de_requisitos():
         "tests/requerimientos.md": 10, "node_modules/x/requirements.md": 10, "CHANGELOG.md": 10,
         "historias_de_usuario.md": 0, "docs/SRS.pdf": importar.MAX_DOC_BYTES + 1, "docs/especificación.txt": 20, "requisitos.py": 5,
     }
-    # docs/ primero; sin vacíos, gigantes, pruebas, dependencias ni código
-    assert importar.find_documents(blobs) == ["docs/especificación.txt", "docs/Requerimientos.pdf", "Reglas de Negocio.docx"]
+    # docs/ primero; solo PDF y Word, sin vacíos, gigantes, pruebas, dependencias ni código
+    assert importar.find_documents(blobs) == ["docs/Requerimientos.pdf", "Reglas de Negocio.docx"]
 
 
-def test_no_confunde_dependencias_de_python_con_requisitos():
+def test_solo_cuentan_pdf_y_word():
     blobs = {
-        "requirements.txt": 50, "requirements-dev.txt": 20, "dev_requirements.txt": 20, "backend/requirements.txt": 30,
-        "test-requirements.txt": 10, "docs/requirements.md": 40,
+        "requirements.txt": 50, "requirements-dev.txt": 20, "backend/requirements.txt": 30, "docs/requirements.md": 40,
+        "docs/requisitos.txt": 10, "docs/requisitos.pdf": 40, "docs/reglas.docx": 40, "docs/reglas.doc": 40,
     }
-    # Un requirements*.txt es la lista de paquetes; un .md con ese nombre sí puede ser el documento
-    assert importar.find_documents(blobs) == ["docs/requirements.md"]
+    # La lista de paquetes de pip, el Markdown, el texto y el .doc antiguo no son documentos de requisitos
+    assert importar.find_documents(blobs) == ["docs/reglas.docx", "docs/requisitos.pdf"]
 
 
 def test_detecta_maximo_cinco():
-    assert len(importar.find_documents({f"docs/requisitos_{i}.md": 1 for i in range(9)})) == importar.MAX_DOCUMENTS
+    assert len(importar.find_documents({f"docs/requisitos_{i}.pdf": 1 for i in range(9)})) == importar.MAX_DOCUMENTS
 
 
 # ─── TOML generado ───
@@ -111,7 +111,7 @@ def test_toml_generado_es_valido_y_numerado():
 
 def test_toml_escapa_y_recorta_textos():
     rara = {"titulo": 'Comillas " y \\ y\nsalto' + "x" * 300, "descripcion": "a\tb\x00c\r\nd", "severidad": "alta", "fuente": "pág.\n1"}
-    content = importar.build_toml('Proyecto "raro"', "x.md", [rara])
+    content = importar.build_toml('Proyecto "raro"', "x.docx", [rara])
     rule = reglas.parse(content).rules[0]
     assert len(rule.title) == reglas.MAX_TITLE and rule.title.startswith('Comillas " y \\ y salto') and rule.title.endswith("…")
     assert rule.description == "a bc d"
@@ -162,17 +162,17 @@ def test_importa_docx_como_texto(client, llm):
     assert not turn.files and "3.2 Los pagos sobre el límite requieren aprobación de Finanzas.\nGlosario" in turn.text
 
 
-def test_importa_markdown_del_repo_en_github(client, llm, fake):
-    fake.set_file("docs/Requerimientos.md", "# Requisitos\n\nUn pedido cancelado no vuelve a pagado.")
-    res = client.post("/api/reglas/importar", json={"url": URL, "branch": "main", "path": "docs/Requerimientos.md"})
+def test_importa_pdf_del_repo_en_github(client, llm, fake):
+    fake.set_file("docs/Requerimientos.pdf", "%PDF-1.4 Un pedido cancelado no vuelve a pagado.")
+    res = client.post("/api/reglas/importar", json={"url": URL, "branch": "main", "path": "docs/Requerimientos.pdf"})
     assert res.status_code == 200, res.text
-    assert res.json()["validation"]["project"] == "ana/api-pagos" and res.json()["source"] == "docs/Requerimientos.md"
-    assert "Un pedido cancelado no vuelve a pagado." in llm.calls[0]["turns"][0].text
+    assert res.json()["validation"]["project"] == "ana/api-pagos" and res.json()["source"] == "docs/Requerimientos.pdf"
+    assert llm.calls[0]["turns"][0].files[0].data.startswith(b"%PDF")
 
 
 def test_documento_del_repo_que_no_existe(client, llm, fake):
     fake.get_file = _not_found
-    res = client.post("/api/reglas/importar", json={"url": URL, "path": "docs/Requerimientos.md"})
+    res = client.post("/api/reglas/importar", json={"url": URL, "path": "docs/Requerimientos.pdf"})
     assert res.status_code == 404 and res.json()["error"]["code"] == "not_found"
     assert not llm.calls
 
@@ -185,28 +185,28 @@ async def _not_found(*args, **kwargs):
 
 def test_respuestas_raras_de_la_ia(client, llm):
     llm.reply = {"reglas": [{"titulo": "", "descripcion": "x", "severidad": "alta"}, {**RN_DECIMAL, "severidad": "CRÍTICA"}, "nada"], "dudas": [""]}
-    body = importar_archivo(client, "r.md", b"texto").json()
+    body = importar_archivo(client, "r.docx", docx("texto")).json()
     assert body["count"] == 1 and body["doubts"] == []
     assert reglas.parse(body["content"]).rules[0].severity == "media"
 
 
 def test_sin_reglas_responde_422_con_la_duda(client, llm):
     llm.reply = {"reglas": [], "dudas": ["El documento solo describe la arquitectura"]}
-    res = importar_archivo(client, "arquitectura.md", b"Usamos FastAPI")
+    res = importar_archivo(client, "arquitectura.docx", docx("Usamos FastAPI"))
     assert res.status_code == 422 and res.json()["error"]["code"] == "no_rules_found"
     assert "El documento solo describe la arquitectura" in res.json()["error"]["message"]
 
 
 def test_maximo_de_reglas(client, llm):
     llm.reply = {"reglas": [{**RN_DECIMAL, "titulo": f"Regla {i}"} for i in range(reglas.MAX_RULES + 5)], "dudas": []}
-    body = importar_archivo(client, "r.md", b"texto").json()
+    body = importar_archivo(client, "r.docx", docx("texto")).json()
     assert body["count"] == reglas.MAX_RULES and body["validation"]["valid"]
     assert body["doubts"][0].startswith(f"El documento tiene {reglas.MAX_RULES + 5} reglas")
 
 
 def test_reglas_repetidas_dan_aviso(client, llm):
     llm.reply = {"reglas": [RN_DECIMAL, RN_DECIMAL], "dudas": []}
-    body = importar_archivo(client, "r.md", b"texto").json()
+    body = importar_archivo(client, "r.docx", docx("texto")).json()
     assert body["validation"]["valid"] and body["validation"]["warnings"]
 
 
@@ -246,13 +246,13 @@ def test_contradicciones_se_marcan_y_bloquean_el_archivo(client, llm):
 def test_contradiccion_apunta_bien_aunque_se_descarte_una_regla(client, llm):
     vacia = {"titulo": "", "descripcion": "", "severidad": "alta"}
     llm.reply = {"reglas": [vacia, RN_24H, RN_48H], "contradicciones": [{"reglas": [2, 3], "motivo": "24 h contra 48 h"}, {"reglas": [1, 2], "motivo": "con la vacía"}], "dudas": []}
-    body = importar_archivo(client, "r.md", b"texto").json()
+    body = importar_archivo(client, "r.docx", docx("texto")).json()
     assert body["count"] == 2 and body["contradictions"] == ["RN-001 (§4.2) y RN-002 (§7.1): 24 h contra 48 h"]
 
 
 def test_sin_contradicciones_en_la_respuesta(client, llm):
     # Respuesta sin la clave (modelo viejo o respuesta incompleta): sin contradicciones y archivo válido
-    body = importar_archivo(client, "r.md", b"texto").json()
+    body = importar_archivo(client, "r.docx", docx("texto")).json()
     assert body["contradictions"] == [] and body["validation"]["valid"]
 
 
@@ -262,7 +262,7 @@ def test_el_prompt_pide_contradicciones_y_no_confundir_excepciones():
 
 
 def test_texto_largo_se_recorta_con_aviso(client, llm):
-    body = importar_archivo(client, "r.txt", b"a" * (importar.MAX_DOC_TEXT + 10)).json()
+    body = importar_archivo(client, "r.docx", docx("a" * (importar.MAX_DOC_TEXT + 10))).json()
     assert body["doubts"][0].startswith("El documento es muy largo")
     assert len(llm.calls[0]["turns"][0].text) < importar.MAX_DOC_TEXT + 500
 
@@ -273,10 +273,13 @@ def test_texto_largo_se_recorta_con_aviso(client, llm):
         ("virus.exe", b"MZ", 415, "unsupported_type"),
         ("falso.pdf", b"no soy pdf", 422, "invalid_document"),
         ("roto.docx", b"no soy zip", 422, "invalid_document"),
-        ("vacio.md", b"", 422, "invalid_document"),
+        ("vacio.docx", b"", 422, "invalid_document"),
+        ("notas.md", b"# notas", 415, "unsupported_type"),
+        ("datos.txt", b"texto", 415, "unsupported_type"),
+        ("reglas.toml", b"[proyecto]", 415, "unsupported_type"),
         ("grande.pdf", b"%PDF" + b"0" * importar.MAX_DOC_BYTES, 413, "file_too_large"),
     ],
-    ids=["exe", "pdf-falso", "docx-roto", "vacio", "grande"],
+    ids=["exe", "pdf-falso", "docx-roto", "vacio", "markdown", "texto", "toml", "grande"],
 )
 def test_documentos_invalidos(client, llm, filename, data, status, code):
     res = importar_archivo(client, filename, data)
@@ -291,24 +294,24 @@ def test_docx_con_entidades_se_rechaza(client, llm):
 
 
 def test_base64_invalido(client, llm):
-    res = client.post("/api/reglas/importar", json={"filename": "r.md", "data": "%%%no-base64"})
+    res = client.post("/api/reglas/importar", json={"filename": "r.docx", "data": "%%%no-base64"})
     assert res.status_code == 422 and res.json()["error"]["code"] == "invalid_document"
 
 
 @pytest.mark.parametrize(("kind", "code"), [("quota", "llm_rate_limited"), ("busy", "llm_busy"), (None, "llm_unavailable")])
 def test_errores_de_la_ia(client, llm, kind, code):
     llm.fail = LlmError("falló", kind=kind)
-    res = importar_archivo(client, "r.md", b"texto")
+    res = importar_archivo(client, "r.docx", docx("texto"))
     assert res.status_code == 503 and res.json()["error"]["code"] == code
 
 
 def test_sin_clave_de_gemini(client):
-    res = importar_archivo(client, "r.md", b"texto")
+    res = importar_archivo(client, "r.docx", docx("texto"))
     assert res.status_code == 503 and res.json()["error"]["code"] == "llm_not_configured"
 
 
 def test_requiere_sesion(anon):
-    assert anon.post("/api/reglas/importar", json={"filename": "r.md", "data": b64(b"x")}).status_code == 401
+    assert anon.post("/api/reglas/importar", json={"filename": "r.docx", "data": b64(b"x")}).status_code == 401
 
 
 # ─── Revisión en Nuevo análisis y Configuración ───
@@ -327,7 +330,7 @@ class ClonerConDocumento(FakeCloner):
         result = super().clone(settings, repo_id, url, branch, token, attempt)
         tmp = clone_mod.clones_root(settings) / f"{repo_id}.tmp-{attempt}"
         (tmp / "docs").mkdir(exist_ok=True)
-        (tmp / "docs" / "Requisitos.md").write_text("Todo pago mayor a $1,000 requiere autorización.", encoding="utf-8")
+        (tmp / "docs" / "Requisitos.docx").write_bytes(docx("Todo pago mayor a $1,000 requiere autorización."))
         return result
 
 
@@ -339,17 +342,17 @@ def cloner() -> ClonerConDocumento:
 def test_configuracion_importa_de_la_copia_del_proyecto(client, llm):
     rid = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])["repo_id"]
     project = client.get(f"/api/projects/{rid}/reglas").json()
-    assert project["documents"] == ["docs/Requisitos.md"]
-    res = client.post("/api/reglas/importar", json={"project_id": rid, "path": "docs/Requisitos.md"})
+    assert project["documents"] == ["docs/Requisitos.docx"]
+    res = client.post("/api/reglas/importar", json={"project_id": rid, "path": "docs/Requisitos.docx"})
     assert res.status_code == 200, res.text
     assert res.json()["validation"]["project"] == "ana/api-pagos"
     assert "Todo pago mayor a $1,000 requiere autorización." in llm.calls[0]["turns"][0].text
     # Fuera de la copia: rechazado
-    assert client.post("/api/reglas/importar", json={"project_id": rid, "path": "../secreto.md"}).json()["error"]["code"] == "invalid_path"
+    assert client.post("/api/reglas/importar", json={"project_id": rid, "path": "../secreto.docx"}).json()["error"]["code"] == "invalid_path"
     # No guarda nada: el usuario lo revisa en el editor
     assert client.get(f"/api/projects/{rid}/reglas").json()["uploaded"] is None
 
 
 def test_proyecto_de_otro_equipo(client, llm):
-    res = client.post("/api/reglas/importar", json={"project_id": "no-existe", "path": "docs/Requisitos.md"})
+    res = client.post("/api/reglas/importar", json={"project_id": "no-existe", "path": "docs/Requisitos.docx"})
     assert res.status_code == 404

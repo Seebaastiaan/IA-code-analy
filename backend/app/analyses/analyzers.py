@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.analyses.mensajes import bandit_message, ruff_message
 from app.analyses.models import ComplexityInput, FindingInput
 from app.analyses.remedies import bandit_remedy, ruff_remedy
 from app.analyses.scoring import grade
@@ -100,22 +101,24 @@ def ruff_finding(path: str, d: dict) -> FindingInput:
     """Hallazgo de Ruff con recomendación concreta. Sin corrección de Ruff, la propone la IA en el editor."""
     code = d["code"] or "E999"
     fix = _auto_fix(d)
-    why, rec = ruff_remedy(code, d["message"])
+    message = ruff_message(d["message"])
+    why, rec = ruff_remedy(code, message)
     if fix and fix.get("message"):
         rec += f" Corrección automática: {fix['message']}."
     return FindingInput(
         sev=_ruff_severity(code), cat="prac", tool="Ruff", rule=code, file=path, line=d["location"]["row"],
-        msg=d["message"], why=why, rec=rec, fix=True, fix_kind="auto" if fix else "ia",
+        msg=message, why=why, rec=rec, fix=True, fix_kind="auto" if fix else "ia",
     )
 
 
 def bandit_finding(path: str, r: dict) -> FindingInput:
     """Hallazgo de Bandit con recomendación concreta. Bandit no corrige: la corrección la propone la IA."""
-    why, rec = bandit_remedy(r["test_id"], r["issue_text"])
+    message = bandit_message(r["test_id"], r["issue_text"])
+    why, rec = bandit_remedy(r["test_id"], message)
     conf = BANDIT_CONF.get(r["issue_confidence"], "baja")
     return FindingInput(
         sev=BANDIT_SEV.get(r["issue_severity"], "baja"), cat="seg", tool="Bandit", rule=r["test_id"], file=path, line=r["line_number"],
-        msg=r["issue_text"], why=f"{why} (Bandit, confianza {conf})", rec=rec, fix=True, fix_kind="ia",
+        msg=message, why=f"{why} (Bandit, confianza {conf})", rec=rec, fix=True, fix_kind="ia",
     )
 
 

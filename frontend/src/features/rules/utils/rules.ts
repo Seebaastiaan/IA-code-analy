@@ -61,11 +61,13 @@ export function saveText(name: string, text: string, type = 'application/toml') 
 
 // ─── Documentos de requisitos (importar con IA) ───
 
-/** Extensiones que la IA puede leer (backend/app/projects/reglas_importar.py) */
-export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.md', '.markdown', '.txt']
+/** Extensiones que se pueden subir: solo PDF y Word (backend/app/projects/reglas_importar.py) */
+export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx']
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+export const INVALID_DOCUMENT = 'Tipo de archivo no válido: sube un PDF o un Word (.docx)'
+export const NO_AI_FOR_DOCUMENTS = 'Para leer documentos hace falta configurar la clave de la IA (Gemini)'
 
-/** PDF, Word o Markdown: se importa con IA. Un .toml (o cualquier otro) se carga tal cual en el editor. */
+/** PDF o Word: la IA saca las reglas. Cualquier otro tipo (incluido un .toml) se rechaza. */
 export const isDocument = (name: string) => DOCUMENT_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext))
 
 /** Nombre del archivo de una ruta (docs/Requerimientos.pdf → Requerimientos.pdf). */

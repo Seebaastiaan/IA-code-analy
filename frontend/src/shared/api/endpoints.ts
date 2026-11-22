@@ -11,6 +11,7 @@ export const EP = {
     list: '/api/repos',
     history: (id: string) => `/api/repos/${id}/history`,
     analyze: (id: string) => `/api/repos/${id}/analyze`,
+    remove: (id: string) => `/api/repos/${id}`,
     tree: (id: string) => `/api/repos/${id}/tree`,
     index: (id: string) => `/api/repos/${id}/index`,
     analyses: (id: string) => `/api/repos/${id}/analyses`,

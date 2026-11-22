@@ -58,6 +58,10 @@ export const handlers = [
   // ─── Tablero y repos ───
   http.get(EP.dashboard, route(({ request }) => json(db.dashboard(param(request, 'repo'))))),
   http.get(EP.repos.list, route(() => json(db.listRepos()))),
+  http.delete(EP.repos.remove(':repoId'), route(({ params }) => {
+    const busy = db.deleteRepo(params.repoId as string)
+    return busy ? fail(409, 'analysis_running', busy) : new HttpResponse(null, { status: 204 })
+  })),
   http.post(EP.repos.analyze(':repoId'), route(({ params }) => json({ job_id: db.reanalyze(params.repoId as string) }))),
   http.get(EP.repos.tree(':repoId'), route(({ params }) => json(db.tree(params.repoId as string)))),
   http.get(EP.repos.analyses(':repoId'), route(({ params }) => json(db.analyses(params.repoId as string)))),

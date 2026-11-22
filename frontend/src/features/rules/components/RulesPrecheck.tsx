@@ -1,12 +1,13 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Icon, Modal, Spinner, type IconName } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { rulesApi, RULES_FILENAME } from '../api/rules.api'
 import type { ImportedRules, RulesValidation } from '../types'
-import { baseName, DOCUMENT_EXTENSIONS, githubRepo, isDocument, precheckView, saveText, type PrecheckTone } from '../utils/rules'
+import { baseName, githubRepo, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, precheckView, saveText, type PrecheckTone } from '../utils/rules'
 import { useImportRules } from '../hooks/useImportRules'
+import { DocumentDropzone } from './DocumentDropzone'
 import { ImportNotice } from './ImportNotice'
 import { ValidationResult } from './ValidationResult'
 
@@ -16,7 +17,6 @@ export interface FormRules {
   validation: RulesValidation
 }
 
-const MAX_BYTES = 256 * 1024
 // Espera a que el usuario deje de escribir la URL antes de consultar GitHub
 const DEBOUNCE_MS = 500
 
@@ -51,7 +51,6 @@ function RulesModal({ url, branch, initial, title, canImport, imported, onUse, o
   const [text, setText] = useState(initial)
   const [result, setResult] = useState<RulesValidation | null>(imported?.validation ?? null)
   const [notice, setNotice] = useState<ImportedRules | null>(imported ?? null)
-  const fileInput = useRef<HTMLInputElement>(null)
   const importRules = useImportRules((done) => {
     setText(done.content)
     setResult(done.validation)
@@ -67,15 +66,11 @@ function RulesModal({ url, branch, initial, title, canImport, imported, onUse, o
     setText(next)
     setResult(null)
   }
-  const upload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    // PDF, Word o Markdown: la IA saca las reglas; un .toml se carga tal cual
-    if (canImport && isDocument(file.name)) return importRules.mutate({ file, extra: { url, branch } })
-    if (file.size > MAX_BYTES) return toast(`El archivo pesa más de ${MAX_BYTES / 1024} KB`, { tone: 'err' })
-    update(await file.text())
-    setNotice(null)
+  // Solo PDF o Word: la IA saca las reglas para que se revisen aquí
+  const upload = (file: File) => {
+    if (!isDocument(file.name)) return toast(INVALID_DOCUMENT, { tone: 'err' })
+    if (!canImport) return toast(NO_AI_FOR_DOCUMENTS, { tone: 'err' })
+    importRules.mutate({ file, extra: { url, branch } })
   }
   const use = () =>
     check.mutate(text, {
@@ -98,8 +93,11 @@ function RulesModal({ url, branch, initial, title, canImport, imported, onUse, o
         </div>
         <p className="text-sm text-slate-500 mb-3">
           Se guardan en el proyecto (cargadas en la app) al iniciar el análisis y se usan mientras el repositorio no tenga un {RULES_FILENAME} válido. Descárgalas para subirlas al repo.
-          {canImport && ' También puedes subir el documento de requisitos (PDF, Word o Markdown) y la IA saca las reglas.'}
+          {canImport && ' También puedes subir el documento de requisitos (PDF o Word) y la IA saca las reglas.'}
         </p>
+        <div className="mb-3">
+          <DocumentDropzone onFile={upload} busy={importRules.isPending} />
+        </div>
         {importRules.isPending && (
           <p className="mb-3 flex items-center gap-2 text-sm text-slate-500">
             <Spinner className="w-4 h-4" />
@@ -128,18 +126,6 @@ function RulesModal({ url, branch, initial, title, canImport, imported, onUse, o
             <Icon name="download" className="w-4 h-4" />
             Descargar para el repo
           </Button>
-          <Button variant="ghost" onClick={() => fileInput.current?.click()} disabled={importRules.isPending}>
-            <Icon name="file" className="w-4 h-4" />
-            {canImport ? 'Subir archivo o documento' : 'Subir archivo'}
-          </Button>
-          <input
-            ref={fileInput}
-            type="file"
-            accept={canImport ? ['.toml', ...DOCUMENT_EXTENSIONS].join(',') : '.toml,text/plain'}
-            className="hidden"
-            aria-label="Archivo de reglas"
-            onChange={(e) => void upload(e)}
-          />
         </div>
       </div>
     </Modal>

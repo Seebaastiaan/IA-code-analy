@@ -18,8 +18,17 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   archivo y hacer commit). El análisis normal (pytest, cobertura, pip-audit) trabaja desde la carpeta del código si está en
   una subcarpeta (`backend/`).
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
+- Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
+  de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.
+- Subir el documento de requisitos arrastrándolo o eligiéndolo, con aviso de «Tipo de archivo no válido»; la tabla de
+  aprobación muestra de qué capítulo y página (u hoja) salió cada regla y la ayuda explica cómo escribir un patrón (regex).
 
 ### Cambiado
+- Los mensajes de los hallazgos de Ruff y Bandit salen en español (`app/analyses/mensajes.py`); lo que no está en el
+  catálogo conserva el original.
+- Las reglas solo se importan de documentos PDF y Word (.docx); ya no de Markdown, texto ni .toml. Los PDF y Word del
+  repositorio ahora sí se detectan en la copia de trabajo (antes solo se veían los de texto).
+- Comparativa: los selectores se llaman «Base A» y «Base B». La IA ya no repite el título como descripción de una regla.
 - `scores` y `weights` del API traen `neg` (puede ser `null` / 0).
 - El sandbox instala también `[project].dependencies` de `pyproject.toml` y las librerías de pruebas de reglas; la red va
   bloqueada en las pruebas de reglas.

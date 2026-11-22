@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from app.analyses import reglas
 from app.analyses.reglas_store import RulesStore
+from app.analyses.workspace import Workspace
+from app.analysis.clone import clone_dir, remove_tree
 from app.analysis.jobs import Job, JobManager, jobs, now_iso
 from app.analysis.pipeline import ALL_ANALYZERS, CATEGORY_ANALYZERS
 from app.assistant.llm import GROQ_LABEL, model_label
@@ -205,6 +207,31 @@ async def reanalyze(repo_id: str, user_id: UserId, conn: Db, jobs: Jobs, setting
     last = conn.execute("SELECT analyzers FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
     analyzers = json.loads(last["analyzers"] or "[]") if last else []
     return JobStarted(job_id=_start(conn, jobs, settings, user_id, repo["url"], repo["branch"], analyzers=analyzers).id)
+
+
+@router.delete("/api/repos/{repo_id}", status_code=204)
+def delete_repo(repo_id: str, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> Response:
+    """
+    Quita un repositorio del equipo con todo lo suyo: análisis, hallazgos, reglas cargadas, arnés, pruebas, enlaces
+    para compartir, la copia de trabajo y los respaldos del editor. No toca el repositorio de GitHub. Con un análisis
+    en curso responde 409: hay que esperar o cancelarlo.
+    """
+    repo = conn.execute("SELECT id FROM repos WHERE id = ? AND team_id = ?", (repo_id, team_id_of(conn, user_id))).fetchone()
+    if repo is None:
+        raise ApiError(404, "not_found", "Repositorio no encontrado")
+    if jobs.running_for_repo(conn, repo_id):
+        raise ApiError(409, "analysis_running", "Este repositorio tiene un análisis en curso: espera a que termine o cancélalo antes de eliminarlo")
+    # reports, findings, shares, reglas, arnés y pruebas se van en cascada con la fila del repo
+    conn.execute("DELETE FROM jobs WHERE repo_id = ?", (repo_id,))
+    conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
+    conn.commit()
+    jobs.forget_repo(repo_id)
+    for folder in (clone_dir(settings, repo_id), Workspace(settings, repo_id).backup_root):
+        try:
+            remove_tree(folder)
+        except OSError:
+            pass  # una carpeta bloqueada no impide quitar el repo: queda para limpiarla a mano
+    return Response(status_code=204)
 
 
 def sandbox_service(settings: Settings) -> dict:
