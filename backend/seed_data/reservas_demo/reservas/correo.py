@@ -3,10 +3,13 @@
 import logging
 import os
 import smtplib
+from collections import deque
 from email.message import EmailMessage
 
 log = logging.getLogger(__name__)
 REMITENTE = os.getenv("CORREO_REMITENTE", "citas@sereno.example")
+# Los últimos correos enviados, para la bandeja de demostración (/demo/correos)
+BANDEJA: deque[dict] = deque(maxlen=50)
 
 
 def _entregar(mensaje: EmailMessage) -> None:
@@ -27,4 +30,5 @@ def enviar(para: str, asunto: str, cuerpo: str) -> None:
     mensaje["To"] = para
     mensaje["Subject"] = asunto
     mensaje.set_content(cuerpo)
+    BANDEJA.append({"para": para, "asunto": asunto, "cuerpo": cuerpo})
     _entregar(mensaje)

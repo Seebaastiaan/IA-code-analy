@@ -14,6 +14,8 @@ Tiene **4 reglas rotas a propósito**; cuáles son y el resultado esperado está
 | Ruta | Qué es |
 |---|---|
 | `reservas/` | La API (`crear_app` en `app.py`). La hora sale de `reloj.ahora()` y los correos de `correo.enviar()` |
+| `reservas/web/` | La interfaz web (HTML, CSS y JavaScript sin compilar), en `/ui`: reservar, mis citas, agenda, servicios, anticipos y una bandeja con los correos que envió la app |
+| `reservas/datos_demo.py` | Datos de ejemplo opcionales (servicios, profesionales, 4 cuentas y 2 citas) |
 | `docs/Requisitos.pdf` | Documento de requisitos: 2 contradicciones, 1 contradicción falsa (una excepción), 1 regla repetida, 3 dudas y 1 regla de proceso |
 | `tests/reglas/` | Pruebas de las 15 reglas, escritas a mano. `conftest.py` es el arnés: `reloj` (hora fija), `buzon` (correos enviados), `como(rol)`, `crear_cliente`, `cita`, `reservar` |
 | `referencia/reglas_negocio.toml` | Las 15 reglas con las contradicciones y dudas resueltas. Fuera de la raíz a propósito |
@@ -29,6 +31,19 @@ flask --app "reservas.app:crear_app()" run --debug
 ```
 
 Sin `SMTP_HOST` los correos solo se escriben en el log.
+
+### Con interfaz
+
+```bash
+python -m reservas.datos_demo          # opcional: servicios, profesionales y 4 cuentas (clave demo-clave-1234)
+RESERVAS_DEMO=1 flask --app "reservas.app:crear_app()" run --debug
+# abre http://localhost:5000 y entra con admin@sereno.example, recepcion@sereno.example, ana@sereno.example (premium) o luis@sereno.example
+```
+
+Un cliente nuevo se registra desde la pantalla de entrada. Con `RESERVAS_DEMO=1` la sección «Correos (demo)» muestra los
+que la app envió (confirmación, cancelación y recordatorio). **Los 4 errores sembrados siguen en la API**: la interfaz no
+los esconde ni los arregla (p. ej. un cliente puede abrir la cita de otro por la API aunque la pantalla no se lo ofrezca).
+
 
 ## Probarlo en IA voy
 

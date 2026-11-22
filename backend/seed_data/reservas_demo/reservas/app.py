@@ -3,6 +3,8 @@ API de reservas (Flask).
 
     flask --app "reservas.app:crear_app()" crear-admin admin@sereno.example una-clave
     flask --app "reservas.app:crear_app()" run --debug
+
+La interfaz web está en /ui. Con RESERVAS_DEMO=1 también hay una bandeja con los correos que "envió" la app.
 """
 
 import os
@@ -10,14 +12,16 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 import click
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, redirect, request, send_from_directory
 from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
-from reservas import citas, db
+from reservas import citas, correo, db
 from reservas.auth import iniciar_sesion, requiere
 from reservas.errores import Error
 from reservas.modelos import Cita, Profesional, Servicio, Usuario
+
+WEB = os.path.join(os.path.dirname(__file__), "web")
 
 PERSONAL = ("recepcion", "admin")
 TODOS = ("cliente", "recepcion", "admin")
@@ -111,7 +115,7 @@ def crear_app(url: str | None = None) -> Flask:
     @app.post("/login")
     def login():
         d = _cuerpo("email", "clave")
-        return jsonify({"token": iniciar_sesion(g.db, str(d["email"]), str(d["clave"]))})
+        return jsonify(_sesion_json(g.db, iniciar_sesion(g.db, str(d["email"]), str(d["clave"]))))
 
     @app.patch("/clientes/<int:cliente_id>")
     @requiere("admin")
@@ -216,6 +220,26 @@ def crear_app(url: str | None = None) -> Flask:
         devuelto = sum((c.reembolso or 0 for c in g.db.scalars(select(Cita))), Decimal(0))
         return jsonify({"cobrado": str(cobrado), "reembolsado": str(devuelto), "neto": str(cobrado - devuelto)})
 
+    # ───────── Interfaz web y apoyo para demostraciones ─────────
+
+    @app.get("/profesionales")
+    def profesionales():
+        return jsonify([{"id": p.id, "nombre": p.nombre} for p in g.db.scalars(select(Profesional).order_by(Profesional.id))])
+
+    @app.get("/")
+    def inicio():
+        return redirect("/ui/")
+
+    @app.get("/ui/")
+    @app.get("/ui/<path:archivo>")
+    def interfaz(archivo: str = "index.html"):
+        return send_from_directory(WEB, archivo)
+
+    @app.get("/demo/correos")
+    def bandeja():
+        """Solo para demostraciones (RESERVAS_DEMO=1): los últimos correos que envió la app, del más nuevo al más viejo."""
+        return jsonify(list(reversed(correo.BANDEJA)) if os.getenv("RESERVAS_DEMO") == "1" else [])
+
     @app.cli.command("crear-admin")
     @click.argument("email")
     @click.argument("clave")
@@ -227,3 +251,9 @@ def crear_app(url: str | None = None) -> Flask:
         click.echo(f"Administrador {email} creado")
 
     return app
+
+
+def _sesion_json(sesion, token: str) -> dict:
+    """Lo que devuelve el inicio de sesión: el token y quién es (la interfaz lo usa para mostrar lo que su rol puede hacer)."""
+    u = sesion.scalar(select(Usuario).where(Usuario.token == token))
+    return {"token": token, "nombre": u.nombre, "rol": u.rol, "premium": u.premium, "id": u.id}

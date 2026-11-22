@@ -23,7 +23,7 @@ sandbox: **11 cumple · 4 no cumple · 0 pruebas que fallan al preparar**.
 | RN-010 | Correo de confirmación | cumple | — |
 | RN-011 | Correo de cancelación con reembolso | cumple | — |
 | RN-012 | Recordatorio único | cumple | — |
-| RN-013 | Un cliente solo ve sus citas | **no cumple** | `GET /citas/<id>` no revisa el dueño ([app.py:190](../reservas/app.py#L190)); cancelar y la lista sí |
+| RN-013 | Un cliente solo ve sus citas | **no cumple** | `GET /citas/<id>` no revisa el dueño ([app.py:194](../reservas/app.py#L194)); cancelar y la lista sí |
 | RN-014 | Bloqueo tras 3 intentos fallidos | **no cumple** | `intentos_fallidos > INTENTOS_MAXIMOS` ([auth.py:29](../reservas/auth.py#L29)): bloquea en el 4.º intento, y tras 3 fallos se entra con la clave correcta |
 | RN-015 | Permisos por rol | cumple | 24 celdas (8 acciones × 3 roles) |
 

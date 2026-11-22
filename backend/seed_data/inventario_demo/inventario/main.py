@@ -4,13 +4,18 @@ API del inventario.
     uvicorn inventario.main:app --reload
 
 Al arrancar crea las tablas y, si no hay usuarios, uno por rol; sus tokens se imprimen en la terminal.
+La interfaz web está en /ui. Con INVENTARIO_DEMO=1 la pantalla de entrada deja elegir un rol sin copiar tokens.
 """
 
+import os
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from inventario.auth import ROLES
@@ -43,6 +48,24 @@ app.include_router(productos)
 app.include_router(operaciones)
 
 
+WEB = Path(__file__).parent / "web"
+app.mount("/ui", StaticFiles(directory=WEB, html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+def inicio() -> RedirectResponse:
+    return RedirectResponse("/ui/")
+
+
 @app.get("/salud")
 def salud() -> dict:
     return {"ok": True}
+
+
+@app.get("/demo/usuarios", include_in_schema=False)
+def usuarios_demo() -> list[dict]:
+    """Solo para demostraciones (INVENTARIO_DEMO=1): los usuarios con su token, para entrar a la interfaz sin copiarlos."""
+    if os.getenv("INVENTARIO_DEMO") != "1":
+        return []
+    with SessionLocal() as db:
+        return [{"nombre": u.nombre, "rol": u.rol, "token": u.token} for u in db.scalars(select(Usuario).order_by(Usuario.id))]

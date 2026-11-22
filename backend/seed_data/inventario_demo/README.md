@@ -13,6 +13,8 @@ de negocio rotas a propósito**; cuáles son y el resultado esperado están en
 | Ruta | Qué es |
 |---|---|
 | `inventario/` | La API |
+| `inventario/web/` | La interfaz web (HTML, CSS y JavaScript sin compilar), en `/ui`. Cada rol ve solo lo que la matriz de permisos del documento le deja hacer |
+| `inventario/datos_demo.py` | Datos de ejemplo opcionales (4 productos con compras, una receta y una merma) |
 | `docs/Requerimientos.docx` | Documento de requisitos del proyecto, con 15 reglas, 1 de proceso y 7 ambigüedades |
 | `tests/reglas/` | Pruebas de las 18 reglas, escritas a mano, con `@pytest.mark.regla("RN-###")`. `conftest.py` es el arnés (fixtures `como`, `crear_producto`, `comprar`, `vender`) |
 | `referencia/reglas_negocio.toml` | Las 18 reglas como las aprobaría el equipo. Fuera de la raíz a propósito, para que IA voy ofrezca sacarlas del documento |
@@ -25,6 +27,18 @@ pip install -r requirements.txt pytest
 python -m pytest                       # 77 pruebas: 7 fallan a propósito (5 reglas)
 uvicorn inventario.main:app --reload   # imprime un token por rol al crear la base
 ```
+
+### Con interfaz
+
+```bash
+python -m inventario.datos_demo        # opcional: catálogo de ejemplo
+INVENTARIO_DEMO=1 uvicorn inventario.main:app --reload
+# abre http://localhost:8000 y elige un rol (gerente, almacenista, cajero o barista)
+```
+
+Sin `INVENTARIO_DEMO=1` la pantalla de entrada pide el token de un usuario. La interfaz sigue lo que dice el documento
+(p. ej. el cajero no ve los precios editables), pero **los 5 errores sembrados siguen en la API**: el cajero no ve el
+botón para cambiar precios, pero la API se lo permite (RN-017). La interfaz no los esconde ni los arregla.
 
 ## Probarlo en IA voy
 
