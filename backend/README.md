@@ -51,7 +51,7 @@ En el frontend, `frontend/.env.development` con `VITE_USE_MOCKS=false`: Vite red
 | `SECRET_KEY` / `TOKEN_ENCRYPTION_KEY` | Opcionales. Vacías, el backend las genera la primera vez y las guarda en `data/secrets.json` (no se sube a git). Si ese archivo se borra, las sesiones vencen y hay que volver a iniciar sesión. |
 | `JOB_STEP_SECONDS` | Pausa de los pasos que no esperan al sandbox en la terminal del frontend (por defecto 0.9 s). |
 | `SANDBOX` | Dónde corren pytest, coverage y pip-audit: `off` (simulados, por defecto en código), `wsl` o `docker`. Ver [Sandbox](#sandbox). |
-| `SANDBOX_WSL_DISTRO` / `SANDBOX_DOCKER_IMAGE` / `SANDBOX_TIMEOUT_S` | Opcionales. Por defecto `Ubuntu-24.04`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` y 1200 s por análisis. |
+| `SANDBOX_WSL_DISTRO` / `SANDBOX_DOCKER_IMAGE` / `SANDBOX_TIMEOUT_S` | Opcionales. Por defecto `Ubuntu-24.04`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` y 1200 s por análisis. Para repos ajenos con dependencias que se compilan usa `ghcr.io/astral-sh/uv:python3.12-bookworm` (trae `gcc`, 1.5 GB). |
 | `GEMINI_API_KEY` | Asistente IA (respuestas y embeddings) e importar reglas desde un documento: https://aistudio.google.com/apikey. Sin ella el asistente y la importación responden `503 llm_not_configured`. |
 | `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Opcionales. Por defecto `gemini-3.5-flash-lite` y, si responde 429/503, `gemini-3.5-flash,gemini-3.1-flash-lite`. |
 | `GROQ_API_KEY` | Opcional. Último respaldo (Llama 3.3), independiente de Google: https://console.groq.com/keys |

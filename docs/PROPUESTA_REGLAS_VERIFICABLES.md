@@ -434,6 +434,44 @@ el arnés pase.
   - `POST …/reglas/arnes/repo`, `…/arnes/humo` y `…/arnes/aprobar`.
 - **Frontend:** tarjeta «Mapa y arnés de pruebas» en Configuración → Reglas de negocio.
 
+### 7.6 Repos públicos con código ajeno (fase 3, Docker)
+
+Se probó el flujo mapa → arnés con Gemini → prueba de humo en **Docker** (`SANDBOX=docker`, el aislamiento que piden
+los repos ajenos) con 5 repos públicos, uno o más por framework. Solo se analizaron con la URL; el código no se copió.
+
+| Repo (commit) | Framework | Mapa | Arnés | Prueba de humo |
+|---|---|---|---|---|
+| Ad-pkh/Clinic-Management-API (`8466a04`) | FastAPI | 22 endpoints, 4 modelos | válido a la 2.ª | **pasa** (4 comprobaciones) |
+| miguelgrinberg/microblog (`a975ef6`) | Flask | 35 endpoints, 5 modelos | válido | **pasa** (7 comprobaciones; necesita la imagen con compilador) |
+| NewGenesis04/InventoryFlow (`b735d65`) | FastAPI | 37 endpoints, 4 roles | válido | falla: `email-validator` no está en sus dependencias |
+| eugen-goebel/inventory-management (`8f44513`) | FastAPI | 20 endpoints, 3 roles | 0 de 3 válidos | no llega a correr |
+| MSKose/django-stock-app (`cf6f7af`) | Django/DRF | 31 endpoints, 5 modelos | válido | falla: sus dependencias de 2022 no instalan en Python 3.12 |
+
+**Resultado:** 2 de 5 pasan de punta a punta (una por framework: FastAPI y Flask). El mapa fue correcto en los 5.
+Lo que salió y cómo se resolvió:
+
+- **Faltaba `import pytest` en un arnés** (microblog, `NameError`). Ahora IA voy agrega los imports que el arnés usa sin
+  importar (`pytest`, `Decimal`, `datetime`…), como ya hacía con las pruebas.
+- **El arnés no sabía las variables de entorno** (InventoryFlow lee `DB_URL`; Gemini puso `DATABASE_URL`). El prompt
+  ahora incluye el `.env.example` (solo la plantilla; el `.env` nunca se lee) y pide usar sus nombres exactos con
+  `os.environ.setdefault(...)` antes de importar la app. Con eso el arnés pasó a fallar por otra cosa.
+- **Dependencias en `pyproject.toml` que `requirements.txt` no trae** (InventoryFlow: `python-dotenv`). El sandbox
+  instala también las de `[project].dependencies`.
+- **La imagen `-slim` de Docker no trae compilador.** Con dependencias antiguas que se compilan (microblog), la
+  instalación falla. Con `SANDBOX_DOCKER_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm` (1.5 GB, con `gcc`) pasa. El
+  valor por defecto sigue siendo la `-slim` (261 MB): para repos ajenos conviene la completa.
+
+Límites que **no** se resolvieron (quedan como casos de §10.2):
+
+- **Código dentro de una subcarpeta** (`backend/`): el validador y el sandbox tratan la raíz del repo como raíz del
+  código, así que `from agents.x import …` parece un módulo inexistente. Es el caso más común en repos con frontend y
+  backend juntos; hace falta una «raíz del código» detectada (carpeta con `requirements.txt`/`pyproject.toml`) en el
+  mapa, el validador y el sandbox.
+- **Dependencias que el repo no declara** o **fijadas a versiones que no instalan** en Python 3.12 (django-stock-app):
+  el arnés no puede arreglarlo; se avisa con el error de la instalación.
+- Gemini 3.5 Flash Lite a veces devuelve un arnés con error de sintaxis o con imports inventados (4 de los 8 primeros
+  intentos de esta prueba; en eugen-goebel, 3 de 3). En la app se vuelve a pedir con «Proponer con IA».
+
 ## 8. Evidencia de apoyo (IA, no cuenta)
 
 Para cada regla, la vista Reglas muestra **dónde parece estar implementada**: el índice RAG busca con el texto de
@@ -531,11 +569,11 @@ corren en el sandbox.
 | Repo | Stack | Para qué sirve | Estado |
 |---|---|---|---|
 | [fastapi/full-stack-fastapi-template](https://github.com/fastapi/full-stack-fastapi-template) | FastAPI + SQLModel + pytest, superusuario y usuarios normales | Probar el arnés con autenticación JWT real y un `conftest.py` existente que se debe reutilizar | Conocido y mantenido; necesita PostgreSQL (caso §10.2) |
-| [eugen-goebel/inventory-management](https://github.com/eugen-goebel/inventory-management) | FastAPI + SQLite + pytest, movimientos de stock con historial | El más parecido al caso de §3 con código ajeno | Por revisar |
+| [eugen-goebel/inventory-management](https://github.com/eugen-goebel/inventory-management) | FastAPI + SQLite + pytest, movimientos de stock con historial | El más parecido al caso de §3 con código ajeno | **Probado** (`8f44513`, MIT): mapa bien (20 endpoints, 3 roles); arnés **no** corre: el código está en `backend/` y Gemini importa `agents.…`, que el validador no ve (§7.6) |
 | [Denxhinjo/IMS_Clean](https://github.com/Denxhinjo/IMS_Clean) | FastAPI + SQLAlchemy 2 + Alembic, endpoints de movimientos de stock | Inventario con PostgreSQL: probar los avisos de §10.2 | Por revisar |
-| [NewGenesis04/InventoryFlow](https://github.com/NewGenesis04/InventoryFlow) | FastAPI + SQLAlchemy async | Probar el arnés async | Por revisar |
-| [MSKose/django-stock-app](https://github.com/MSKose/django-stock-app) | Django REST Framework | Arnés de Django / DRF | Por revisar |
-| [Ad-pkh/Clinic-Management-API](https://github.com/Ad-pkh/Clinic-Management-API) | FastAPI + pytest + SQLite en memoria; citas con conflictos de horario | Servicio con clientes: «no hay dos citas a la misma hora» | Por revisar |
+| [NewGenesis04/InventoryFlow](https://github.com/NewGenesis04/InventoryFlow) | FastAPI + SQLAlchemy async | Probar el arnés async | **Probado** (`b735d65`, MIT): mapa bien (37 endpoints, 4 roles); arnés válido, pero la prueba de humo falla: el repo no declara `email-validator` (§7.6) |
+| [MSKose/django-stock-app](https://github.com/MSKose/django-stock-app) | Django REST Framework | Arnés de Django / DRF | **Probado** (`cf6f7af`, sin licencia): mapa bien (31 endpoints DRF); el arnés es válido, pero sus dependencias de 2022 no se instalan en Python 3.12 (`ruamel-yaml-clib==0.2.6`) (§7.6) |
+| [Ad-pkh/Clinic-Management-API](https://github.com/Ad-pkh/Clinic-Management-API) | FastAPI + pytest + SQLite en memoria; citas con conflictos de horario | Servicio con clientes: «no hay dos citas a la misma hora» | **Probado** (`8466a04`, sin licencia): arnés válido a la segunda y **prueba de humo pasa** (4 comprobaciones, FastAPI, Docker) |
 | [thunderbird/appointment](https://github.com/thunderbird/appointment) | FastAPI + SQLAlchemy + pytest (backend de citas real) | Servicio con clientes grande y real; reglas de agenda y correos | Conocido; probablemente demasiado grande para el sandbox |
 | [Pytest-with-Eric/pytest-fastapi-crud-example](https://github.com/Pytest-with-Eric/pytest-fastapi-crud-example) | FastAPI + SQLite + pytest | Ya está en el conjunto estándar: CRUD sin roles, para el caso mínimo | Ya usado |
 | [inventree/InvenTree](https://github.com/inventree/InvenTree) | Django, inventario de producción | Prueba de escala: cuánto tarda el mapa y si la IA se pierde en un repo grande | Conocido; solo como prueba de límites |
@@ -600,7 +638,7 @@ resultado se guarda por hash de la regla y commit; el análisis **nunca** llama 
 |---|---|---|
 | **1 · Importador v2** (**hecho**; la tabla de aprobación está en Configuración → Reglas de negocio) | Formato v2, reglas atómicas, `tipo`, escenarios, `estado` y `dudas`; tabla de aprobación | Con el `.docx` del inventario: 18 reglas, ≥ 5 de las 7 dudas; un TOML v1 sigue validando |
 | **2 · Repos demo** (**hecho**) | `inventario_demo` y `reservas_demo` con sus documentos, pruebas manuales de referencia y tabla de resultados esperados | Con las pruebas **escritas a mano** y el plugin actual, el reporte da 13/5 (inventario) y 11/4 (reservas) ([test_demos_reglas.py](../backend/tests/test_demos_reglas.py)). Es la referencia para todo lo que sigue |
-| **3 · Mapa y arnés** (**hecho**, falta la parte de repos públicos) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno. **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en esos repos quedan pendientes (código ajeno: correrlo en Docker) |
+| **3 · Mapa y arnés** (**hecho**; repos públicos en §7.6) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno (§7.6). **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en repos públicos se probaron en Docker (§7.6): pasan FastAPI y Flask; Django no instala sus dependencias de 2022 |
 | **4 · Pruebas generadas** (**hecho**, §6.6) | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo`. **Resultado** con Gemini 3.5 Flash Lite: 17 de 18 sin editar, 5 de 5 rotas detectadas, 0 falsos positivos tras aprobar y 1 prueba rota (6 %). En `reservas_demo`: 15 de 15 y 4 de 4 rotas detectadas |
 | **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (Gemini real y sandbox WSL): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más; la evidencia señala 7 de 9 errores sembrados; de las pruebas buenas, 16 salen fuertes, 6 parciales (huecos reales) y 1 débil (falsa alarma) |
 | **6 · Score** (**hecho**, §9) | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |

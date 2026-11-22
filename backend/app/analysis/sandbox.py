@@ -77,7 +77,12 @@ if [ -d "$OUT/overlay" ]; then cp -R "$OUT/overlay/." "$WORK/"; fi
 MODE="$(cat "$OUT/mode" 2>/dev/null || echo analisis)"
 
 phase install 600 bash -c '
-  if [ -f requirements.txt ]; then uv pip install -r requirements.txt || exit $?
+  if [ -f requirements.txt ]; then
+    uv pip install -r requirements.txt || exit $?
+    # Algunos repos declaran en pyproject.toml lo que requirements.txt no trae (InventoryFlow: python-dotenv)
+    if [ -f pyproject.toml ] && grep -qE "^dependencies[[:space:]]*=" pyproject.toml; then
+      uv pip install -q -r pyproject.toml || echo "aviso: no se pudieron instalar las dependencias de pyproject.toml"
+    fi
   elif [ -f pyproject.toml ] || [ -f setup.py ]; then uv pip install -e . || exit $?
   else echo "Sin requirements.txt ni pyproject.toml: no hay dependencias que instalar"
   fi

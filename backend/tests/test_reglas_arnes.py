@@ -441,3 +441,14 @@ def test_junit_con_entidades_no_se_parsea():
     bomb = '<?xml version="1.0"?><!DOCTYPE t [<!ENTITY a "aaaa">]><testsuite><testcase name="test_humo_api"/></testsuite>'
     result = arnes.read_smoke(bomb, {**OK, "tests": (0, "")})
     assert result.status == "fallo" and result.tests == []
+
+
+def test_agrega_el_import_que_el_arnes_olvido():
+    # Pasó con un arnés de Gemini sobre microblog: `@pytest.fixture` sin `import pytest` (NameError al cargarlo)
+    code = "@pytest.fixture\ndef api():\n    return Decimal('1')\n"
+    fixed = arnes.add_missing_imports(code)
+    assert fixed.startswith("from decimal import Decimal\nimport pytest\n")
+    # Lo que ya está importado o definido no se duplica
+    ok = "import pytest\n\n@pytest.fixture\ndef api():\n    return 1\n"
+    assert arnes.add_missing_imports(ok) == ok
+    assert arnes.add_missing_imports("def roto(:") == "def roto(:"
