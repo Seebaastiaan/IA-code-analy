@@ -406,3 +406,12 @@ test('reglas de negocio en el score: tablero y reporte muestran su nota aunque p
   await openReport(page)
   await expect(page.getByText(/Reglas de negocio:/)).toContainText('no cuenta en el score')
 })
+
+test('reglas del repositorio: se aprueban en la copia del proyecto y avisa que falta el commit', async ({ page }) => {
+  await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await expect(page.getByText(/Son las reglas del repositorio: lo que cambies se guarda en su copia, no en GitHub/)).toBeVisible()
+  await page.getByLabel('Elegir RN-001').check()
+  await page.getByRole('button', { name: 'Volver a borrador' }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'Guardado en la copia del proyecto' })).toBeVisible()
+  await expect(page.getByText(/1 de \d+ reglas son borrador/)).toBeVisible()
+})

@@ -169,7 +169,7 @@ estado      = "aprobada"
 | `tipo` | no (se infiere al importar) | **nuevo** | Elige la plantilla de la prueba (§6.3). `proceso` = fuera del código |
 | `estado` | no (`aprobada` si falta, por compatibilidad con v1) | **nuevo** | Lo importado entra como `borrador` |
 | `fuente` | no | **nuevo** | Documento, página o sección |
-| `dudas` | no | **nuevo** | Una regla con dudas abiertas no se puede aprobar desde la app |
+| `dudas` | no | **nuevo** | Una regla con dudas abiertas no se puede aprobar desde la app. Con las reglas del repositorio, la app cambia `estado` y `dudas` en la copia de trabajo (con respaldo, como el editor) y avisa que hay que descargar el archivo y hacer commit: un análisis nuevo vuelve a clonar y el archivo del repo manda otra vez |
 | `[[regla.escenario]]` | no | **nuevo** | `dado`, `cuando`, `entonces`; máximo 10 por regla |
 | `criterio` | no | obsoleto | Se lee como un escenario |
 | `historia`, `responsable` | no | igual | — |
@@ -461,9 +461,11 @@ Lo que salió y cómo se resolvió:
   no existe, porque el mapa nombraba los módulos desde la raíz del repo (`backend.agents…`). Ahora el mapa detecta la
   **raíz del código** (`mapa.source_root`): si la raíz no tiene `requirements.txt`, `pyproject.toml` ni parecidos y
   exactamente una carpeta de primer nivel sí, los módulos se nombran desde ahí; las rutas del mapa siguen siendo las del
-  repo. El sandbox, en los modos de reglas (`arnes`, `pruebas`, `fuerza`), instala y corre pytest desde esa carpeta (el
-  análisis normal no cambia), y la prueba de fuerza sigue escribiendo los mutantes con rutas del repo
-  (`IA_VOY_RAIZ`). Las dependencias y el `.env.example` también se leen de ahí.
+  repo. El sandbox, en todos sus modos (también el análisis normal de pytest y cobertura), instala y corre desde esa carpeta
+  y escribe cuál fue en `subdir`; los archivos de junit, coverage y reglas.json salen con la carpeta antepuesta
+  (`backend/tests/…`), así que los hallazgos, la cobertura y los enlaces al editor usan rutas del repo. La prueba de
+  fuerza sigue escribiendo los mutantes con rutas del repo (`IA_VOY_RAIZ`). Medido con eugen-goebel en Docker: el
+  análisis normal pasó de no poder importar nada a 105 pruebas que pasan y 30 archivos con cobertura. Las dependencias y el `.env.example` también se leen de ahí.
 - **Nombres sin importar** (`os`, `Callable`: `NameError` al cargar el arnés, en Clinic-Management-API y microblog). Se
   agregan los imports conocidos y la validación avisa de los demás (`undefined_names`), así que la ronda de corrección
   los recibe.
@@ -480,8 +482,8 @@ Límites que **no** se resolvieron (quedan como casos de §10.2):
 
 - **Más de una carpeta con código** (`api/` y `worker/`): se elige la única que declara un framework web (FastAPI, Flask
   o Django) en sus dependencias; si siguen siendo varias, ninguna y se trabaja desde la raíz.
-- **El análisis normal** (pytest y cobertura del repo, modo `analisis`) sigue instalando solo lo de la raíz: los
-  repos con el código en una subcarpeta siguen mostrando sus pruebas como fallidas al importar.
+- **Pruebas en otra carpeta** (`tests/` en la raíz y el código en `backend/`): el análisis corre pytest desde la carpeta
+  del código, así que no ve las pruebas de la raíz.
 - **Dependencias que el repo no declara** o **fijadas a versiones que no instalan** en Python 3.12 (django-stock-app):
   el arnés no puede arreglarlo; se avisa con el error de la instalación.
 - Gemini 3.5 Flash Lite a veces devuelve un arnés con error de sintaxis o con imports inventados (4 de los 8 primeros
@@ -539,7 +541,7 @@ en [CRITERIOS_DE_ANALISIS.md](CRITERIOS_DE_ANALISIS.md) §2.
 | Caso | Qué pasa |
 |---|---|
 | Paquete de dominio sin API (solo funciones o clases) | Se generan pruebas unitarias que llaman a las funciones; los tipos `permisos` e `integracion` quedan «sin verificar» |
-| Código en subcarpeta (`backend/`, `src/`) | Funciona para las pruebas de reglas (§7.6): se detecta la carpeta con `requirements.txt`/`pyproject.toml` y se instala y corre desde ahí. El análisis normal sigue instalando solo las de la raíz ([repos-de-prueba.md](repos-de-prueba.md)) |
+| Código en subcarpeta (`backend/`, `src/`) | Funciona (§7.6): se detecta la carpeta con `requirements.txt`/`pyproject.toml` (o la única que declara un framework web) y el análisis, las pruebas de reglas y el mapa trabajan desde ahí. No ve las pruebas que estén fuera de esa carpeta |
 | PostgreSQL con funciones propias (JSONB, `ARRAY`, triggers, `CHECK` solo en migraciones SQL) | En SQLite pueden fallar o comportarse distinto → prueba rota con el motivo. A futuro: un servicio PostgreSQL efímero en Docker |
 | SQLAlchemy async | Funciona con `TestClient`; el arnés usa `aiosqlite` |
 | GraphQL (Strawberry, Graphene) | El cliente envía consultas; el mapa no lee el esquema, así que la IA recibe menos contexto |

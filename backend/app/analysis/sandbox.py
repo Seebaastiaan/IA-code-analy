@@ -74,10 +74,10 @@ if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit tests coverage; e
 export VIRTUAL_ENV="$WORK/.venv"; export PATH="$VIRTUAL_ENV/bin:$PATH"
 MODE="$(cat "$OUT/mode" 2>/dev/null || echo analisis)"
 # Código en una subcarpeta (un repo con frontend/ y backend/): si la raíz no tiene requirements.txt ni parecidos y
-# exactamente UNA carpeta de primer nivel sí, las pruebas de reglas se instalan y corren desde ahí (como mapa.source_root).
-# El análisis normal (modo analisis) no cambia.
+# exactamente UNA carpeta de primer nivel sí (o la única que declara un framework web), todo se instala y corre desde ahí
+# (como mapa.source_root). Los resultados salen con rutas de esa carpeta: Python les antepone `subdir` (SandboxOutput).
 SUB=""
-if [ "$MODE" != analisis ] && ! ls requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile > /dev/null 2>&1; then
+if ! ls requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile > /dev/null 2>&1; then
   CANDS="$(for d in */; do d="${d%/}"; for m in requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile; do [ -f "$d/$m" ] && { echo "$d"; break; }; done; done)"
   # Varias (api/ y worker/): la única que declara un framework web (como mapa.source_root)
   if [ "$(printf "%s" "$CANDS" | grep -c .)" -gt 1 ]; then
@@ -87,7 +87,8 @@ if [ "$MODE" != analisis ] && ! ls requirements.txt pyproject.toml setup.py setu
 fi
 # Archivos de IA voy sobre la copia (el arnés de reglas de negocio y su prueba de humo); el clon no se toca
 if [ -d "$OUT/overlay" ]; then mkdir -p "$WORK/$SUB"; cp -R "$OUT/overlay/." "$WORK/${SUB:+$SUB/}"; fi
-[ -n "$SUB" ] && echo "código en $SUB/" > "$OUT/subdir.txt" && cd "$WORK/$SUB"
+printf "%s" "$SUB" > "$OUT/subdir"
+[ -n "$SUB" ] && cd "$WORK/$SUB"
 # La prueba de fuerza escribe los mutantes con rutas desde la raíz del repo
 export IA_VOY_RAIZ="$WORK"
 
@@ -197,6 +198,8 @@ class SandboxOutput:
     reglas_app: dict | None = None
     # Prueba de fuerza (modo `fuerza`): resultado de cada mutante
     fuerza: dict | None = None
+    # Carpeta del repo donde corrió todo ("" = la raíz): los archivos de junit, coverage y reglas son relativos a ella
+    subdir: str = ""
 
     @property
     def usable(self) -> bool:
@@ -300,6 +303,7 @@ class SandboxRun:
             reglas=_load_json(self.out / "reglas.json"),
             reglas_app=_load_json(self.out / "reglas_app.json"),
             fuerza=_load_json(self.out / "fuerza.json"),
+            subdir=(self.out / "subdir").read_text(encoding="utf-8").strip().strip("/") if (self.out / "subdir").is_file() else "",
         )
 
     def _kill_inside(self) -> None:
@@ -403,7 +407,20 @@ class TestRun:
     failures: list[TestCase] = field(default_factory=list)
 
 
-def parse_junit(xml: str | None) -> TestRun:
+def _under(prefix: str, path: str) -> str:
+    """Ruta del repo a partir de una relativa a la carpeta del código (`backend/` + `tests/x.py`)."""
+    return f"{prefix}/{path}" if prefix and path and not path.startswith("/") else path
+
+
+def rebase_tests(data: dict | None, prefix: str) -> dict | None:
+    """El reglas.json del plugin con los archivos y nodeids desde la raíz del repo (si el código está en una subcarpeta)."""
+    if not prefix or not isinstance(data, dict) or not isinstance(data.get("tests"), list):
+        return data
+    tests = [{**t, "file": _under(prefix, str(t.get("file") or "")), "nodeid": _under(prefix, str(t.get("nodeid") or ""))} if isinstance(t, dict) else t for t in data["tests"]]
+    return {**data, "tests": tests}
+
+
+def parse_junit(xml: str | None, prefix: str = "") -> TestRun:
     run = TestRun()
     if not xml:
         return run
@@ -425,19 +442,19 @@ def parse_junit(xml: str | None) -> TestRun:
                 file = (case.get("classname") or "").replace(".", "/") + ".py"
             line = int(case.get("line") or -1) + 1
             message = (bad.get("message") or bad.text or "").strip().splitlines()
-            run.failures.append(TestCase(case.get("name") or "?", file, max(line, 1), message[0][:300] if message else "", bad.tag))
+            run.failures.append(TestCase(case.get("name") or "?", _under(prefix, file), max(line, 1), message[0][:300] if message else "", bad.tag))
         else:
             run.passed += 1
     return run
 
 
-def parse_coverage(data: dict | None) -> dict[str, tuple[int, int]]:
+def parse_coverage(data: dict | None, prefix: str = "") -> dict[str, tuple[int, int]]:
     """{archivo: (líneas ejecutadas, sentencias)} del coverage.json."""
     files = (data or {}).get("files") or {}
     out = {}
     for path, info in files.items():
         summary = info.get("summary") or {}
-        out[path.replace("\\", "/").removeprefix("./")] = (int(summary.get("covered_lines", 0)), int(summary.get("num_statements", 0)))
+        out[_under(prefix, path.replace("\\", "/").removeprefix("./"))] = (int(summary.get("covered_lines", 0)), int(summary.get("num_statements", 0)))
     return out
 
 

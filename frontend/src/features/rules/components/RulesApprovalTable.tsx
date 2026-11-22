@@ -2,8 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, Icon, SeverityBadge, Spinner } from '@/shared/ui'
-import { projectRulesQuery, rulesApi } from '../api/rules.api'
+import { projectRulesQuery, RULES_FILENAME, rulesApi } from '../api/rules.api'
 import type { ProjectRules, RuleApproval, RulePreview } from '../types'
+import { saveText } from '../utils/rules'
 
 const KIND_LABEL: Record<string, string> = {
   datos: 'Datos',
@@ -95,8 +96,9 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
   const queryClient = useQueryClient()
   const source = data.active === 'repo' ? data.repo : data.uploaded
   const rules = source?.valid ? source.rules : []
-  // Con las reglas del repo, el archivo manda: el estado y las dudas se cambian ahí
-  const editable = data.active === 'app'
+  // Las del repo se editan en su copia de trabajo (no en GitHub): hay que descargar el archivo y hacer commit
+  const fromRepo = data.active === 'repo'
+  const editable = Boolean(source?.valid)
   const [filter, setFilter] = useState<Filter>('todas')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
@@ -149,7 +151,8 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
         {drafts.length === 0
           ? `Las ${rules.length} reglas están aprobadas.`
           : `${drafts.length} de ${rules.length} reglas son borrador: revísalas, resuelve sus dudas y apruébalas. Solo las aprobadas se verifican.`}
-        {!editable && ' Estas reglas son las del repositorio: cambia `estado` y `dudas` en su archivo.'}
+        {fromRepo && editable && ' Son las reglas del repositorio: lo que cambies se guarda en su copia, no en GitHub. Descarga el archivo y haz commit.'}
+        {fromRepo && !editable && ' El archivo del repositorio tiene errores: corrígelo para poder aprobar.'}
       </p>
       {messages.length > 0 && (
         <ul role="alert" className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-200 px-3.5 py-2.5 text-sm space-y-0.5">
@@ -189,6 +192,12 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
           <Button variant="ghost" onClick={() => states.mutate({ ids: chosen, status: 'borrador' })} disabled={chosen.length === 0 || busy}>
             Volver a borrador
           </Button>
+          {fromRepo && data.repo && (
+            <Button variant="ghost" onClick={() => saveText(RULES_FILENAME, data.repo?.content ?? '')}>
+              <Icon name="download" className="w-4 h-4" />
+              Descargar para el repo
+            </Button>
+          )}
         </div>
       )}
     </Card>

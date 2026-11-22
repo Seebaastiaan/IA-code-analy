@@ -177,3 +177,24 @@ def test_health_muestra_el_sandbox(client, settings):
     settings.sandbox = "wsl"
     [svc] = [s for s in client.get("/api/health").json()["services"] if s["id"] == "sandbox"]
     assert svc["status"] == "ok" and "WSL2" in svc["name"]
+
+
+def test_codigo_en_subcarpeta_los_resultados_salen_con_rutas_del_repo():
+    # El sandbox corre desde backend/ (SandboxOutput.subdir): junit, coverage y reglas.json traen rutas de esa carpeta
+    run = parse_junit(JUNIT, "backend")
+    assert [(c.file, c.name) for c in run.failures] == [("backend/tests/test_servicio.py", "test_resta"), ("backend/tests/test_servicio.py", "test_db")]
+    assert parse_coverage(COVERAGE, "backend")["backend/app/core/servicio.py"] == (1, 4)
+    assert parse_coverage(COVERAGE)["app/core/servicio.py"] == (1, 4)
+    data = {"version": 2, "tests": [{"nodeid": "tests/test_a.py::test_x", "file": "tests/test_a.py", "line": 3, "rules": ["RN-001"], "outcome": "passed"}]}
+    [t] = sandbox.rebase_tests(data, "backend")["tests"]
+    assert (t["nodeid"], t["file"]) == ("backend/tests/test_a.py::test_x", "backend/tests/test_a.py")
+    assert sandbox.rebase_tests(data, "") is data and sandbox.rebase_tests(None, "backend") is None
+
+
+def test_archivo_de_dependencias_en_la_subcarpeta():
+    from app.analysis.pipeline import _deps_file
+
+    assert _deps_file(["backend/requirements.txt", "README.md"], "backend") == "backend/requirements.txt"
+    assert _deps_file(["backend/pyproject.toml"], "backend") == "backend/pyproject.toml"
+    assert _deps_file(["README.md"], "backend") == "backend/requirements.txt"
+    assert _deps_file(["requirements.txt"]) == "requirements.txt"

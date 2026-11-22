@@ -271,14 +271,42 @@ def test_sin_reglas_en_la_app_no_hay_nada_que_aprobar(client, rid):
     assert res.status_code == 409 and res.json()["error"]["code"] == "no_rules"
 
 
-def test_las_del_repo_se_aprueban_en_el_repo(client, settings, rid):
+def test_las_del_repo_se_aprueban_en_su_copia_de_trabajo(client, settings, rid):
     from app.analysis.clone import clone_dir
 
-    # El repo trae su reglas_negocio.toml válido: manda sobre lo de la app, y la app no lo edita
-    (clone_dir(settings, rid) / reglas.FILENAME).write_text(V2, encoding="utf-8")
+    # El repo trae su reglas_negocio.toml válido: manda sobre lo de la app. Se edita la copia de trabajo (con respaldo,
+    # como el editor); GitHub no se toca, y la respuesta lo dice
+    archivo = clone_dir(settings, rid) / reglas.FILENAME
+    archivo.write_text(V2, encoding="utf-8")
     assert client.get(f"/api/projects/{rid}/reglas").json()["active"] == "repo"
-    res = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-002"], "status": "aprobada"})
-    assert res.status_code == 409 and res.json()["error"]["code"] == "repo_rules" and "reglas_negocio.toml" in res.json()["error"]["message"]
+
+    # RN-001 viene aprobada: se vuelve a borrador y luego se aprueba junto con RN-002 (que tiene dudas)
+    body = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "borrador"}).json()
+    assert {r["id"]: r["status"] for r in body["repo"]["rules"]}["RN-001"] == "borrador" and body["messages"][-1].startswith("Guardado en la copia del proyecto")
+    body = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001", "RN-002"], "status": "aprobada"}).json()
+    assert body["messages"][0].startswith("RN-002: tiene 2 duda(s)") and body["messages"][-1].startswith("Guardado en la copia del proyecto")
+    estados = {r["id"]: r["status"] for r in body["repo"]["rules"]}
+    assert estados["RN-001"] == "aprobada" and estados["RN-002"] == "borrador"
+    assert "# Reglas del inventario" in archivo.read_text(encoding="utf-8")
+    # Respaldo de la versión anterior, junto a la base (data/backups/{repo}/{fecha}/{ruta})
+    backups = list((Path(settings.database_path).parent / "backups" / rid).rglob(reglas.FILENAME))
+    assert len(backups) == 2 and any(b.read_text(encoding="utf-8") == V2 for b in backups)
+
+    # Las dudas también; sin cambios no hay aviso de la copia
+    body = client.put(f"/api/projects/{rid}/reglas/RN-002/dudas", json={"doubts": []}).json()
+    assert {r["id"]: r["doubts"] for r in body["repo"]["rules"]}["RN-002"] == [] and body["messages"][0].startswith("Guardado en la copia")
+    body = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "aprobada"}).json()
+    assert body["messages"] == []
+    # Lo guardado en la app no se toca
+    assert body["uploaded"] is None
+
+
+def test_el_archivo_del_repo_con_errores_no_se_edita(client, settings, rid):
+    from app.analysis.clone import clone_dir
+
+    (clone_dir(settings, rid) / reglas.FILENAME).write_text(V2.replace('severidad   = "alta"', 'severidad   = "urgente"', 1), encoding="utf-8")
+    res = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "aprobada"})
+    assert res.status_code == 409 and res.json()["error"]["code"] == "invalid_repo_rules" and "corrígelo primero" in res.json()["error"]["message"]
 
 
 def test_las_pruebas_generadas_son_solo_de_las_aprobadas(client, rid, settings):

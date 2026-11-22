@@ -24,7 +24,7 @@ from app.analyses.reglas_store import RulesStore
 from app.analyses.scoring import business_score, category_scores, effective_coverage, global_score
 from app.analyses.store import AnalysisStore, ProjectConfig
 from app.analyses.workspace import Workspace, is_excluded
-from app.analysis.sandbox import PhaseResult, SandboxOutput, parse_audit, parse_coverage, parse_junit
+from app.analysis.sandbox import PhaseResult, SandboxOutput, parse_audit, parse_coverage, parse_junit, rebase_tests
 from app.config import Settings
 from app.db import session
 
@@ -172,8 +172,10 @@ def app_rule_tests(conn, settings: Settings, repo_id: str) -> tuple[dict[str, st
 # ───────────────────────── Resultados del sandbox ─────────────────────────
 
 
-def _deps_file(files: list[str]) -> str:
-    return next((f for f in ("requirements.txt", "pyproject.toml", "setup.py") if f in files), "requirements.txt")
+def _deps_file(files: list[str], sub: str = "") -> str:
+    """Archivo de dependencias; con el código en una subcarpeta (`backend/`), el de ahí."""
+    base = f"{sub}/" if sub else ""
+    return next((f"{base}{n}" for n in ("requirements.txt", "pyproject.toml", "setup.py") if f"{base}{n}" in files), f"{base}requirements.txt")
 
 
 def _normalize(name: str) -> str:
@@ -191,7 +193,7 @@ def _package_line(lines: list[str] | None, package: str) -> int:
 
 
 def audit_findings(ws: Workspace, files: list[str], out: SandboxOutput) -> list[FindingInput]:
-    deps = _deps_file(files)
+    deps = _deps_file(files, out.subdir)
     lines = ws.read_lines(deps) if deps in files else None
     findings = []
     for v in parse_audit(out.audit):
@@ -213,7 +215,7 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
     """(cobertura por archivo, cobertura total, fallidas, pasadas, hallazgos) de pytest y coverage en el sandbox."""
     findings: list[FindingInput] = []
     install, tests = out.phases.get("install"), out.phases.get("tests")
-    deps = _deps_file(static.files)
+    deps = _deps_file(static.files, out.subdir)
     if install is not None and not install.ok:
         findings.append(FindingInput(
             sev="alta", cat="test", tool="pytest", rule="DEPS", file=deps, line=1, code="",
@@ -222,7 +224,7 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
             rec="Revisa que requirements.txt (o pyproject.toml) tenga versiones que existan y se instalen en Python 3.12.",
         ))
 
-    run = parse_junit(out.junit)
+    run = parse_junit(out.junit, out.subdir)
     for case in run.failures[:MAX_TEST_FINDINGS]:
         if is_excluded(case.file, static.cfg.excluded):
             continue
@@ -244,7 +246,7 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
             rec="Ejecuta `pytest` localmente en un entorno limpio con las dependencias del proyecto.",
         ))
 
-    measured = parse_coverage(out.coverage)
+    measured = parse_coverage(out.coverage, out.subdir)
     coverage, covered, statements = [], 0, 0
     for f in static.py:
         if _is_test(f) or _is_tooling(f):
@@ -298,7 +300,7 @@ def build(
     else:
         not_run = None
     # Las del repo y, aparte, las generadas y aprobadas en la app (las del repo tienen prioridad)
-    data = reglas.merge_app_tests(out.reglas, out.reglas_app) if out is not None else None
+    data = reglas.merge_app_tests(rebase_tests(out.reglas, out.subdir), rebase_tests(out.reglas_app, out.subdir)) if out is not None else None
     rules = reglas.with_tests(static.rules, data, not_run, static.rule_notes)
     if "pytest" not in analyzers:
         failed, passed = 0, 0
@@ -349,10 +351,10 @@ def phase_summary(step: int, phase: PhaseResult, out: SandboxOutput) -> str:
             return "  no se encontraron pruebas"
         if out.junit is None:
             return f"  pytest no pudo correr (código {phase.code}): " + _last_line(phase.log_tail, "sin detalle")
-        t = parse_junit(out.junit)
+        t = parse_junit(out.junit, out.subdir)
         return f"  {t.passed} passed, {t.failed} failed, {t.skipped} skipped"
     if step == COVERAGE_STEP:
-        measured = [v for f, v in parse_coverage(out.coverage).items() if not _is_test(f) and not _is_tooling(f)]
+        measured = [v for f, v in parse_coverage(out.coverage, out.subdir).items() if not _is_test(f) and not _is_tooling(f)]
         done, total = sum(c for c, _ in measured), sum(n for _, n in measured)
         return f"  líneas cubiertas: {round(100 * done / total, 1) if total else 0.0} %"
     return ""

@@ -204,23 +204,33 @@ def delete_rules(project_id: str, store: Analyses, user_id: UserId, settings: Co
     return _project_rules(store, settings, project_id)
 
 
-def _editable(store: Analyses, settings: Config, project_id: str) -> tuple[str, reglas.RuleSet]:
+REPO_COPY_NOTE = (
+    "Guardado en la copia del proyecto, no en GitHub: descarga el archivo (Descargar para el repo) y haz commit. Un análisis "
+    "nuevo vuelve a clonar el repositorio y su archivo manda otra vez"
+)
+
+
+def _editable(store: Analyses, settings: Config, project_id: str, user_id: str) -> tuple[str, reglas.RuleSet, Callable[[str], None], bool]:
     """
-    El texto de las reglas cargadas en la app, que es lo único que la app edita. Si el análisis usa las del repo, se
-    editan en el repo (su archivo manda) o se cargan en la app.
+    (texto, reglas, cómo guardar, ¿es la copia del repo?) de las reglas que usa el análisis. Las cargadas en la app se
+    guardan en la app. Las del repositorio se guardan en su copia de trabajo, con respaldo (como el editor): GitHub no se
+    toca, así que hay que descargar el archivo y hacer commit.
     """
     current = _project_rules(store, settings, project_id)
     if current.active == "repo":
-        raise ApiError(
-            409, "repo_rules",
-            f"El análisis usa el {current.repo.path if current.repo else reglas.FILENAME} del repositorio: cambia `estado` y `dudas` ahí "
-            "(o carga las reglas en la app)",
-        )
+        if current.repo is None or not current.repo.valid:
+            raise ApiError(409, "invalid_repo_rules", f"El {current.repo.path if current.repo else reglas.FILENAME} del repositorio tiene errores: corrígelo primero")
+        ws = Workspace(settings, project_id)
+        path, text = current.repo.path, current.repo.content
+        try:
+            return text, reglas.parse(text), lambda new: ws.write(path, new), True
+        except reglas.RulesError as exc:
+            raise ApiError(422, "invalid_rules", str(exc)) from exc
     text = RulesStore(store.conn).uploaded_text(project_id)
     if not text:
         raise ApiError(409, "no_rules", "El proyecto no tiene reglas cargadas en la app")
     try:
-        return text, reglas.parse(text)
+        return text, reglas.parse(text), lambda new: RulesStore(store.conn).save_upload(project_id, new, user_id), False
     except reglas.RulesError as exc:
         raise ApiError(422, "invalid_rules", str(exc)) from exc
 
@@ -232,12 +242,13 @@ def set_states(project_id: str, body: RuleStates, store: Analyses, user_id: User
     aprueba: se dice por qué en `messages` (PROPUESTA_REGLAS_VERIFICABLES.md §5).
     """
     require_repo(store, user_id, project_id)
-    text, rs = _editable(store, settings, project_id)
+    text, rs, save, in_repo = _editable(store, settings, project_id, user_id)
     by_id = {r.id: r for r in rs.rules}
     unknown = [i for i in body.ids if i not in by_id]
     if unknown:
         raise ApiError(404, "unknown_rule", f"{', '.join(unknown)} no está en las reglas del proyecto")
     messages: list[str] = []
+    changed = False
     for rid in dict.fromkeys(body.ids):
         rule = by_id[rid]
         if rule.status == body.status:
@@ -246,7 +257,11 @@ def set_states(project_id: str, body: RuleStates, store: Analyses, user_id: User
             messages.append(f"{rid}: tiene {len(rule.doubts)} duda(s) abierta(s); resuélvelas antes de aprobarla")
             continue
         text = reglas.set_fields(text, rid, {"estado": body.status})
-    RulesStore(store.conn).save_upload(project_id, text, user_id)
+        changed = True
+    if changed:
+        save(text)
+        if in_repo:
+            messages.append(REPO_COPY_NOTE)
     return _project_rules(store, settings, project_id).model_copy(update={"messages": messages})
 
 
@@ -254,7 +269,7 @@ def set_states(project_id: str, body: RuleStates, store: Analyses, user_id: User
 def set_doubts(project_id: str, rule_id: str, body: RuleDoubts, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
     """Las dudas que siguen abiertas de una regla: quitar una es resolverla (la respuesta va en la descripción)."""
     require_repo(store, user_id, project_id)
-    text, rs = _editable(store, settings, project_id)
+    text, rs, save, in_repo = _editable(store, settings, project_id, user_id)
     if rule_id not in {r.id for r in rs.rules}:
         raise ApiError(404, "unknown_rule", f"{rule_id} no está en las reglas del proyecto")
     doubts = [d.strip()[: reglas.MAX_DOUBT] for d in body.doubts if d.strip()]
@@ -262,8 +277,8 @@ def set_doubts(project_id: str, rule_id: str, body: RuleDoubts, store: Analyses,
         text = reglas.set_fields(text, rule_id, {"dudas": doubts})
     except reglas.RulesError as exc:
         raise ApiError(422, "invalid_rules", str(exc)) from exc
-    RulesStore(store.conn).save_upload(project_id, text, user_id)
-    return _project_rules(store, settings, project_id)
+    save(text)
+    return _project_rules(store, settings, project_id).model_copy(update={"messages": [REPO_COPY_NOTE] if in_repo else []})
 
 
 @router.post("/api/projects/{project_id}/reglas/validar", response_model=Validation)

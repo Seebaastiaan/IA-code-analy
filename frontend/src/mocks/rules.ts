@@ -526,13 +526,20 @@ function setField(text: string, id: string, key: string, line: string): string {
   return lines.join('\n')
 }
 
-/** Un texto = error (el handler responde 409/404 con ese mensaje). */
-function editable(repoId: string): { text: string; rules: ParsedRule[] } | string {
+const REPO_COPY_NOTE =
+  'Guardado en la copia del proyecto, no en GitHub: descarga el archivo (Descargar para el repo) y haz commit. Un análisis nuevo vuelve a clonar el repositorio y su archivo manda otra vez'
+
+/** Un texto = error (el handler responde 409/404 con ese mensaje). Las del repo se guardan en su copia de trabajo. */
+function editable(repoId: string): { text: string; rules: ParsedRule[]; save: (text: string) => void; inRepo: boolean } | string {
   getRepo(repoId)
-  if (REPO_RULES[repoId]) return `El análisis usa el ${FILENAME} del repositorio: cambia \`estado\` y \`dudas\` ahí (o carga las reglas en la app)`
+  const own = REPO_RULES[repoId]
+  if (own) {
+    if (!validate(own).valid) return `El ${FILENAME} del repositorio tiene errores: corrígelo primero`
+    return { text: own, rules: parse(own).rules, save: (text) => void (REPO_RULES[repoId] = text), inRepo: true }
+  }
   const up = uploads.get(repoId)
   if (!up) return 'El proyecto no tiene reglas cargadas en la app'
-  return { text: up.content, rules: parse(up.content).rules }
+  return { text: up.content, rules: parse(up.content).rules, save: (text) => void uploads.set(repoId, { content: text, updated_at: new Date().toISOString() }), inRepo: false }
 }
 
 export function setStates(repoId: string, ids: string[], status: RuleApproval): ProjectRules | string {
@@ -540,6 +547,7 @@ export function setStates(repoId: string, ids: string[], status: RuleApproval): 
   if (typeof cur === 'string') return cur
   let text = cur.text
   const messages: string[] = []
+  let changed = false
   for (const id of new Set(ids)) {
     const rule = cur.rules.find((r) => r.id === id)
     if (!rule) return `${id} no está en las reglas del proyecto`
@@ -549,8 +557,12 @@ export function setStates(repoId: string, ids: string[], status: RuleApproval): 
       continue
     }
     text = setField(text, id, 'estado', `estado      = ${q(status)}`)
+    changed = true
   }
-  uploads.set(repoId, { content: text, updated_at: new Date().toISOString() })
+  if (changed) {
+    cur.save(text)
+    if (cur.inRepo) messages.push(REPO_COPY_NOTE)
+  }
   return { ...projectRules(repoId), messages }
 }
 
@@ -559,6 +571,6 @@ export function setDoubts(repoId: string, ruleId: string, doubts: string[]): Pro
   if (typeof cur === 'string') return cur
   if (!cur.rules.some((r) => r.id === ruleId)) return `${ruleId} no está en las reglas del proyecto`
   const text = setField(cur.text, ruleId, 'dudas', `dudas       = [${doubts.map(q).join(', ')}]`)
-  uploads.set(repoId, { content: text, updated_at: new Date().toISOString() })
-  return projectRules(repoId)
+  cur.save(text)
+  return { ...projectRules(repoId), messages: cur.inRepo ? [REPO_COPY_NOTE] : [] }
 }

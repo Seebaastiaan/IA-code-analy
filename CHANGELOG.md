@@ -14,6 +14,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   prueba de fuerza (mutación dirigida) que avisa de pruebas débiles.
 - Categoría `neg` (reglas de negocio) en el score, con peso 0 % por defecto: se ve en el reporte, el tablero, la
   tendencia, la comparativa y las exportaciones; solo mueve el global con un peso (`[pesos] negocio`).
+- Las reglas del repositorio también se aprueban desde la tabla (se guardan en la copia de trabajo; hay que descargar el
+  archivo y hacer commit). El análisis normal (pytest, cobertura, pip-audit) trabaja desde la carpeta del código si está en
+  una subcarpeta (`backend/`).
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
 
 ### Cambiado
