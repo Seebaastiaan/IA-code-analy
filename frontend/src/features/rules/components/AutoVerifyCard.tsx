@@ -26,10 +26,10 @@ export function AutoVerifyCard({ repoId }: { repoId: string }) {
           <p className="mt-1 text-sm text-slate-500">
             El programa aprueba las reglas sin dudas, prepara el entorno, escribe y ejecuta una prueba por regla y comprueba que detecten fallos. Solo te pide decidir lo que no puede resolver solo.
           </p>
-          <p className="mt-1 text-xs text-slate-400">Puede tardar de 3 a 8 minutos. Si la IA está saturada, reintenta en un rato: lo ya hecho se conserva.</p>
+          <p className="mt-1 text-xs text-slate-400">Puede tardar de 3 a 8 minutos. Sigue aunque cierres esta pestaña. Si la IA está saturada, reintenta en un rato: lo ya hecho se conserva.</p>
         </div>
         {running ? (
-          <Button variant="secondary" onClick={stop}>
+          <Button variant="secondary" onClick={() => void stop()}>
             Detener
           </Button>
         ) : (

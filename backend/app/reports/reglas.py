@@ -54,6 +54,8 @@ class BusinessRuleResult(BaseModel):
     evidence_total: int
     # Pruebas ligadas (@pytest.mark.regla o test_rn###_…), las que fallan primero
     tests: list[RuleTest]
+    # Estado en el análisis anterior (None = no había análisis anterior con reglas o la regla es nueva)
+    previous_status: str | None = None
 
 
 class BusinessRulesSummary(BaseModel):
@@ -85,6 +87,24 @@ class BusinessRules(BaseModel):
     warnings: list[str]
     summary: BusinessRulesSummary
     rules: list[BusinessRuleResult]
+    # Número del análisis anterior con el que se compara (None = es el primero con reglas)
+    previous_num: int | None = None
+    # Reglas que se cumplían en el análisis anterior y en este ya no (las que hay que mirar primero)
+    regressions: list[str] = []
+
+
+# Estados que dicen que el código viola la regla
+BROKEN = ("no_cumple", "no_implementada")
+
+
+def _previous(store, rules: RulesStore, report):
+    """El análisis anterior del mismo repo que verificó reglas (se salta los que no las tenían)."""
+    num = report["num"]
+    while (prev := store.previous_report(report["repo_id"], num)) is not None:
+        if rules.check(prev["id"]) is not None:
+            return prev
+        num = prev["num"]
+    return None
 
 
 @router.get("/{report_id}/reglas", response_model=BusinessRules)
@@ -102,6 +122,12 @@ def get_business_rules(report_id: str, store: Analyses, user_id: UserId, repo: s
         )
         for r in rows
     ]
+    previous = _previous(store, rules, report)
+    if previous is not None:
+        before = {r["rule_id"]: r["status"] for r in rules.results(previous["id"])}
+        for r in results:
+            r.previous_status = before.get(r.id)
+    regressions = [r.id for r in results if r.previous_status == "cumple" and r.status in BROKEN]
     count = lambda status: sum(r.status == status for r in results)
     return BusinessRules(
         report_id=report["id"],
@@ -117,4 +143,6 @@ def get_business_rules(report_id: str, store: Analyses, user_id: UserId, repo: s
             prueba_rota=count("prueba_rota"), no_implementada=count("no_implementada"), fuera_del_codigo=count("fuera_del_codigo"),
         ),
         rules=results,
+        previous_num=previous["num"] if previous is not None else None,
+        regressions=regressions,
     )

@@ -76,6 +76,8 @@ export const EP = {
     testFixCode: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/corregir`,
     /** POST: prueba de fuerza con mutación dirigida (en segundo plano) */
     testsStrength: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/fuerza`,
+    /** «Preparar todo» en el servidor: GET (estado) / POST (lanzar) / DELETE (detener) */
+    prepare: (projectId: string) => `/api/projects/${projectId}/reglas/preparar`,
     /** Zip con reglas_negocio.toml, el arnés y las pruebas aprobadas */
     export: (projectId: string) => `/api/projects/${projectId}/reglas/exportar`,
   },

@@ -2,7 +2,7 @@ import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
 import { download, http, openDocument } from '@/shared/api/http'
 import type { FixResponse } from '@/features/findings/types'
-import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, ControlExpected, Concordance, DoubtAnswer, MatrixCell, PermissionMatrix, ProjectRules, RuleApproval, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
+import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, ControlExpected, Concordance, DoubtAnswer, MatrixCell, PermissionMatrix, PrepareView, ProjectRules, RuleApproval, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
 
 export const RULES_FILENAME = 'reglas_negocio.toml'
 
@@ -56,6 +56,10 @@ export const rulesApi = {
   explainRule: (repoId: string, ruleId: string) => http.post<RuleTestsView>(EP.rules.testEvidence(repoId, ruleId)),
   /** Prueba de fuerza en segundo plano (sin `ids`: las que pasan y no la tienen) */
   strengthTests: (repoId: string, ids?: string[]) => http.post<RuleTestsView>(EP.rules.testsStrength(repoId), { ids: ids ?? null }),
+  /** «Preparar todo» corre en el servidor: se lanza, se consulta y se detiene */
+  prepare: (repoId: string) => http.get<PrepareView>(EP.rules.prepare(repoId)),
+  startPrepare: (repoId: string) => http.post<PrepareView>(EP.rules.prepare(repoId)),
+  stopPrepare: (repoId: string) => http.delete<PrepareView>(EP.rules.prepare(repoId)),
 }
 
 /** Bajo la clave del reporte: se refresca junto con él (re-analizar, guardar en el editor). */
@@ -83,3 +87,5 @@ export const ruleTestsQuery = (repoId: string) => queryOptions({ queryKey: ['rul
 /** Mientras genera o corre en segundo plano se consulta cada 2 s. */
 export const useRuleTests = (repoId: string, enabled = true) =>
   useQuery({ ...ruleTestsQuery(repoId), enabled: Boolean(repoId) && enabled, refetchInterval: (q) => (q.state.data?.busy ? 2000 : false) })
+
+export const prepareQuery = (repoId: string) => queryOptions({ queryKey: ['rules', repoId, 'preparar'], queryFn: () => rulesApi.prepare(repoId) })

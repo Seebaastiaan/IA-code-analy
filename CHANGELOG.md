@@ -5,6 +5,19 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 ## [Sin publicar] — Reglas de negocio verificables (docs/PROPUESTA_REGLAS_VERIFICABLES.md)
 
 ### Agregado
+- «Preparar todo» corre en el servidor (`/api/projects/{id}/reglas/preparar`): sigue aunque se cierre la pestaña, se ve
+  su avance al volver y se detiene al terminar el paso en curso. Si una prueba no coincide con la lectura independiente del
+  código, la escribe una vez más y la vuelve a correr y medir antes de decidir.
+- La confianza de cada regla usa la segunda opinión: si la prueba coincide con la lectura del código sube un escalón; si
+  discrepa queda como mucho en «baja».
+- Una prueba aprobada que usa rutas que el código ya no tiene no se corre en el análisis: sale como «prueba rota» con el
+  motivo (no se culpa al código) y «Preparar todo» la escribe de nuevo.
+- El reporte de reglas avisa arriba de las reglas que se cumplían en el análisis anterior y ahora no.
+- «Preparar todo» aprueba solas las pruebas que fallan cuando la lectura del código confirma que la regla no está (antes ninguna regla
+  rota llegaba sola al reporte) y reescribe las pruebas rotas dándole a la IA el error de su corrida. La prueba de fuerza ya no quita el
+  «no existe» (404) salvo que la regla hable de existencia. Medición en docs/BITACORA_REGLAS_AUTOMATICAS.md §5b
+  (`scripts/medir_preparar.py`).
+- Una regla con prueba sin aprobar ya no sale como «sin patrón ni pruebas»: el reporte dice si su prueba pasa o falla y que falta aprobarla.
 - Configuración → Reglas como asistente de 4 pasos (importar, preguntas y aprobación, preparar todo, resultado) con la siguiente
   acción siempre a la vista, «Preguntas para ti» (una por una, con la cita del documento, el efecto del Sí y del No y respuesta
   escrita para las abiertas) y errores de la IA o del documento en palabras con «Reintentar». El reporte de reglas ya no

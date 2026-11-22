@@ -357,6 +357,27 @@ def missing_endpoints(endpoints: list[str], project_map: mapa.ProjectMap) -> lis
     return missing
 
 
+def unapproved_note(row) -> str | None:
+    """Qué se sabe de una prueba que corrió y nadie aprobó (no cuenta en el análisis hasta aprobarla)."""
+    if row["kind"] != "prueba" or not row["run_result"] or row["run_hash"] != arnes.code_hash(row["code"]):
+        return None
+    verdict = json.loads(row["run_result"]).get("verdict")
+    said = {"cumple": "pasa", "no_cumple": "falla", "prueba_rota": "está rota"}.get(verdict)
+    if said is None:
+        return None
+    why = ""
+    if verdict == "cumple" and row["strength_hash"] == row["run_hash"] and row["strength_result"]:
+        status = json.loads(row["strength_result"]).get("status")
+        why = {"parcial": " (no notó todas las violaciones que se le inyectaron)", "debil": " (no notó ninguna violación inyectada)"}.get(status, "")
+    return f"Su prueba {said}{why}, pero todavía no cuenta: revísala y apruébala en Configuración → Reglas"
+
+
+def stale_note(gone: list[str]) -> str:
+    """Por qué una prueba aprobada ya no sirve: usa rutas que el código ya no tiene."""
+    routes = ", ".join(gone[:3]) + ("…" if len(gone) > 3 else "")
+    return f"La prueba usa {routes}, que ya no está en el código: el código cambió desde que se escribió. Pulsa «Preparar todo» para escribirla de nuevo"
+
+
 # ───────────────────────── Generación ─────────────────────────
 
 
@@ -405,19 +426,39 @@ def _answer(llm: LLM, turns: list[Turn]) -> tuple[dict, str]:
     return (reply.data if isinstance(reply.data, dict) else {}), reply.model
 
 
+def repair_turns(code: str, failure: str) -> list[Turn]:
+    """La prueba anterior y por qué se rompió al correrla: para que la IA la corrija en vez de empezar de cero."""
+    return [
+        Turn("model", json.dumps({"codigo": code}, ensure_ascii=False)),
+        Turn(
+            "user",
+            "Esta prueba se corrió en el sandbox y se ROMPIÓ al preparar el escenario (no por el código que se prueba):\n"
+            f"{failure[:1500]}\n"
+            "Corrígela sin cambiar lo que comprueba la regla: revisa en el código del proyecto qué responde cada endpoint (códigos, "
+            "campos y formatos) y qué datos acepta antes de usarlos. Mismo formato JSON, con \"codigo\".",
+        ),
+    ]
+
+
 def generate(
     llm: LLM, root: Path, project_map: mapa.ProjectMap, harness_code: str, rule: reglas.BusinessRule,
-    allowed: set[str] = frozenset(),
+    allowed: set[str] = frozenset(), broken: tuple[str, str] | None = None,
 ) -> Generated:
     """
     Bloqueante (red). LlmError si Gemini falla; GenerationError si la respuesta no sirve. Si la prueba no pasa la
     validación (sintaxis, fixtures, nombres), se le devuelven los errores a la IA una vez para que la corrija.
-    Una regla con `tipo = "proceso"` no llama a la IA: es fuera del código.
+    Una regla con `tipo = "proceso"` no llama a la IA: es fuera del código. `broken` = (código, por qué se rompió) de la
+    prueba anterior, que se corrió y falló al preparar el escenario: se le pide corregirla.
     """
     if rule.process:
         return Generated("fuera_del_codigo", "proceso", "", [], [], "", 'Regla de proceso (tipo = "proceso"): no está en el código')
     question = Turn("user", prompt(root, project_map, harness_code, rule))
-    data, model = _answer(llm, [question])
+    if broken is not None:
+        data, model = _answer(llm, [question, *repair_turns(*broken)])
+        if not str(data.get("codigo") or "").strip():
+            data, model = _answer(llm, [question])
+    else:
+        data, model = _answer(llm, [question])
     # Error frecuente: dice «no implementada» pero sus endpoints sí existen y deja el código vacío (contra lo que pide el prompt):
     # se le insiste una vez en que escriba la prueba, que es la evidencia
     endpoints = [str(e) for e in data.get("endpoints") or [] if str(e).strip()]
@@ -766,10 +807,26 @@ def analysis_inputs(conn, settings: Settings, repo_id: str) -> tuple[dict[str, s
     files: dict[str, str] = {}
     notes: dict[str, reglas.AppNote] = {}
     declared: list[reglas.LinkedTest] = []
+    project_map: mapa.ProjectMap | None = None
     for row in RuleTestsStore(conn).all(repo_id):
         rule = by_id.get(row["rule_id"])
-        if rule is None or row["rule_hash"] != rule_hash(rule) or row["approved_hash"] != arnes.code_hash(row["code"]):
+        if rule is None or row["rule_hash"] != rule_hash(rule):
             continue
+        if row["approved_hash"] != arnes.code_hash(row["code"]):
+            # Sin aprobar no cuenta, pero el reporte dice lo que se sabe en vez de «sin patrón ni pruebas»
+            waiting = unapproved_note(row)
+            if waiting:
+                notes[rule.id] = reglas.AppNote("sin_verificar", waiting)
+            continue
+        if row["kind"] == "prueba" and ctx.harness_ready:
+            # El código cambió desde que se escribió la prueba: si usa una ruta que ya no existe, fallaría por eso y no
+            # porque el código viole la regla. No se corre y se dice que hay que escribirla de nuevo
+            if project_map is None:
+                project_map = mapa.build(ctx.ws.root, ctx.ws.list_files([]))
+            gone = missing_endpoints(json.loads(row["endpoints"] or "[]"), project_map)
+            if gone:
+                notes[rule.id] = reglas.AppNote("prueba_rota", stale_note(gone))
+                continue
         if row["kind"] == "fuera_del_codigo":
             notes[rule.id] = reglas.AppNote("fuera_del_codigo", row["reason"] or "Regla de proceso: no está en el código")
         elif row["kind"] == "no_implementada":

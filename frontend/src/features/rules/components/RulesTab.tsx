@@ -205,6 +205,18 @@ export function RulesTab({ repoId, reportId }: { repoId: string; reportId: strin
       {summary.total > 0 && (
         <p className="px-4 sm:px-5 py-3 text-sm font-medium border-b border-slate-100 dark:border-slate-800">{plainSummary(data.rules)}</p>
       )}
+      {!!data.regressions?.length && (
+        <p role="alert" className="px-4 sm:px-5 py-3 text-sm border-b border-rose-100 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-200">
+          {data.regressions.length === 1 ? 'Dejó de cumplirse' : `Dejaron de cumplirse ${data.regressions.length} reglas`} desde el análisis #{data.previous_num}:{' '}
+          {data.regressions
+            .map((id) => {
+              const r = data.rules.find((x) => x.id === id)
+              return r ? `${id} · ${r.title}` : id
+            })
+            .join('; ')}
+          . Míralas primero: algo que cambió en el código las rompió.
+        </p>
+      )}
       <Notices data={data} repoId={repoId} />
       <div className="px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
         <SegmentedControl options={FILTERS} value={status} onChange={setStatus} />

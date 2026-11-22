@@ -136,6 +136,8 @@ class RuleTestOut(BaseModel):
     tests: list[str]
     # La regla cambió desde que se generó (título, descripción o criterio)
     outdated: bool
+    # Rutas que la prueba usa y que el código ya no tiene: el código cambió y hay que escribirla de nuevo
+    gone_endpoints: list[str] = Field(default_factory=list)
     # La corrida vale para el código actual: pendiente (sin correr o editada), corriendo o hecho
     run_status: Literal["pendiente", "corriendo", "hecho"]
     run: RunOut | None
@@ -343,6 +345,7 @@ def _view(conn, settings: Settings, repo_id: str) -> TestsView:
                 assumptions=json.loads(row["assumptions"] or "[]"), endpoints=json.loads(row["endpoints"] or "[]"), reason=row["reason"],
                 model=row["model"], errors=check.errors if check else [], warnings=check.warnings if check else [],
                 tests=check.tests if check else [], outdated=outdated, run_status=run_status,
+                gone_endpoints=pruebas.missing_endpoints(json.loads(row["endpoints"] or "[]"), mp) if row["kind"] == "prueba" else [],
                 run=RunOut(**run) if run else None, approved=approved,
                 approved_by=names.get(row["approved_by"]) if approved else None, approved_at=row["approved_at"] if approved else None,
                 blocked=_blocked(row, check, outdated, run_current and run_status == "hecho", run), updated_at=row["updated_at"],
@@ -371,6 +374,21 @@ def _require_free(repo_id: str) -> None:
 # ───────────────────────── Generar ─────────────────────────
 
 
+def broken_of(settings: Settings, repo_id: str, rule: reglas.BusinessRule) -> tuple[str, str] | None:
+    """(código, por qué se rompió) si la prueba actual de la regla se corrió y se rompió al preparar el escenario."""
+    with db.session(settings.database_path) as conn:
+        row = RuleTestsStore(conn).get(repo_id, rule.id)
+    if row is None or row["kind"] != "prueba" or row["rule_hash"] != pruebas.rule_hash(rule) or not row["run_result"]:
+        return None
+    if row["run_hash"] != arnes.code_hash(row["code"]):
+        return None
+    run = json.loads(row["run_result"])
+    if run.get("verdict") != "prueba_rota":
+        return None
+    why = [f"{t.get('name')}: {t.get('message')}" for t in run.get("tests") or [] if t.get("message")]
+    return row["code"], "\n".join(why) or str(run.get("detail") or "")
+
+
 async def _generate(settings: Settings, repo_id: str, llm: LLM, ids: list[str], user_id: str) -> None:
     busy = _busy[repo_id]
     messages: list[str] = []
@@ -386,7 +404,7 @@ async def _generate(settings: Settings, repo_id: str, llm: LLM, ids: list[str], 
             if rule is None or ctx.harness is None:
                 continue
             try:
-                g = await asyncio.to_thread(pruebas.generate, llm, ctx.ws.root, mp, ctx.harness, rule, allowed)
+                g = await asyncio.to_thread(pruebas.generate, llm, ctx.ws.root, mp, ctx.harness, rule, allowed, broken_of(settings, repo_id, rule))
             except pruebas.GenerationError as exc:
                 messages.append(f"{rid}: {exc}")
                 continue

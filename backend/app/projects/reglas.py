@@ -16,6 +16,7 @@ con la API de GitHub y lo valida con el mismo parser.
 import asyncio
 import base64
 import binascii
+import json
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
@@ -25,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from app.analyses import reglas
 from app.analyses.access import Analyses, UserId, require_repo
-from app.analyses.reglas_store import RulesStore, RuleTestsStore
+from app.analyses.reglas_store import EvidenceStore, RulesStore, RuleTestsStore
 from app.analyses.workspace import Workspace
 from app.analysis.router import BRANCH, REPO_URL, Config, Db
 from app.assistant.llm import LLM, LlmError
@@ -363,6 +364,23 @@ class ExpectedBody(BaseModel):
     expected: Literal["cumple", "viola"] | None
 
 
+def _crosscheck(test, code_hash: str, evidence, commit: str | None) -> str | None:
+    """coincide | discrepa: la corrida de la prueba actual contra la lectura del código de esa versión de la regla y del commit."""
+    from app.projects import pruebas as rutas_pruebas
+    from app.projects import reglas_evidencia as evidencia
+
+    if test["run_hash"] != code_hash or test["run_status"] != "hecho" or not test["run_result"] or evidence is None:
+        return None
+    if evidence["rule_hash"] != test["rule_hash"] or (commit is not None and evidence["commit_sha"] != commit):
+        return None
+    ev = evidencia.loads(evidence["data"])
+    verdict = json.loads(test["run_result"]).get("verdict")
+    if ev is None or verdict not in ("cumple", "no_cumple"):
+        return None
+    key = (verdict, ev.verdict)
+    return "coincide" if key in rutas_pruebas.CROSS_AGREE else "discrepa" if key in rutas_pruebas.CROSS_DISAGREE else None
+
+
 def _concordance(store: Analyses, settings: Config, project_id: str) -> Concordance:
     current = _project_rules(store, settings, project_id)
     source = current.repo if current.active == "repo" else current.uploaded
@@ -370,13 +388,20 @@ def _concordance(store: Analyses, settings: Config, project_id: str) -> Concorda
     rules_store = RulesStore(store.conn)
     latest = store.latest_report(project_id)
     results = {r["rule_id"]: (r["status"], r["level"]) for r in rules_store.results(latest["id"])} if latest else {}
-    strength = {}
+    strength: dict[str, str] = {}
+    cross: dict[str, str] = {}
+    evidences = EvidenceStore(store.conn).all(project_id)
+    commit = latest["commit_sha"] if latest else None
     for row in RuleTestsStore(store.conn).all(project_id):
+        current = arnes.code_hash(row["code"])
         # Solo vale la prueba de fuerza de la versión actual de la prueba
-        done = row["strength_status"] == "hecho" and row["strength_hash"] == arnes.code_hash(row["code"]) and fuerza.loads(row["strength_result"])
+        done = row["strength_status"] == "hecho" and row["strength_hash"] == current and fuerza.loads(row["strength_result"])
         if done:
             strength[row["rule_id"]] = done.status
-    items = concordancia.build(rules, rules_store.expected(project_id), results, strength)
+        agree = _crosscheck(row, current, evidences.get(row["rule_id"]), commit)
+        if agree:
+            cross[row["rule_id"]] = agree
+    items = concordancia.build(rules, rules_store.expected(project_id), results, strength, cross)
     known = [i for i in items if i.expected]
     return Concordance(
         items=[ControlItem(**i.__dict__) for i in items], known=len(known), hits=sum(i.outcome == "acerto" for i in known),

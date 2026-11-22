@@ -45,6 +45,8 @@ export interface BusinessRuleResult {
   evidence_total: number
   /** Las que fallan primero */
   tests: RuleTest[]
+  /** Estado en el análisis anterior (null = no había o la regla es nueva) */
+  previous_status?: RuleStatus | null
 }
 
 export interface BusinessRules {
@@ -64,6 +66,10 @@ export interface BusinessRules {
   warnings: string[]
   summary: { total: number; cumple: number; no_cumple: number; sin_verificar: number; prueba_rota: number; no_implementada: number; fuera_del_codigo: number }
   rules: BusinessRuleResult[]
+  /** Número del análisis anterior con el que se compara (null = es el primero con reglas) */
+  previous_num?: number | null
+  /** Reglas que se cumplían en el análisis anterior y ahora no */
+  regressions?: string[]
 }
 
 export interface RulePreview {
@@ -353,6 +359,8 @@ export interface GeneratedTest {
   tests: string[]
   /** La regla cambió desde que se generó la prueba */
   outdated: boolean
+  /** Rutas que la prueba usa y que el código ya no tiene: hay que escribirla de nuevo */
+  gone_endpoints?: string[]
   run_status: 'pendiente' | 'corriendo' | 'hecho'
   run: RuleTestRun | null
   approved: boolean
@@ -399,4 +407,22 @@ export interface RuleTestsView {
   busy: { kind: 'generando' | 'corriendo' | 'fuerza'; total: number; done: number; current: string | null } | null
   /** Avisos del último trabajo (reglas que la IA no pudo generar, las que no se aprobaron y por qué) */
   messages: string[]
+}
+
+/** «Preparar todo» corre en el servidor: sigue aunque se cierre la pestaña (docs/PLAN_REGLAS_AUTOMATICO.md, paso 1) */
+export type PrepareStepId = 'reglas' | 'arnes' | 'humo' | 'pruebas' | 'correr' | 'fuerza' | 'revision'
+export type PrepareStatus = 'pendiente' | 'haciendo' | 'hecho' | 'fallo'
+export interface PrepareStep {
+  id: PrepareStepId
+  label: string
+  status: PrepareStatus
+  /** Lo que pasó, en una frase (qué se hizo o por qué se detuvo y cómo resolverlo) */
+  note: string | null
+}
+export interface PrepareView {
+  running: boolean
+  steps: PrepareStep[]
+  summary: string | null
+  started_at: string | null
+  finished_at: string | null
 }

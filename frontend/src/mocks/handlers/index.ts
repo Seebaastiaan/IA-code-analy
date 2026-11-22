@@ -12,6 +12,7 @@ import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
 import * as harness from '../harness'
+import * as prepare from '../prepare'
 import * as ruleTests from '../ruleTests'
 import * as rules from '../rules'
 import * as team from '../team'
@@ -282,6 +283,13 @@ export const handlers = [
     const view = ruleTests.strengthTests(params.projectId as string, ids)
     return typeof view === 'string' ? fail(409, 'nothing_to_test', view) : json(view)
   })),
+  // «Preparar todo» corre en el «servidor»: sigue aunque se cambie de pantalla
+  http.get(EP.rules.prepare(':projectId'), route(({ params }) => json(prepare.prepareView(params.projectId as string)), 100)),
+  http.post(EP.rules.prepare(':projectId'), route(({ params }) => {
+    const view = prepare.startPrepare(params.projectId as string)
+    return typeof view === 'string' ? fail(409, 'prepare_running', view) : json(view)
+  })),
+  http.delete(EP.rules.prepare(':projectId'), route(({ params }) => json(prepare.stopPrepare(params.projectId as string)))),
   http.get(EP.rules.export(':projectId'), route(() => new HttpResponse(new Uint8Array([80, 75, 5, 6, ...new Array(18).fill(0)]), {
     headers: { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="reglas-api-pagos.zip"' },
   }))),

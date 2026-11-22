@@ -115,6 +115,11 @@ function Details({ repoId, row, view, act, busy }: { repoId: string; row: RuleTe
             {test.origin === 'manual' ? ' · editada a mano' : test.origin === 'matriz' ? ' · de la matriz de permisos (sin IA)' : test.model ? ` · ${test.model}` : ''}
           </p>
           {test.outdated && <p className="text-amber-700 dark:text-amber-300">La regla cambió desde que se generó la prueba: vuelve a generarla.</p>}
+          {!!test.gone_endpoints?.length && (
+            <p className="text-amber-700 dark:text-amber-300">
+              El código cambió: la prueba usa {test.gone_endpoints.join(', ')}, que ya no existe. No cuenta en el análisis hasta escribirla de nuevo.
+            </p>
+          )}
           {test.reason && <p className={test.kind === 'no_implementada' ? 'text-rose-700 dark:text-rose-300' : 'text-slate-600 dark:text-slate-300'}>{test.reason}</p>}
           {test.assumptions.length > 0 && (
             <div>

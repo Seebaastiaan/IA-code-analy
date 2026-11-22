@@ -98,13 +98,38 @@ Cada punto dice qué pasó, cómo se descubrió y cómo quedó.
 | Recordatorio (plazo ambiguo) | falso positivo 3 de 3 | pasa 3 de 3 tras contestar la duda |
 | Aprobaciones automáticas incorrectas | — | 0 de 5 (todas eran reglas que sí se cumplen) |
 
+## 5b. «Preparar todo» de punta a punta con `inventario-demo` (Gemini 3.5 Flash Lite, sandbox WSL)
+
+Medido con `backend/scripts/medir_preparar.py`: copia el demo sin `referencia/` ni sus pruebas escritas a mano, carga las 18 reglas
+(5 rotas a propósito), corre «Preparar todo» en el servidor y un análisis, y compara con `ESPERADO.md`. Unos 7 minutos por corrida.
+
+| Ronda | Pruebas que aciertan | Falsos positivos / negativos | Aprobadas solas | Aprobadas mal | Reglas rotas que llegan al reporte |
+|---|---|---|---|---|---|
+| 1 · flujo en el servidor (1 corrida) | 14 de 18 (4 rotas) | 0 / 0 | 2 | 0 | 0 de 5 |
+| 2 · aprobar las que fallan y coinciden; corregir las rotas con su error (2 corridas) | 17 · 17 | 0 · 1 / 0 · 0 | 4 · 6 | 0 · 0 | 2 · 4 de 5 |
+| 3 · sin mutar el «no existe» (404); leer el código tras reescribir (2 corridas) | 16 · 17 | 1 · 1 / 0 · 0 | 9 · 10 | 0 · 0 | 5 · 5 de 5 |
+
+Qué se encontró en cada ronda:
+
+1. **Ninguna regla rota podía aprobarse sola.** La prueba de fuerza solo se mide a las pruebas que pasan y la aprobación pedía «fuerte»,
+   así que las 5 rotas quedaban «sin verificar» aunque la prueba fallaba y la lectura del código coincidía. Ahora una prueba que falla se
+   aprueba sola si la lectura del código tampoco encuentra la regla completa.
+2. **Las pruebas rotas eran errores de la IA al preparar el escenario** (esperaba 201 de una venta que responde 200, compraba un producto
+   con receta, mandaba un `Decimal` a JSON). Al reescribirlas se le da su código y el error: de 4 rotas, 1 a 0 por corrida.
+3. **La prueba de fuerza castigaba pruebas buenas.** Quitar el `raise HTTPException(404, "No existe el producto")` de `obtener` sobrevivía a
+   las pruebas de RN-011, 012 y 013, que no tienen por qué notarlo. Ese cambio solo se hace si la regla habla de existencia.
+4. **La red de seguridad funcionó:** el falso positivo de RN-016 (la prueba falla y la regla sí se cumple) salió «discrepa» y no se aprobó.
+
+Queda: 4 o 5 reglas con fuerza «parcial» (RN-005, 009, 010, 013, 014) y RN-004 sin cambios que inyectar esperan a una persona; el reporte
+ahora dice «su prueba pasa (no notó todas las violaciones…), pero todavía no cuenta» en lugar de «sin patrón ni pruebas».
+
 ## 6. Pendientes y riesgos
 
-- **Variación entre corridas.** Los falsos negativos del empalme de profesionales y del bloqueo de cuenta aparecen en 1 de cada 3 corridas;
+- **Variación entre corridas** (mitigado: «Preparar todo» escribe de nuevo las pruebas que no coinciden con la lectura del código; falta medir cuánto ayuda con Gemini real). Los falsos negativos del empalme de profesionales y del bloqueo de cuenta aparecen en 1 de cada 3 corridas;
   de vez en cuando una prueba sale rota. Por eso nada se aprueba sin prueba de fuerza y lectura del código.
-- **Un solo modelo y un solo repo.** Falta repetir la medición con `inventario-demo` (18 reglas, 5 rotas) y con otro modelo.
+- **Un solo modelo.** `inventario-demo` ya se midió de punta a punta (§5b); falta otro modelo y volver a medir `reservas-demo` con el flujo nuevo.
 - **Paso 7: caja negra** con docker-compose y base de datos real. Un repo que necesite servicios externos no se podrá verificar bien.
-- **La revisión independiente** todavía no entra en la confianza por regla.
+- ~~**La revisión independiente** todavía no entra en la confianza por regla.~~ Ya entra (coincide sube, discrepa baja a «baja»).
 - **Plazos ambiguos:** la lista es corta y fija; «pronto», «al cierre» o «cada mes» no se detectan.
 - **PDF escaneado** (sin texto): sus citas quedan «sin comprobar».
 - **`vitest`:** hay que investigar por qué falla con `npm test` en este equipo.

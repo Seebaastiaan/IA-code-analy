@@ -491,6 +491,11 @@ test('reglas de negocio: «Preparar todo» hace solo el arnés, las pruebas y la
   await page.getByRole('button', { name: 'Preparar todo', exact: true }).click()
   const steps = page.getByRole('list', { name: 'Avance de la preparación' })
   await expect(steps.getByText('Preparar el entorno de pruebas del proyecto')).toBeVisible()
+  // Corre en el servidor: salir de la pantalla no lo detiene y al volver se ve el avance
+  await page.getByRole('tab', { name: 'General' }).click()
+  await expect(steps).toBeHidden()
+  await page.getByRole('tab', { name: 'Reglas de negocio' }).click()
+  await expect(page.getByRole('list', { name: 'Avance de la preparación' })).toBeVisible()
   // Termina con el resumen y sin pasos fallidos
   await expect(page.getByText('Listo. El siguiente análisis usará estas reglas y pruebas.')).toBeVisible({ timeout: 90_000 })
   await expect(steps.getByText(/pruebas aprobadas por el programa/)).toBeVisible()
@@ -562,6 +567,8 @@ test('reglas de negocio: el resultado en palabras y «el documento manda» para 
   await page.getByRole('tab', { name: 'Reglas' }).click()
   // Resumen y una frase por regla, con semáforo
   await expect(page.getByText(/reglas se cumplen · \d+ no se cumplen?/)).toBeVisible()
+  // Lo que se cumplía en el análisis anterior y ya no, arriba y con su título
+  await expect(page.getByRole('alert').filter({ hasText: /Dejó de cumplirse desde el análisis #\d+: RN-003/ })).toBeVisible()
 
   await page.getByRole('button', { name: /RN-002/ }).click()
   await expect(page.getByText('El documento manda: el código tiene que seguir a la regla.')).toBeVisible()

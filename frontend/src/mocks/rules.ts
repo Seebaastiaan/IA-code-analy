@@ -372,11 +372,17 @@ export function reportRules(repoId: string, reportId: string): BusinessRules {
     no_implementada: rules.filter((r) => r.status === 'no_implementada').length,
     fuera_del_codigo: rules.filter((r) => r.status === 'fuera_del_codigo').length,
   })
-  if (REPO_RULES[repoId])
+  if (REPO_RULES[repoId]) {
+    // En la demo, RN-003 se cumplía en el análisis anterior: el reporte avisa que dejó de cumplirse
+    const index = report ? repo.reports.indexOf(report) : -1
+    const previous = index > 0 ? index : null
+    const rules = R1_RESULTS.map((r) => ({ ...r, previous_status: previous === null ? null : r.id === 'RN-003' ? ('cumple' as const) : r.status }))
     return {
-      ...base, source: FILENAME, origin: 'repo', project: 'API de pagos', tests_ran: true, rules: R1_RESULTS, summary: count(R1_RESULTS),
+      ...base, source: FILENAME, origin: 'repo', project: 'API de pagos', tests_ran: true, rules, summary: count(rules),
       warnings: ['tests/test_api.py::test_reembolso usa RN-099, que no está en reglas_negocio.toml'],
+      previous_num: previous, regressions: previous === null ? [] : ['RN-003'],
     }
+  }
   const up = uploads.get(repoId)
   if (!up) return { ...base, source: null, origin: null, project: null, tests_ran: false, rules: [], summary: count([]) }
   const { project, rules } = parse(up.content)

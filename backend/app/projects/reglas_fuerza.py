@@ -58,6 +58,19 @@ KEEP_DECORATORS = {
 }
 # Llamadas que no se quitan: quitarlas no cambia lo que hace el código (registros)
 KEEP_CALLS = {"log", "logger", "logging", "print", "warnings", "warn"}
+# Palabras con las que una regla habla de que algo exista: solo entonces se quita un `raise` de «no existe» (404)
+EXISTENCE_WORDS = {"existe", "existir", "inexistente", "encontrado", "404"}
+
+
+def not_found(node: ast.AST) -> bool:
+    """`raise HTTPException(404, …)` / `abort(404)` / `Http404(…)`: la guarda de «no existe», común a casi todo endpoint."""
+    exc = node.exc if isinstance(node, ast.Raise) else None
+    if not isinstance(exc, ast.Call):
+        return isinstance(exc, ast.Name) and exc.id in ("Http404", "NotFound")
+    if _callee(exc).split(".")[-1] in ("Http404", "NotFound", "get_object_or_404"):
+        return True
+    values = [*exc.args[:1], *(k.value for k in exc.keywords if k.arg in ("status_code", "code", "status"))]
+    return any(isinstance(v, ast.Constant) and v.value == 404 for v in values)
 
 
 @dataclass
@@ -358,6 +371,10 @@ def mutants(
             # otras reglas, y se filtra por palabras como sin evidencia
             loose = t.source != "evidencia" or t.end - t.start + 1 > PRECISE_LINES
             for c in candidates(source, tree, t.start, t.end):
+                # Quitar el «no existe» de una función común sobrevive a casi cualquier prueba de otra cosa (RN-011, 012 y
+                # 013 de inventario salían «parciales» por `obtener_producto`): solo cuenta si la regla habla de existencia
+                if c.kind == "excepcion" and not_found(c.node) and not words & EXISTENCE_WORDS:
+                    continue
                 ctx = pruebas._words(c.context)
                 relevance = len(words & ctx)
                 # De otra regla: se parece más a ella que a esta (solo las líneas de un tramo largo; una línea precisa de

@@ -41,30 +41,40 @@ def outcome(expected: str | None, status: str | None) -> str | None:
 LADDER = ("ninguna", "baja", "media", "alta")
 
 
-def confidence(level: str | None, strength: str | None) -> str | None:
+def confidence(level: str | None, strength: str | None, crosscheck: str | None = None) -> str | None:
     """
-    Solidez del resultado: la del nivel de verificación, ajustada por la prueba de fuerza de su prueba: «fuerte» (mató todos
-    los cambios) sube un escalón; «débil» (no notó ninguno) la deja como mucho en «baja».
+    Solidez del resultado: la del nivel de verificación, ajustada por dos comprobaciones de su prueba.
+
+    - Prueba de fuerza: «fuerte» (mató todos los cambios) sube un escalón; «débil» (no notó ninguno) la deja como mucho en «baja».
+    - Segunda opinión (la IA lee el código sin ver la prueba): «coincide» sube un escalón; «discrepa» la deja como mucho en
+      «baja», porque una de las dos está equivocada y no se sabe cuál.
     """
     if not level:
         return None
     base = CONFIDENCE.get(level)
-    if base is None or level == "patron" or strength is None or base == "ninguna":
+    if base is None or level == "patron" or base == "ninguna":
         return base
     i = LADDER.index(base)
     if strength == "fuerte":
-        return LADDER[min(i + 1, 3)]
-    if strength == "debil":
-        return LADDER[min(i, 1)]
-    return base
+        i += 1
+    if crosscheck == "coincide":
+        i += 1
+    i = min(i, 3)
+    if strength == "debil" or crosscheck == "discrepa":
+        i = min(i, 1)
+    return LADDER[i]
 
 
 def build(
     rules: list[tuple[str, str]], expected: dict[str, str], results: dict[str, tuple[str, str]], strength: dict[str, str] | None = None,
+    crosscheck: dict[str, str] | None = None,
 ) -> list[Item]:
-    """`rules` = (id, título) en orden; `results` = regla → (estado, nivel) del último análisis; `strength` = regla → resultado de su prueba de fuerza."""
+    """
+    `rules` = (id, título) en orden; `results` = regla → (estado, nivel) del último análisis; `strength` = regla → resultado
+    de su prueba de fuerza; `crosscheck` = regla → coincide | discrepa (la prueba contra la lectura independiente del código).
+    """
     items = []
     for rid, title in rules:
         status, level = results.get(rid, (None, None))
-        items.append(Item(rid, title, expected.get(rid), status, outcome(expected.get(rid), status), confidence(level, (strength or {}).get(rid))))
+        items.append(Item(rid, title, expected.get(rid), status, outcome(expected.get(rid), status), confidence(level, (strength or {}).get(rid), (crosscheck or {}).get(rid))))
     return items

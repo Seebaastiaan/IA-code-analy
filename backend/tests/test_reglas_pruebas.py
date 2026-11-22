@@ -310,6 +310,21 @@ def test_cargar_reglas_desde_configuracion(client, cloner):
     assert client.delete(f"/api/projects/{rid}/reglas").json()["active"] is None
 
 
+def test_el_reporte_dice_que_reglas_dejaron_de_cumplirse(client, cloner):
+    # Primer análisis: app/pagos no tiene `Decimal(` y la regla se cumple
+    cloner.contenido = regla(rutas='["app/pagos/"]', prohibido="'Decimal\\('")
+    rid = repo_id(client)
+    first = client.get("/api/report/latest/reglas", params={"repo": rid}).json()
+    assert first["rules"][0]["status"] == "cumple" and first["previous_num"] is None and first["regressions"] == []
+
+    # Segundo: ahora el repo prohíbe `float(` y cobro.py lo usa
+    cloner.contenido = regla(rutas='["app/pagos/"]', prohibido="'float\\('")
+    wait_done(client, client.post(f"/api/repos/{rid}/analyze").json()["job_id"])
+    second = client.get("/api/report/latest/reglas", params={"repo": rid}).json()
+    assert second["rules"][0]["status"] == "no_cumple" and second["rules"][0]["previous_status"] == "cumple"
+    assert second["previous_num"] == 1 and second["regressions"] == ["RN-001"]
+
+
 def test_el_archivo_del_repo_gana(client):
     rid = repo_id(client)
     body = client.put(f"/api/projects/{rid}/reglas", json={"content": regla()}).json()
