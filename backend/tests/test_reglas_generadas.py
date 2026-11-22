@@ -25,11 +25,12 @@ from app.assistant import router as assistant_router
 from app.assistant.llm import Answer
 from app.projects import reglas_arnes as arnes
 from app.projects import reglas_pruebas as pruebas
+from tests import demos
 from tests.test_analysis import URL, wait_done
 from tests.test_reglas_arnes import ClonerInventario, harness_of
 
 SEED = Path(__file__).resolve().parent.parent / "seed_data"
-INVENTARIO = SEED / "inventario_demo"
+INVENTARIO = demos.combined("inventario_demo")
 PLUGINS = Path(reglas.__file__).resolve().parent.parent / "analysis"
 RULES = {r.id: r for r in reglas.parse((INVENTARIO / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8")).rules}
 
@@ -225,6 +226,18 @@ def test_una_ronda_de_correccion_con_los_errores(mp, harness):
     g = pruebas.generate(llm, INVENTARIO, mp, harness, RULES["RN-002"])
     assert len(llm.calls) == 2 and "usa `preparar` sin definirlo" in llm.calls[1][-1].text
     assert pruebas.validate(g.code, "RN-002", mp, arnes.fixtures_of(harness)).valid
+
+
+def test_una_prueba_rota_se_corrige_con_el_error_de_su_corrida(mp, harness):
+    # Corrida real (inventario-demo): la prueba esperaba 201 de una venta que responde 200 y se rompió al preparar el escenario
+    llm = FakeLLM(reply(hand_test("RN-002")))
+    anterior = "def test_rn002_viejo(como):\n    pass\n"
+    error = 'test_rn002_viejo: conftest.PreparacionFallida: la venta no se pudo realizar: 201 {"venta_id":1}'
+    g = pruebas.generate(llm, INVENTARIO, mp, harness, RULES["RN-002"], broken=(anterior, error))
+    turns = llm.calls[0]
+    assert len(llm.calls) == 1 and [t.role for t in turns] == ["user", "model", "user"]
+    assert "test_rn002_viejo" in turns[1].text and "se ROMPIÓ al preparar el escenario" in turns[2].text and "PreparacionFallida" in turns[2].text
+    assert g.kind == "prueba"
 
 
 def test_si_dice_no_implementada_con_endpoints_que_existen_se_le_insiste(mp, harness):
@@ -434,6 +447,17 @@ def test_generar_correr_aprobar_exportar_y_analizar(client, settings, local_sand
     assert set(overlay) == {pruebas.CONFTEST, by_rule(view)["RN-006"]["test"]["file"], by_rule(view)["RN-017"]["test"]["file"]}
     assert notes == {} and {t.rules for t in declared} == {("RN-006",), ("RN-017",)}
 
+    # El código cambia y ya no tiene una ruta que usa la prueba aprobada de RN-006: fallaría por eso, no porque el código
+    # viole la regla. No se corre, queda como prueba rota con el motivo y la vista lo dice para escribirla de nuevo
+    with session(settings.database_path) as conn:
+        conn.execute("UPDATE business_rule_tests SET endpoints = ? WHERE repo_id = ? AND rule_id = 'RN-006'", (json.dumps(["DELETE /ya-no-existe/{id}"]), rid))
+    with session(settings.database_path) as conn:
+        overlay, notes, declared = pipeline.app_rule_tests(conn, settings, rid)
+    assert by_rule(view)["RN-006"]["test"]["file"] not in overlay and {t.rules for t in declared} == {("RN-017",)}
+    assert notes["RN-006"].status == "prueba_rota" and "DELETE /ya-no-existe/{id}, que ya no está en el código" in notes["RN-006"].detail
+    gone = by_rule(client.get(f"/api/projects/{rid}/reglas/pruebas").json())["RN-006"]["test"]["gone_endpoints"]
+    assert gone == ["DELETE /ya-no-existe/{id}"]
+
 
 def test_generar_necesita_el_arnes_aprobado(client, settings):
     settings.gemini_api_key = "clave"
@@ -468,3 +492,19 @@ def test_no_implementada_cuenta_en_el_analisis_sin_correr(client, settings, loca
                        (INVENTARIO / "referencia/reglas_negocio.toml").read_text(encoding="utf-8"))
     sin_pruebas = reglas.with_app(reglas.RulesCheck(source="x", project="x", patterns=check.patterns, declared=[]), [], notes)
     assert {r.rule.id: r.status for r in sin_pruebas.results}["RN-012"] == "no_implementada"
+
+
+def test_una_prueba_sin_aprobar_dice_lo_que_se_sabe_en_el_reporte():
+    code = "def test_rn001_x():\n    pass\n"
+    h = arnes.code_hash(code)
+    row = lambda verdict, strength=None, **kw: {
+        "kind": "prueba", "code": code, "run_hash": h, "run_result": json.dumps({"verdict": verdict}),
+        "strength_hash": h if strength else None, "strength_result": json.dumps({"status": strength}) if strength else None, **kw,
+    }
+    assert pruebas.unapproved_note(row("cumple", "parcial")) == (
+        "Su prueba pasa (no notó todas las violaciones que se le inyectaron), pero todavía no cuenta: revísala y apruébala en Configuración → Reglas"
+    )
+    assert pruebas.unapproved_note(row("no_cumple")).startswith("Su prueba falla, pero todavía no cuenta")
+    # Sin correr con su código actual no se sabe nada
+    assert pruebas.unapproved_note(row("cumple", run_hash="otro")) is None
+    assert pruebas.unapproved_note(row("cumple", kind="no_implementada")) is None

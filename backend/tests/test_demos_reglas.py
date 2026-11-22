@@ -16,6 +16,7 @@ import pytest
 from app.analyses import reglas
 from app.analyses.scoring import business_score
 from app.projects import reglas_importar as importar
+from tests import demos
 
 SEED = Path(__file__).resolve().parent.parent / "seed_data"
 PLUGINS = Path(reglas.__file__).resolve().parent.parent / "analysis"
@@ -34,7 +35,7 @@ class Demo:
 
     @property
     def root(self) -> Path:
-        return SEED / self.carpeta
+        return demos.combined(self.carpeta)
 
     @property
     def referencia(self) -> str:
@@ -99,7 +100,24 @@ def test_veredictos_con_pytest(demo, tmp_path):
     # Ninguna prueba falla al preparar (sería el arnés, no el código)
     assert [t["nodeid"] for t in data["tests"] if t["outcome"] == "error"] == []
     check = reglas.with_tests(_check(demo), data, None)
-    assert {r.rule.id: r.status for r in check.results} == demo.esperado
+    assert {r.rule.id: r.status for r in check.results} == demo.esperado
+
 
     # Fase 6: la compuerta para activar `neg` en el score
     assert business_score((r.status, r.rule.severity) for r in check.results) == demo.neg
+
+
+def test_el_repo_demo_es_como_cualquier_otro(demo):
+    # Lo que se publica no trae respuestas ni ayudas: ni reglas resueltas, ni pruebas ligadas a reglas, ni arnés hecho, ni
+    # textos que digan qué está roto. Todo eso vive en seed_data/<demo>_clave
+    name = demo.carpeta
+    root = demos.clean(name)
+    files = [p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts]
+    rel = {p.relative_to(root).as_posix() for p in files}
+    assert not any(r.startswith(("referencia/", "tests/")) or r in ("pytest.ini", "conftest.py", "reglas_negocio.toml") for r in rel), rel
+    for p in files:
+        if p.suffix in (".py", ".md", ".js", ".html", ".txt", ".ini", ".toml"):
+            text = p.read_text(encoding="utf-8").lower()
+            for giveaway in ("ia voy", "ia_voy", "a propósito", "sembrad", "rn-0", "esperado.md", "pytest.mark.regla"):
+                assert giveaway not in text, f"{p.relative_to(root)} dice «{giveaway}»"
+    assert (demos.key(name) / "referencia" / "ESPERADO.md").exists()

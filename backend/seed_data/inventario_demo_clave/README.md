@@ -1,3 +1,8 @@
+> **Clave de respuestas de `seed_data/inventario_demo`: no se publica.** El repo `inventario-demo` es solo `seed_data/inventario_demo` (código,
+> interfaz, documento de requisitos y README de producto), como cualquier otro repo. Aquí quedan las reglas resueltas, el
+> veredicto esperado, las pruebas escritas a mano y su arnés; las pruebas del backend (`tests/demos.py`) combinan las dos
+> carpetas y `scripts/medir_preparar.py` compara contra `referencia/ESPERADO.md`.
+
 # Inventario de la cafetería (proyecto demo)
 
 API de inventario en FastAPI + SQLAlchemy + SQLite: catálogo, lotes con PEPS, Kardex, recetas, mermas, ajustes,

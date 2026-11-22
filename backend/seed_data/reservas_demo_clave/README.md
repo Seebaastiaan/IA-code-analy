@@ -1,3 +1,8 @@
+> **Clave de respuestas de `seed_data/reservas_demo`: no se publica.** El repo `reservas-demo` es solo `seed_data/reservas_demo` (código,
+> interfaz, documento de requisitos y README de producto), como cualquier otro repo. Aquí quedan las reglas resueltas, el
+> veredicto esperado, las pruebas escritas a mano y su arnés; las pruebas del backend (`tests/demos.py`) combinan las dos
+> carpetas y `scripts/medir_preparar.py` compara contra `referencia/ESPERADO.md`.
+
 # Reservas Sereno (proyecto demo)
 
 API de reservas de un centro de bienestar en Flask + SQLAlchemy + SQLite: servicios, profesionales, citas, anticipos,

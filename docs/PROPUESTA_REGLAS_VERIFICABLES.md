@@ -570,8 +570,8 @@ en [CRITERIOS_DE_ANALISIS.md](CRITERIOS_DE_ANALISIS.md) §2.
 
 | Repo | Contenido | Qué debe salir |
 |---|---|---|
-| `seed_data/inventario_demo/` (**hecho**, ver su [ESPERADO.md](../backend/seed_data/inventario_demo/referencia/ESPERADO.md)) | FastAPI + SQLAlchemy + SQLite, roles cajero, barista, gerente y almacenista, Kardex, lotes y recetas. `docs/Requerimientos.docx` con las 15 reglas de §3, 1 regla de proceso y 7 ambigüedades a propósito. **5 reglas rotas a propósito**: stock negativo en ventas, DELETE físico, cajero que cambia precios y costos, costo promedio simple en lugar de ponderado y bitácora sin valor anterior | 18 reglas atómicas + 1 de proceso, ≥ 5 de 7 dudas, 13 cumple y 5 no cumple, 0 pruebas rotas tras aprobar el arnés |
-| `seed_data/reservas_demo/` (**hecho**, ver su [ESPERADO.md](../backend/seed_data/reservas_demo/referencia/ESPERADO.md)) | Flask + SQLAlchemy: clientes, citas, anticipo, cancelaciones con reembolso, premium, correos, recordatorios y bloqueo tras 3 intentos. `docs/Requisitos.pdf` con **2 contradicciones** entre áreas, 1 excepción que no es contradicción, 1 regla repetida con otras palabras y 3 dudas. **4 reglas rotas**: empalme del profesional, 24 h exactas, IDOR al ver una cita, bloqueo en el 4.º intento | 15 reglas (+2 de finanzas que se descartan al resolver), contradicciones 1 y 2 marcadas sin marcar la excepción, 11 cumple y 4 no cumple. Reglas con `reloj`, `buzon` y matriz de permisos |
+| `seed_data/inventario_demo/` (**hecho**, ver su [ESPERADO.md](../backend/seed_data/inventario_demo_clave/referencia/ESPERADO.md)) | FastAPI + SQLAlchemy + SQLite, roles cajero, barista, gerente y almacenista, Kardex, lotes y recetas. `docs/Requerimientos.docx` con las 15 reglas de §3, 1 regla de proceso y 7 ambigüedades a propósito. **5 reglas rotas a propósito**: stock negativo en ventas, DELETE físico, cajero que cambia precios y costos, costo promedio simple en lugar de ponderado y bitácora sin valor anterior | 18 reglas atómicas + 1 de proceso, ≥ 5 de 7 dudas, 13 cumple y 5 no cumple, 0 pruebas rotas tras aprobar el arnés |
+| `seed_data/reservas_demo/` (**hecho**, ver su [ESPERADO.md](../backend/seed_data/reservas_demo_clave/referencia/ESPERADO.md)) | Flask + SQLAlchemy: clientes, citas, anticipo, cancelaciones con reembolso, premium, correos, recordatorios y bloqueo tras 3 intentos. `docs/Requisitos.pdf` con **2 contradicciones** entre áreas, 1 excepción que no es contradicción, 1 regla repetida con otras palabras y 3 dudas. **4 reglas rotas**: empalme del profesional, 24 h exactas, IDOR al ver una cita, bloqueo en el 4.º intento | 15 reglas (+2 de finanzas que se descartan al resolver), contradicciones 1 y 2 marcadas sin marcar la excepción, 11 cumple y 4 no cumple. Reglas con `reloj`, `buzon` y matriz de permisos |
 | `seed_data/demo_repo/` (ya existe, pagos) | Se actualiza al formato v2 | Debe seguir dando el mismo resultado que hoy (prueba de compatibilidad) |
 
 Los demo son código nuestro: los podemos modificar, versionar y usar en las pruebas automáticas (pytest del backend
@@ -731,7 +731,7 @@ generadas aciertan.
 
   | Qué | Resultado |
   |---|---|
-  | Prueba débil sembrada de RN-004 ([referencia/pruebas_debiles](../backend/seed_data/reservas_demo/referencia/pruebas_debiles/test_rn004_debil.py)) | **débil**: 0 de 3 cambios a `citas.py:51-52` |
+  | Prueba débil sembrada de RN-004 ([referencia/pruebas_debiles](../backend/seed_data/reservas_demo_clave/referencia/pruebas_debiles/test_rn004_debil.py)) | **débil**: 0 de 3 cambios a `citas.py:51-52` |
   | Prueba buena de RN-004 (la escrita a mano del demo) | **fuerte**: 3 de 3 |
   | Matriz de RN-015 marcada como dice la regla | cumple (21 celdas) |
   | La misma matriz con «el cliente puede crear servicios» | no cumple |

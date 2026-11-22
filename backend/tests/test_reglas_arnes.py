@@ -19,12 +19,13 @@ from app.analysis import sandbox
 from app.assistant import router as assistant_router
 from app.assistant.llm import Answer
 from app.projects import reglas_arnes as arnes
+from tests import demos
 from tests.conftest import FakeCloner
 from tests.test_analysis import URL, wait_done
 
 SEED = Path(__file__).resolve().parent.parent / "seed_data"
-INVENTARIO = SEED / "inventario_demo"
-RESERVAS = SEED / "reservas_demo"
+INVENTARIO = demos.combined("inventario_demo")
+RESERVAS = demos.combined("reservas_demo")
 
 
 def harness_of(root: Path) -> str:

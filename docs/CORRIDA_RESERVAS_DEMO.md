@@ -1,7 +1,7 @@
 # Primera corrida real: `reservas-demo` con Gemini y el sandbox
 
 Fecha: 2026-11-22. Repo: `urielbatizzzzzzzz/reservas-demo` (público). Modelo: Gemini 3.5 Flash Lite. Sandbox: WSL. Verdad contra la que se compara:
-`backend/seed_data/reservas_demo/referencia/ESPERADO.md` (4 reglas rotas a propósito: empalme de profesionales, reembolso a las 24 h exactas,
+`backend/seed_data/reservas_demo_clave/referencia/ESPERADO.md` (4 reglas rotas a propósito: empalme de profesionales, reembolso a las 24 h exactas,
 cliente que ve la cita de otro y bloqueo tras 3 intentos).
 
 ## Qué se encontró y se corrigió

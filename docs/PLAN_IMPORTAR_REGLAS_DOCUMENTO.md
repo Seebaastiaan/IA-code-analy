@@ -247,7 +247,7 @@ detectaba contradicciones entre patrones regex, que las reglas importadas no tie
 - **El aviso** del editor (`ImportNotice`) lista las contradicciones en rojo, antes que las dudas
   (`ImportedRules.contradictions`).
 
-Lo prueba `reservas_demo` ([ESPERADO.md](../backend/seed_data/reservas_demo/referencia/ESPERADO.md) §3): 2
+Lo prueba `reservas_demo` ([ESPERADO.md](../backend/seed_data/reservas_demo_clave/referencia/ESPERADO.md) §3): 2
 contradicciones reales, 1 excepción que no se debe marcar y 1 regla repetida con otras palabras.
 
 ## 6. Tareas

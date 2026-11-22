@@ -257,6 +257,22 @@ def test_evidencia_sin_fragmentos_no_llama_a_la_ia(tmp_path):
 # ───────────────────────── Prueba de fuerza ─────────────────────────
 
 
+def test_no_se_quita_el_404_de_no_existe_salvo_que_la_regla_hable_de_existencia():
+    # Corrida real (inventario-demo): RN-011, 012 y 013 salían «parciales» porque sobrevivía quitar el
+    # `raise HTTPException(404, "No existe el producto")` de `obtener`, que ninguna de esas pruebas tiene por qué notar
+    inventario = SEED_ROOT / "inventario_demo"
+    reglas_inv = {r.id: r for r in reglas.parse((inventario / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8")).rules}
+    ev = evidencia.Evidence("implementada", "", [evidencia.Place("inventario/servicios.py", 25, 29, "")])
+    mp_inv = mapa.build(inventario)
+    ms, _ = fuerza.mutants(inventario, mp_inv, reglas_inv["RN-013"], [], ev)
+    assert 28 not in {m.line for m in ms}
+    existe = dataclasses.replace(reglas_inv["RN-013"], description="Si el producto no existe se responde 404")
+    assert 28 in {m.line for m in fuerza.mutants(inventario, mp_inv, existe, [], ev)[0]}
+
+    tree = __import__("ast").parse("raise HTTPException(404, 'x')\nraise HTTPException(status_code=404)\nraise Http404\nraise HTTPException(409, 'y')\n")
+    assert [fuerza.not_found(n) for n in tree.body] == [True, True, True, False]
+
+
 def test_no_se_muta_la_linea_de_otra_regla():
     # RN-016 de inventario: su evidencia es la función `salida`, que también trae el aviso de RN-014 (`base < costo`).
     # Antes solo se mutaba esa línea (la de otra regla) y la prueba buena salía «débil»

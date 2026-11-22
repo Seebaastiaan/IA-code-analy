@@ -15,6 +15,7 @@ from app.projects import reglas_concordancia as concordancia
 from app.projects import reglas_importar as importar
 from app.projects import reglas_pruebas as pruebas
 from app.projects import reglas_respuestas as respuestas
+from tests import demos
 from tests.test_analysis import URL, wait_done
 from tests.test_reglas import correr, repo
 from tests.test_reglas_importar import docx
@@ -79,9 +80,9 @@ def test_lee_los_campos_v2():
 
 def test_un_archivo_v1_sigue_siendo_valido_y_su_criterio_es_un_escenario():
     for demo in ("inventario_demo", "reservas_demo"):
-        rs = reglas.parse((SEED / demo / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8"))
+        rs = reglas.parse((demos.key(demo) / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8"))
         assert rs.format == 1 and rs.warnings == [] and all(r.approved and r.tipo is None for r in rs.rules)
-    rs = reglas.parse((SEED / "inventario_demo" / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8"))
+    rs = reglas.parse((demos.key("inventario_demo") / "referencia" / "reglas_negocio.toml").read_text(encoding="utf-8"))
     rn1 = rs.rules[0]
     assert rn1.scenarios == (reglas.Scenario("un producto con una compra registrada", "el gerente lo elimina", "sigue existiendo con estado Inactivo y su Kardex intacto"),)
     # Un criterio que no es «Dado…, cuando…, entonces…» se queda como texto
@@ -465,6 +466,17 @@ def test_la_prueba_de_fuerza_ajusta_la_confianza():
     assert (c("pruebas_y_patron", "fuerte"), c("pruebas_y_patron", "debil")) == ("alta", "baja")
     # El patrón no tiene prueba que mutar, y sin verificación no hay confianza que subir
     assert (c("patron", "fuerte"), c("ninguno", "fuerte"), c(None, "fuerte")) == ("baja", "ninguna", None)
+
+
+def test_la_segunda_opinion_ajusta_la_confianza():
+    c = concordancia.confidence
+    # Coincide con la lectura del código: sube un escalón (hasta alta)
+    assert (c("pruebas", None, "coincide"), c("pruebas", "fuerte", "coincide")) == ("alta", "alta")
+    # Discrepa: una de las dos se equivoca, así que queda como mucho en baja aunque la prueba sea fuerte
+    assert (c("pruebas", "fuerte", "discrepa"), c("pruebas_y_patron", None, "discrepa")) == ("baja", "baja")
+    assert c("patron", None, "coincide") == "baja"
+    items = concordancia.build([("RN-001", "A")], {}, {"RN-001": ("cumple", "pruebas")}, {"RN-001": "fuerte"}, {"RN-001": "discrepa"})
+    assert items[0].confidence == "baja"
 
 
 def test_casos_de_control_y_panel_de_concordancia(client, rid):

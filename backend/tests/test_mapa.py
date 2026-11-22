@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 
 from app.analyses import mapa
+from tests import demos
 
 SEED = Path(__file__).resolve().parent.parent / "seed_data"
 
@@ -26,7 +27,7 @@ def endpoints(mp: mapa.ProjectMap) -> dict[str, mapa.Endpoint]:
 
 
 def test_inventario_demo_fastapi():
-    mp = mapa.build(SEED / "inventario_demo")
+    mp = mapa.build(demos.combined("inventario_demo"))
     assert (mp.framework, mp.packages, mp.warnings) == ("fastapi", ["inventario"], [])
     eps = endpoints(mp)
     # Prefijo del APIRouter (prefix="/productos") + ruta vacía del decorador
@@ -50,7 +51,7 @@ def test_inventario_demo_fastapi():
 
 
 def test_reservas_demo_flask():
-    mp = mapa.build(SEED / "reservas_demo")
+    mp = mapa.build(demos.combined("reservas_demo"))
     assert mp.framework == "flask"
     eps = endpoints(mp)
     # Rutas de Flask con parámetros (<int:cita_id> → {cita_id}) dentro de la fábrica crear_app()

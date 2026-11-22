@@ -42,7 +42,7 @@ def seeded(esperado: str) -> dict[str, list[tuple[str, int]]]:
     for line in esperado.splitlines():
         m = re.match(r"\| (RN-\d{3}) \|", line)
         if m and "no cumple" in line:
-            out[m.group(1)] = [(f, int(n)) for f, n in re.findall(r"\]\(\.\./([^#)]+)#L(\d+)\)", line)]
+            out[m.group(1)] = [(f, int(n)) for f, n in re.findall(r"\]\(\.\./\.\./\w+_demo/([^#)]+)#L(\d+)\)", line)]
     return out
 
 
@@ -62,10 +62,12 @@ def test_ids(root: Path) -> dict[str, list[str]]:
 
 
 for name in only:
-    src = SEED / name
+    # El demo como se publica, con las pruebas escritas a mano y su arnés de la clave (seed_data/<demo>_clave)
+    src = SEED / f"{name}_clave"
     dest = S / "clones" / name
     shutil.rmtree(dest, ignore_errors=True)
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "referencia"))
+    shutil.copytree(SEED / name, dest, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(src, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "referencia", "README.md"))
     mp = mapa.build(dest)
     rules = reglas.parse((src / "referencia/reglas_negocio.toml").read_text(encoding="utf-8")).rules
     esperado = (src / "referencia/ESPERADO.md").read_text(encoding="utf-8")
