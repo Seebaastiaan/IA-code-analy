@@ -405,10 +405,10 @@ def wait_smoke(client, rid: str) -> dict:
 def test_mapa_y_arnes_de_un_proyecto(client):
     rid = project(client)
     mp = client.get(f"/api/projects/{rid}/reglas/mapa").json()
-    assert mp["framework"] == "fastapi" and len(mp["endpoints"]) == 16 and "commit" in mp
+    assert mp["framework"] == "fastapi" and len(mp["endpoints"]) == 18 and "commit" in mp
     view = client.get(f"/api/projects/{rid}/reglas/arnes").json()
     assert view["cloned"] and view["harness"] is None and not view["ready"]
-    assert view["map"]["framework"] == "fastapi" and view["map"]["endpoints"] == 16 and view["map"]["models"] == 9
+    assert view["map"]["framework"] == "fastapi" and view["map"]["endpoints"] == 18 and view["map"]["models"] == 9
     assert view["map"]["roles"] == ["cajero", "barista", "gerente", "almacenista"]
     assert view["repo_harness"] == "tests/reglas/conftest.py"
     # Sin GEMINI_API_KEY ni sandbox (SANDBOX=off por defecto)

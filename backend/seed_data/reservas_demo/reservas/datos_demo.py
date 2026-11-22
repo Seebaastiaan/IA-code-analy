@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
-from reservas import citas, db
+from reservas import citas, db, reloj
 from reservas.modelos import Profesional, Servicio, Usuario
 
 CLAVE = "demo-clave-1234"
@@ -47,7 +47,7 @@ def sembrar(url: str | None = None) -> str:
         marta, diego = Profesional(nombre="Marta"), Profesional(nombre="Diego")
         s.add_all([masaje, facial, reflexo, marta, diego])
         s.flush()
-        manana = _proximo_dia_habil(datetime.now(), 10)
+        manana = _proximo_dia_habil(reloj.ahora(), 10)
         citas.reservar(s, usuarios["ana@sereno.example"], masaje, marta, manana)
         citas.reservar(s, usuarios["luis@sereno.example"], facial, diego, manana + timedelta(hours=2))
         s.commit()
