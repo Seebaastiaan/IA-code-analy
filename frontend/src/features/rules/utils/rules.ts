@@ -1,8 +1,26 @@
 import type { CHIP_TONES } from '@/shared/ui/styles'
 import type {
-  BusinessRuleResult, Harness, HarnessOrigin, MapSummary, MatrixCell, PermissionMatrix, RuleLevel, RulesPrecheck, RuleStatus, RuleTestState,
-  RuleTestsView, RulesValidation, SmokeStatus, StrengthStatus, SupportEvidence, TestOutcome,
+  BusinessRuleResult, Crosscheck, Harness, HarnessOrigin, MapSummary, MatrixCell, PermissionMatrix, RuleLevel, RulesPrecheck, RuleStatus, RuleTestState,
+  RuleTestsView, RulesValidation, RuleTestRun, SmokeStatus, StrengthStatus, SupportEvidence, TestOutcome,
 } from '../types'
+
+// (resultado de la prueba, lectura del código) → ¿coinciden? Igual que `crosscheck` del backend (app/projects/pruebas.py)
+const CROSS: Record<string, [Crosscheck['status'], string]> = {
+  'cumple|implementada': ['coincide', 'La prueba pasa y la lectura del código confirma que la regla está implementada.'],
+  'no_cumple|no_encontrada': ['coincide', 'La prueba falla y la lectura no encuentra la regla en el código: probablemente no está implementada.'],
+  'no_cumple|parcial': ['coincide', 'La prueba falla y la lectura ve la regla solo en parte: falta cubrir algo.'],
+  'cumple|parcial': ['discrepa', 'La prueba pasa, pero la lectura del código dice que la regla solo se cumple en parte: la prueba puede ser floja.'],
+  'cumple|no_encontrada': ['discrepa', 'La prueba pasa, pero no se encontró dónde el código implementa la regla: la prueba puede no comprobar lo que dice.'],
+  'no_cumple|implementada': ['discrepa', 'La prueba falla, pero el código parece implementar la regla: la prueba puede estar mal escrita.'],
+}
+
+/** Contrasta el resultado de la prueba con la lectura independiente del código. */
+export function crosscheck(run: Pick<RuleTestRun, 'verdict'> | null, evidence: Pick<SupportEvidence, 'verdict' | 'stale'> | null): Crosscheck {
+  if (!run || (run.verdict !== 'cumple' && run.verdict !== 'no_cumple')) return { status: 'sin_revisar', note: 'Falta una prueba que corra y dé un resultado claro.' }
+  if (!evidence || evidence.stale) return { status: 'sin_revisar', note: 'Falta leer el código de forma independiente (o la lectura es de una versión anterior).' }
+  const [status, note] = CROSS[`${run.verdict}|${evidence.verdict}`]
+  return { status, note }
+}
 
 type Tone = keyof typeof CHIP_TONES
 
@@ -30,6 +48,57 @@ export const OUTCOME: Record<TestOutcome, { label: string; tone: Tone }> = {
   skipped: { label: 'Omitida', tone: 'neutral' },
   not_run: { label: 'No corrió', tone: 'neutral' },
   sin_ejecutar: { label: 'Sin ejecutar', tone: 'neutral' },
+}
+
+/** Semáforo en lenguaje normal (docs/PLAN_REGLAS_AUTOMATICO.md, paso 5): verde se cumple, rojo no, amarillo necesita una decisión. */
+export type Light = 'verde' | 'rojo' | 'amarillo' | 'gris'
+
+export const LIGHT: Record<Light, { dot: string; label: string }> = {
+  verde: { dot: '🟢', label: 'Se cumple' },
+  rojo: { dot: '🔴', label: 'No se cumple' },
+  amarillo: { dot: '🟡', label: 'Necesita una decisión' },
+  gris: { dot: '⚪', label: 'Fuera del código' },
+}
+
+/** El color de un estado (el mismo que usa `plain`). */
+export const lightOf = (status: RuleStatus): Light =>
+  status === 'cumple' ? 'verde' : status === 'no_cumple' || status === 'no_implementada' ? 'rojo' : status === 'fuera_del_codigo' ? 'gris' : 'amarillo'
+
+/** El resultado de una regla en una frase: qué pasó y con qué se comprobó, o qué caso falla y dónde. */
+export function plain(r: BusinessRuleResult): { light: Light; text: string } {
+  const failing = r.tests.find((t) => t.outcome === 'failed' || t.outcome === 'error')
+  const passing = r.tests.filter((t) => t.outcome === 'passed').length
+  switch (r.status) {
+    case 'cumple':
+      return { light: 'verde', text: passing ? `Se comprobó con ${passing} prueba${passing === 1 ? '' : 's'} que pasa${passing === 1 ? '' : 'n'}.` : 'Se comprobó buscando en el código: no aparece nada que la contradiga.' }
+    case 'no_cumple':
+      if (failing) return { light: 'rojo', text: `Falla el caso «${testFunction(failing.name)}» (${failing.file}:${failing.line}).${failing.message ? ` ${failing.message}` : ''}` }
+      return { light: 'rojo', text: r.evidence[0] ? `El código hace algo que la regla prohíbe (${r.evidence[0].file}:${r.evidence[0].line}).` : 'El código no la cumple.' }
+    case 'no_implementada':
+      return { light: 'rojo', text: 'No encontré en el código nada que la implemente.' }
+    case 'prueba_rota':
+      return { light: 'amarillo', text: 'La prueba de esta regla no pudo correr: hay que revisarla o regenerarla.' }
+    case 'sin_verificar':
+      return { light: 'amarillo', text: 'Todavía no hay forma de comprobarla: falta aprobarla, una prueba o resolver sus dudas.' }
+    default:
+      return { light: 'gris', text: 'La hace una persona, no el sistema: no se comprueba con código.' }
+  }
+}
+
+/** «34 de 40 reglas se cumplen · 2 no se cumplen · 4 necesitan una decisión» */
+export function plainSummary(rules: BusinessRuleResult[]): string {
+  const n = (l: Light) => rules.filter((r) => plain(r).light === l).length
+  const outside = n('gris')
+  const parts = [`${n('verde')} de ${rules.length - outside} reglas se cumplen`, n('rojo') && `${n('rojo')} no se cumple${n('rojo') === 1 ? '' : 'n'}`, n('amarillo') && `${n('amarillo')} necesita${n('amarillo') === 1 ? '' : 'n'} una decisión`]
+  return parts.filter(Boolean).join(' · ')
+}
+
+/** Cuántas reglas conocidas acertó el programa, con una frase («acertó 11 de 12 reglas que conocían»). */
+export const concordanceText = (known: number, hits: number, misses: number, unverified: number): string => {
+  if (!known) return 'Marca las reglas que conoces (se cumple o se viola) para medir al programa.'
+  const decided = hits + misses
+  const extra = unverified ? ` · ${unverified} sin resultado todavía` : ''
+  return decided ? `Acertó ${hits} de ${decided} reglas que conocías${extra}.` : `Todavía no hay resultado para tus ${known} reglas${extra}.`
 }
 
 export type StatusFilter = RuleStatus | 'todas'

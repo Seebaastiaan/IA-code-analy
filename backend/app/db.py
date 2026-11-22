@@ -259,6 +259,30 @@ CREATE TABLE IF NOT EXISTS business_rule_tests (
     PRIMARY KEY (repo_id, rule_id)
 );
 
+-- Respuestas de sí o no a las dudas de las reglas (app.projects.reglas_respuestas): la memoria del proyecto. Si una
+-- importación vuelve a traer la misma pregunta, se responde sola con lo que el equipo ya contestó.
+CREATE TABLE IF NOT EXISTS business_rule_answers (
+    repo_id      TEXT NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    question_key TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    question     TEXT NOT NULL,
+    answer       TEXT NOT NULL,
+    answered_by  TEXT,
+    answered_at  TEXT NOT NULL,
+    PRIMARY KEY (repo_id, question_key)
+);
+
+-- Casos de control (app.projects.reglas_concordancia): lo que el equipo sabe de una regla (cumple | viola), para medir
+-- al programa. No cambia ningún resultado.
+CREATE TABLE IF NOT EXISTS business_rule_expected (
+    repo_id    TEXT NOT NULL REFERENCES repos (id) ON DELETE CASCADE,
+    rule_id    TEXT NOT NULL,
+    expected   TEXT NOT NULL,
+    set_by     TEXT,
+    set_at     TEXT NOT NULL,
+    PRIMARY KEY (repo_id, rule_id)
+);
+
 -- Evidencia de apoyo de una regla (app.projects.reglas_evidencia, PROPUESTA §8): dónde parece estar implementada, según
 -- la IA. No cambia el estado ni el score. La última por regla; vale para la versión de la regla y el commit con que se pidió.
 CREATE TABLE IF NOT EXISTS business_rule_evidence (

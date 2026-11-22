@@ -188,8 +188,8 @@ export const handlers = [
     return typeof saved === 'string' ? fail(422, 'invalid_rules', saved) : json(saved)
   })),
   http.post(EP.rules.states(':projectId'), route(async ({ request, params }) => {
-    const { ids, status } = (await request.json()) as { ids: string[]; status: 'borrador' | 'aprobada' }
-    const done = rules.setStates(params.projectId as string, ids, status)
+    const { ids, status, by } = (await request.json()) as { ids: string[]; status: 'borrador' | 'aprobada'; by?: 'equipo' | 'programa' }
+    const done = rules.setStates(params.projectId as string, ids, status, by)
     return typeof done === 'string' ? fail(409, 'no_rules', done) : json(done)
   })),
   http.put(EP.rules.doubts(':projectId', ':ruleId'), route(async ({ request, params }) => {
@@ -197,8 +197,28 @@ export const handlers = [
     const done = rules.setDoubts(params.projectId as string, params.ruleId as string, doubts)
     return typeof done === 'string' ? fail(409, 'no_rules', done) : json(done)
   })),
+  http.get(EP.rules.control(':projectId'), route(({ params }) => json(rules.concordance(params.projectId as string)))),
+  http.put(EP.rules.expected(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { expected } = (await request.json()) as { expected: 'cumple' | 'viola' | null }
+    const done = rules.setExpected(params.projectId as string, params.ruleId as string, expected)
+    return typeof done === 'string' ? fail(404, 'unknown_rule', done) : json(done)
+  })),
+  http.post(EP.rules.write(':projectId'), route(async ({ request, params }) => {
+    const { text } = (await request.json()) as { text: string }
+    const done = rules.writeRule(params.projectId as string, text)
+    return typeof done === 'string' ? fail(422, 'invalid_sentence', done) : json(done)
+  })),
+  http.post(EP.rules.answer(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { doubt, answer } = (await request.json()) as { doubt: string; answer: 'si' | 'no' }
+    const done = rules.answerDoubt(params.projectId as string, params.ruleId as string, doubt, answer)
+    return typeof done === 'string' ? fail(409, 'unknown_doubt', done) : json(done)
+  })),
   http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
   http.post(EP.rules.validate(':projectId'), route(async ({ request, params }) => json(rules.validateFor(params.projectId as string, ((await request.json()) as { content: string }).content)))),
+  http.get(EP.rules.document(':projectId'), route(({ params, request }) => {
+    const doc = rules.documentFor(params.projectId as string, param(request, 'formato') ?? 'html')
+    return typeof doc === 'string' ? fail(409, 'no_rules', doc) : new HttpResponse(doc.body, { headers: { 'Content-Type': doc.type, 'Content-Disposition': `attachment; filename="${doc.name}"` } })
+  })),
   http.get(EP.rules.template(':projectId'), route(({ params }) => new HttpResponse(rules.templateFor(params.projectId as string), { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
   http.post(EP.rules.precheck, route(async ({ request }) => {
     const body = (await request.json()) as { url: string; branch: string; content?: string }

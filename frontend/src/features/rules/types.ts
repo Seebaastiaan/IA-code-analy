@@ -81,10 +81,38 @@ export interface RulePreview {
   /** Ambigüedades abiertas: con alguna no se puede aprobar */
   doubts?: string[]
   scenarios?: RuleScenario[]
+  /** Frase del documento de requisitos que respalda la regla */
+  quote?: string | null
+  /** El programa la encontró en el documento (null = no se pudo comprobar, p. ej. en un PDF) */
+  quote_ok?: boolean | null
+  /** 'programa' = la aprobó el programa solo (se revierte en un clic); null = el equipo */
+  approved_by?: 'programa' | null
 }
 
 export type RuleKind = 'datos' | 'flujo' | 'calculo' | 'permisos' | 'auditoria' | 'integracion' | 'proceso'
 export type RuleApproval = 'borrador' | 'aprobada'
+/** Casos de control: lo que el equipo sabe de una regla; mide al programa, no cambia resultados */
+export type ControlExpected = 'cumple' | 'viola'
+export interface ControlItem {
+  rule_id: string
+  title: string
+  expected: ControlExpected | null
+  /** Estado en el último análisis */
+  status: RuleStatus | null
+  outcome: 'acerto' | 'fallo' | 'sin_resultado' | null
+  /** Solidez con que se comprobó: alta | media | baja | ninguna */
+  confidence: string | null
+}
+export interface Concordance {
+  items: ControlItem[]
+  known: number
+  hits: number
+  misses: number
+  unverified: number
+  report_num: number | null
+}
+/** Respuesta de sí o no a una duda de una regla */
+export type DoubtAnswer = 'si' | 'no'
 
 export interface RuleScenario {
   given: string
@@ -281,6 +309,12 @@ export interface SupportEvidence {
   stale: boolean
 }
 
+/** Contraste entre la prueba corrida y la IA leyendo el código sin ver la prueba (no cuenta en el score) */
+export interface Crosscheck {
+  status: 'coincide' | 'discrepa' | 'sin_revisar'
+  note: string
+}
+
 export type MatrixCell = 'permitido' | 'prohibido'
 
 export interface MatrixAction {
@@ -348,6 +382,7 @@ export interface RuleTestRow {
   /** La regla habla de permisos o roles: se le ofrece la matriz */
   permissions: boolean
   evidence: SupportEvidence | null
+  crosscheck: Crosscheck
 }
 
 export interface RuleTestsView {

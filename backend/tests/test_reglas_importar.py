@@ -28,7 +28,7 @@ RN_LIMITE = {
     "criterio": "Dado un pago mayor al límite autorizado por «ventas», cuando se procesa, entonces se rechaza",
     "fuente": "pág. 4 · §3.2",
 }
-RN_DECIMAL = {"titulo": "Cobros exactos al centavo", "descripcion": "Lo cobrado coincide al centavo.", "severidad": "alta", "criterio": None, "fuente": "§3.1"}
+RN_DECIMAL = {"titulo": "Cobros exactos al centavo", "descripcion": "Lo cobrado coincide al centavo.", "severidad": "alta", "criterio": None, "fuente": "§3.1", "cita": "texto"}
 
 
 class FakeLLM:
@@ -356,3 +356,80 @@ def test_configuracion_importa_de_la_copia_del_proyecto(client, llm):
 def test_proyecto_de_otro_equipo(client, llm):
     res = client.post("/api/reglas/importar", json={"project_id": "no-existe", "path": "docs/Requisitos.docx"})
     assert res.status_code == 404
+
+
+# ─── Cita textual verificada contra el documento ───
+
+DOC_CITAS = "3.2 Los pagos mayores a $1,000 requieren la aprobación de Finanzas antes de procesarse."
+
+
+def test_la_cita_se_busca_en_el_documento_aunque_cambien_acentos_y_signos():
+    assert importar.quote_found(DOC_CITAS, "Los pagos mayores a $1,000 requieren la aprobacion de FINANZAS antes de procesarse")
+    # Un par de palabras distintas todavía cuenta; una frase inventada no
+    assert importar.quote_found(DOC_CITAS, "Los pagos mayores a $1,000 requieren la aprobación del área de Finanzas antes de procesarse")
+    assert not importar.quote_found(DOC_CITAS, "Los clientes premium cancelan gratis hasta 12 horas antes del viaje")
+    assert not importar.quote_found(DOC_CITAS, "corta")
+
+
+def test_una_regla_sin_cita_valida_queda_con_duda(client, llm):
+    ok = {**RN_DECIMAL, "cita": "Los pagos mayores a $1,000 requieren la aprobación de Finanzas"}
+    inventada = {**RN_DECIMAL, "titulo": "Otra", "cita": "Todos los clientes reciben un regalo de bienvenida"}
+    sin_cita = {**RN_DECIMAL, "titulo": "Sin cita", "cita": ""}
+    llm.reply = {"reglas": [ok, inventada, sin_cita], "dudas": []}
+    body = importar_archivo(client, "Reglas.docx", docx(DOC_CITAS)).json()
+    rs = reglas.parse(body["content"])
+    assert [r.quote_ok for r in rs.rules] == [True, False, False]
+    assert rs.rules[0].quote == ok["cita"] and rs.rules[0].doubts == ()
+    assert "No encontré la cita" in rs.rules[1].doubts[-1] and "no citó" in rs.rules[2].doubts[-1]
+
+
+def test_en_un_pdf_ilegible_la_cita_no_se_puede_comprobar_y_no_se_inventa_una_duda(client, llm):
+    llm.reply = {"reglas": [{**RN_DECIMAL, "cita": "Frase cualquiera del documento"}], "dudas": []}
+    body = importar_archivo(client, "Reglas.pdf", b"%PDF-1.4 x").json()
+    rule = reglas.parse(body["content"]).rules[0]
+    assert rule.quote == "Frase cualquiera del documento" and rule.quote_ok is None and rule.doubts == ()
+    assert "cita_verificada" not in body["content"]
+
+
+def pdf_con_texto(*lines: str) -> bytes:
+    """Un PDF mínimo con texto seleccionable (una línea por renglón), armado a mano."""
+    content = "BT /F1 12 Tf 14 TL 50 700 Td " + " T* ".join(f"({line}) Tj" for line in lines) + " ET"
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for n, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{n} 0 obj\n{body}\nendobj\n".encode("latin-1")
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    out += "".join(f"{o:010d} 00000 n \n" for o in offsets).encode()
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return out
+
+
+def test_en_un_pdf_con_texto_la_cita_si_se_comprueba(client, llm):
+    pdf = pdf_con_texto("3.2 Los pagos mayores a 1000 requieren la aprobacion de Finanzas antes de procesarse.")
+    assert "aprobacion de Finanzas" in (importar.pdf_text(pdf) or "")
+    ok = {**RN_DECIMAL, "cita": "Los pagos mayores a 1000 requieren la aprobacion de Finanzas"}
+    inventada = {**RN_DECIMAL, "titulo": "Otra", "cita": "Todos los clientes reciben un regalo de bienvenida"}
+    llm.reply = {"reglas": [ok, inventada], "dudas": []}
+    rs = reglas.parse(importar_archivo(client, "Reglas.pdf", pdf).json()["content"])
+    assert [r.quote_ok for r in rs.rules] == [True, False] and "No encontré la cita" in rs.rules[1].doubts[-1]
+
+
+def test_un_pdf_sin_texto_o_roto_deja_la_cita_sin_comprobar():
+    assert importar.pdf_text(b"%PDF-1.4 no es un pdf de verdad") is None
+    assert importar.pdf_text(pdf_con_texto("corto")) is None
+
+
+def test_las_frases_omitidas_se_avisan_solo_si_estan_en_el_documento(client, llm):
+    llm.reply = {"reglas": [RN_DECIMAL], "omitidas": ["Los pagos mayores a $1,000 requieren la aprobación de Finanzas", "Frase que la IA se inventó por completo", ""], "dudas": []}
+    body = importar_archivo(client, "Reglas.docx", docx(DOC_CITAS)).json()
+    avisos = [d for d in body["doubts"] if d.startswith("Posible regla que no se extrajo")]
+    assert avisos == ["Posible regla que no se extrajo: «Los pagos mayores a $1,000 requieren la aprobación de Finanzas»"]

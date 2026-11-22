@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { EP } from '@/shared/api/endpoints'
-import { download, http } from '@/shared/api/http'
-import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, MatrixCell, PermissionMatrix, ProjectRules, RuleApproval, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
+import { download, http, openDocument } from '@/shared/api/http'
+import type { BusinessRules, HarnessView, ImportedRules, ImportRulesRequest, ControlExpected, Concordance, DoubtAnswer, MatrixCell, PermissionMatrix, ProjectRules, RuleApproval, RulesPrecheck, RulesValidation, RuleTestsView } from '../types'
 
 export const RULES_FILENAME = 'reglas_negocio.toml'
 
@@ -10,9 +10,18 @@ export const rulesApi = {
   project: (repoId: string) => http.get<ProjectRules>(EP.rules.project(repoId)),
   upload: (repoId: string, content: string) => http.put<ProjectRules>(EP.rules.project(repoId), { content }),
   remove: (repoId: string) => http.delete<ProjectRules>(EP.rules.project(repoId)),
-  setStates: (repoId: string, ids: string[], status: RuleApproval) => http.post<ProjectRules>(EP.rules.states(repoId), { ids, status }),
+  setStates: (repoId: string, ids: string[], status: RuleApproval, by: 'equipo' | 'programa' = 'equipo') => http.post<ProjectRules>(EP.rules.states(repoId), { ids, status, by }),
   setDoubts: (repoId: string, ruleId: string, doubts: string[]) => http.put<ProjectRules>(EP.rules.doubts(repoId, ruleId), { doubts }),
+  /** Contesta una duda con sí o no: la duda se cierra, la respuesta queda en la regla y el proyecto la recuerda */
+  answerDoubt: (repoId: string, ruleId: string, doubt: string, answer: DoubtAnswer) => http.post<ProjectRules>(EP.rules.answer(repoId, ruleId), { doubt, answer }),
+  /** «Escribe una regla con tus palabras»: la IA la redacta y se agrega en borrador */
+  writeRule: (repoId: string, text: string) => http.post<ProjectRules>(EP.rules.write(repoId), { text }),
+  concordance: (repoId: string) => http.get<Concordance>(EP.rules.control(repoId)),
+  setExpected: (repoId: string, ruleId: string, expected: ControlExpected | null) => http.put<Concordance>(EP.rules.expected(repoId, ruleId), { expected }),
   validate: (repoId: string, content: string) => http.post<RulesValidation>(EP.rules.validate(repoId), { content }),
+  /** Las reglas como documento legible: se abre en otra pestaña (imprimible a PDF) o se baja en Markdown */
+  viewDocument: (repoId: string) => openDocument(EP.rules.document(repoId), { formato: 'html' }),
+  downloadDocument: (repoId: string) => download(EP.rules.document(repoId), { formato: 'md' }, 'reglas_de_negocio.md'),
   template: (repoId: string) => download(EP.rules.template(repoId), {}, RULES_FILENAME),
   /** `content` = valida ese texto contra el repo en vez de leer su archivo */
   precheck: (url: string, branch: string, content?: string) => http.post<RulesPrecheck>(EP.rules.precheck, { url, branch, content }),
@@ -53,6 +62,8 @@ export const reportRulesQuery = (repoId: string, reportId = 'latest') =>
 export const projectRulesQuery = (repoId: string) => queryOptions({ queryKey: ['rules', repoId], queryFn: () => rulesApi.project(repoId) })
 
 export const useReportRules = (repoId: string, reportId = 'latest') => useQuery(reportRulesQuery(repoId, reportId))
+
+export const concordanceQuery = (repoId: string) => queryOptions({ queryKey: ['rules', repoId, 'control'], queryFn: () => rulesApi.concordance(repoId) })
 
 export const useProjectRules = (repoId: string) => useQuery({ ...projectRulesQuery(repoId), enabled: Boolean(repoId) })
 

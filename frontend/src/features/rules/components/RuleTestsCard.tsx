@@ -187,6 +187,12 @@ function Details({ repoId, row, view, act, busy }: { repoId: string; row: RuleTe
         </>
       )}
       {row.evidence && <Evidence evidence={row.evidence} />}
+      {row.crosscheck.status !== 'sin_revisar' && (
+        <p className={row.crosscheck.status === 'coincide' ? 'text-xs text-emerald-700 dark:text-emerald-300' : 'text-xs text-amber-700 dark:text-amber-300'}>
+          {row.crosscheck.status === 'coincide' ? '✓ Las dos comprobaciones coinciden. ' : '⚠ Las dos comprobaciones no coinciden. '}
+          {row.crosscheck.note}
+        </p>
+      )}
       {showMatrix && <PermissionMatrixEditor repoId={repoId} ruleId={row.id} onSave={act} busy={busy} />}
       <div className="flex flex-wrap gap-2 pt-1">
         {edited && (

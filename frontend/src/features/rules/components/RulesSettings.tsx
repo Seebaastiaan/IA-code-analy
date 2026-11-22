@@ -6,10 +6,13 @@ import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '..
 import type { ImportedRules, ProjectRules, RulesValidation } from '../types'
 import { baseName, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, saveText } from '../utils/rules'
 import { useImportRules } from '../hooks/useImportRules'
+import { AutoVerifyCard } from './AutoVerifyCard'
+import { ConcordanceCard } from './ConcordanceCard'
 import { DocumentDropzone } from './DocumentDropzone'
 import { HarnessCard } from './HarnessCard'
 import { ImportNotice } from './ImportNotice'
 import { RuleTestsCard } from './RuleTestsCard'
+import { WriteRuleCard } from './WriteRuleCard'
 import { RulesApprovalTable } from './RulesApprovalTable'
 import { ValidationResult } from './ValidationResult'
 
@@ -101,6 +104,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     importRules.mutate({ file, extra: { project_id: repoId } }, { onSettled: () => setReading(null) })
   }
 
+  const dirty = Boolean(text.trim()) && text !== (data.uploaded?.content ?? data.repo?.content ?? '')
   const busy = validate.isPending || save.isPending || importRules.isPending
   // El archivo del repo es válido: gana a lo que se guarde aquí
   const fromRepo = data.active === 'repo' && Boolean(data.repo?.valid)
@@ -156,6 +160,19 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
           <code className="font-mono">{data.repo?.path}</code> del repositorio siga con errores. Después descárgalo y súbelo al repositorio.
         </p>
       )}
+      {dirty && !fromRepo && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 px-3.5 py-2.5 text-sm text-brand-800 dark:text-brand-200">
+          <span>Las reglas nuevas todavía no están guardadas: guárdalas para revisarlas y aprobarlas en la tabla.</span>
+          <Button onClick={() => save.mutate()} disabled={busy || result?.valid === false}>
+            {save.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="save" className="w-4 h-4" />}
+            Guardar reglas
+          </Button>
+        </div>
+      )}
+      {result?.valid === false && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">Las reglas tienen un error: corrígelo en «Avanzado» para poder guardarlas.</p>}
+      {/* El archivo .toml es un formato interno: queda en «Avanzado», cerrado salvo que haya un error que corregir */}
+      <details open={result?.valid === false ? true : undefined} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
+        <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">Avanzado: archivo {RULES_FILENAME}</summary>
       <textarea
         value={text}
         onChange={(e) => update(e.target.value)}
@@ -184,6 +201,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
           </Button>
         )}
       </div>
+      </details>
     </Card>
   )
 }
@@ -248,7 +266,10 @@ export function RulesSettings({ repoId }: { repoId: string }) {
         </Card>
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
         <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+        <WriteRuleCard repoId={repoId} canWrite={data.can_import} />
+        <AutoVerifyCard repoId={repoId} />
         <RulesApprovalTable repoId={repoId} data={data} />
+        <ConcordanceCard repoId={repoId} />
         <HarnessCard repoId={repoId} />
         <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
       </div>

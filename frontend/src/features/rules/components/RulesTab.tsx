@@ -5,7 +5,7 @@ import { Card, Chip, EmptyState, ErrorState, Icon, PageLoader, SegmentedControl,
 import { cn } from '@/shared/utils/cn'
 import { useReportRules } from '../api/rules.api'
 import type { BusinessRuleResult, BusinessRules } from '../types'
-import { filterRules, LEVEL, OUTCOME, STATUS, testFunction, testName, type StatusFilter } from '../utils/rules'
+import { filterRules, LEVEL, LIGHT, OUTCOME, plain, plainSummary, STATUS, testFunction, testName, type StatusFilter } from '../utils/rules'
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'todas', label: 'Todas' },
@@ -64,6 +64,9 @@ function Notices({ data, repoId }: { data: BusinessRules; repoId: string }) {
 function RuleDetail({ rule, repoId }: { rule: BusinessRuleResult; repoId: string }) {
   return (
     <div className="px-5 pb-4 pt-1 space-y-3 text-sm bg-slate-50/60 dark:bg-slate-950/30">
+      <p className="font-medium">
+        {LIGHT[plain(rule).light].dot} {plain(rule).text}
+      </p>
       <p className="text-slate-600 dark:text-slate-300">{rule.description}</p>
       {rule.criterion && (
         <p>
@@ -187,6 +190,9 @@ export function RulesTab({ repoId, reportId }: { repoId: string; reportId: strin
           {summary.fuera_del_codigo > 0 && <Chip>{summary.fuera_del_codigo} fuera del código</Chip>}
         </div>
       </div>
+      {summary.total > 0 && (
+        <p className="px-4 sm:px-5 py-3 text-sm font-medium border-b border-slate-100 dark:border-slate-800">{plainSummary(data.rules)}</p>
+      )}
       <Notices data={data} repoId={repoId} />
       <div className="px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
         <SegmentedControl options={FILTERS} value={status} onChange={setStatus} />
@@ -224,6 +230,9 @@ export function RulesTab({ repoId, reportId }: { repoId: string; reportId: strin
                       <span className="min-w-0">
                         <span className="font-mono text-xs text-slate-500 mr-2">{r.id}</span>
                         <span className="font-medium">{r.title}</span>
+                        <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                          {LIGHT[plain(r).light].dot} {plain(r).text}
+                        </span>
                       </span>
                     </button>
                   </td>

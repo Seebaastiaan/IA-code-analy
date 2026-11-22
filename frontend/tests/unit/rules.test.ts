@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { BusinessRuleResult, HarnessView, MapSummary, PermissionMatrix, RulesPrecheck, RuleStatus, RulesValidation, RuleTestsView } from '@/features/rules/types'
 import {
-  baseName, EVIDENCE, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, markedCells, matrixFromCode, matrixPayload, nextCell, OUTCOME,
-  precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
+  baseName, crosscheck, EVIDENCE, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, markedCells, matrixFromCode, matrixPayload, nextCell, OUTCOME,
+  concordanceText, plain, plainSummary, precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
 } from '@/features/rules/utils/rules'
 import * as ruleTests from '@/mocks/ruleTests'
 import * as harness from '@/mocks/harness'
@@ -41,7 +41,7 @@ describe('validación simulada de reglas_negocio.toml', () => {
   const base = '[proyecto]\nnombre = "Tienda"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n'
 
   it('acepta un archivo válido', () => {
-    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false, description: 'D', tipo: null, status: 'aprobada', source: null, doubts: [], scenarios: [] }], warnings: [] })
+    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false, description: 'D', tipo: null, status: 'aprobada', source: null, doubts: [], scenarios: [], quote: null, quote_ok: null }], warnings: [] })
   })
 
   it('lee el formato v2: tipo, estado, dudas y escenarios', () => {
@@ -426,5 +426,45 @@ describe('matriz de permisos, evidencia y prueba de fuerza (fase 5)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('contraste entre la prueba y la lectura del código', () => {
+  const ev = (verdict: 'implementada' | 'parcial' | 'no_encontrada', stale = false) => ({ verdict, stale })
+  it('coincide o discrepa según el par de resultados', () => {
+    expect(crosscheck({ verdict: 'cumple' }, ev('implementada')).status).toBe('coincide')
+    expect(crosscheck({ verdict: 'no_cumple' }, ev('no_encontrada')).status).toBe('coincide')
+    expect(crosscheck({ verdict: 'cumple' }, ev('parcial')).status).toBe('discrepa')
+    expect(crosscheck({ verdict: 'cumple' }, ev('no_encontrada')).status).toBe('discrepa')
+    expect(crosscheck({ verdict: 'no_cumple' }, ev('implementada')).status).toBe('discrepa')
+  })
+  it('sin corrida clara o sin lectura vigente no hay contraste', () => {
+    expect(crosscheck(null, ev('implementada')).status).toBe('sin_revisar')
+    expect(crosscheck({ verdict: 'prueba_rota' }, ev('implementada')).status).toBe('sin_revisar')
+    expect(crosscheck({ verdict: 'cumple' }, null).status).toBe('sin_revisar')
+    expect(crosscheck({ verdict: 'cumple' }, ev('implementada', true)).status).toBe('sin_revisar')
+  })
+})
+
+describe('semáforo en lenguaje normal', () => {
+  it('dice qué caso falla y dónde', () => {
+    const failing = { ...rule('RN-001', 'no_cumple'), tests: [{ name: 'tests/t.py::test_stock', file: 'tests/t.py', line: 9, outcome: 'failed' as const, message: 'esperaba 3' }] }
+    expect(plain(failing)).toEqual({ light: 'rojo', text: 'Falla el caso «test_stock» (tests/t.py:9). esperaba 3' })
+    expect(plain(rule('RN-002', 'cumple')).light).toBe('verde')
+    expect(plain(rule('RN-003', 'sin_verificar')).light).toBe('amarillo')
+    expect(plain(rule('RN-004', 'fuera_del_codigo')).light).toBe('gris')
+  })
+
+  it('resume sin contar las que hace una persona', () => {
+    const rules = [rule('A', 'cumple'), rule('B', 'cumple'), rule('C', 'no_cumple'), rule('D', 'sin_verificar'), rule('E', 'fuera_del_codigo')]
+    expect(plainSummary(rules)).toBe('2 de 4 reglas se cumplen · 1 no se cumple · 1 necesita una decisión')
+  })
+})
+
+describe('concordancia', () => {
+  it('dice cuántas reglas conocidas acertó el programa', () => {
+    expect(concordanceText(0, 0, 0, 0)).toMatch(/Marca las reglas/)
+    expect(concordanceText(12, 11, 1, 0)).toBe('Acertó 11 de 12 reglas que conocías.')
+    expect(concordanceText(3, 0, 0, 3)).toBe('Todavía no hay resultado para tus 3 reglas · 3 sin resultado todavía.')
   })
 })

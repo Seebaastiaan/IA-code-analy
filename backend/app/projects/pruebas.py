@@ -152,6 +152,13 @@ class RuleTestOut(BaseModel):
     has_matrix: bool
 
 
+class CrosscheckOut(BaseModel):
+    """Dos comprobaciones que no se ven entre sí: la prueba corrida y la IA leyendo el código sin ver la prueba."""
+
+    status: Literal["coincide", "discrepa", "sin_revisar"]
+    note: str
+
+
 class RuleRow(BaseModel):
     id: str
     title: str
@@ -165,6 +172,8 @@ class RuleRow(BaseModel):
     # La regla habla de permisos o roles (o su prueba es de tipo permisos): se le ofrece la matriz
     permissions: bool
     evidence: EvidenceOut | None
+    # Contraste entre la prueba y la lectura independiente del código (no cuenta en el score)
+    crosscheck: CrosscheckOut
 
 
 class BusyOut(BaseModel):
@@ -265,6 +274,32 @@ def _evidence(row, rule: reglas.BusinessRule, commit: str | None) -> EvidenceOut
     )
 
 
+# (resultado de la prueba, lectura del código) → ¿coinciden? Una prueba que pasa con un código que «no se encuentra» o
+# «parcial» es sospechosa (prueba floja); una que falla con un código «implementado» también (prueba mal escrita).
+CROSS_AGREE = {
+    ("cumple", "implementada"): "La prueba pasa y la lectura del código confirma que la regla está implementada.",
+    ("no_cumple", "no_encontrada"): "La prueba falla y la lectura no encuentra la regla en el código: probablemente no está implementada.",
+    ("no_cumple", "parcial"): "La prueba falla y la lectura ve la regla solo en parte: falta cubrir algo.",
+}
+CROSS_DISAGREE = {
+    ("cumple", "parcial"): "La prueba pasa, pero la lectura del código dice que la regla solo se cumple en parte: la prueba puede ser floja.",
+    ("cumple", "no_encontrada"): "La prueba pasa, pero no se encontró dónde el código implementa la regla: la prueba puede no comprobar lo que dice.",
+    ("no_cumple", "implementada"): "La prueba falla, pero el código parece implementar la regla: la prueba puede estar mal escrita.",
+}
+
+
+def crosscheck(run: RunOut | None, evidence: EvidenceOut | None) -> CrosscheckOut:
+    """Contrasta el resultado de la prueba con la lectura independiente del código."""
+    if run is None or run.verdict not in ("cumple", "no_cumple"):
+        return CrosscheckOut(status="sin_revisar", note="Falta una prueba que corra y dé un resultado claro.")
+    if evidence is None or evidence.stale:
+        return CrosscheckOut(status="sin_revisar", note="Falta leer el código de forma independiente (o la lectura es de una versión anterior).")
+    key = (run.verdict, evidence.verdict)
+    if key in CROSS_AGREE:
+        return CrosscheckOut(status="coincide", note=CROSS_AGREE[key])
+    return CrosscheckOut(status="discrepa", note=CROSS_DISAGREE[key])
+
+
 def _view(conn, settings: Settings, repo_id: str) -> TestsView:
     ctx = pruebas.context(conn, settings, repo_id)
     busy = _busy.get(repo_id)
@@ -314,11 +349,12 @@ def _view(conn, settings: Settings, repo_id: str) -> TestsView:
                 strength_blocked=_strength_blocked(row, outdated, run_current and run_status == "hecho", run), has_matrix=bool(row["matrix"]),
             )
             state = "desactualizada" if outdated else "aprobada" if approved else "borrador"
+        evidence = _evidence(evidences.get(rule.id), rule, commit)
         rows.append(RuleRow(
             id=rule.id, title=rule.title, description=rule.description, severity=rule.severity, criterion=rule.criterion,
             repo_tests=sum(rule.id in t.rules for t in declared), state=state, test=test,
             permissions=matriz.looks_like_permissions(rule) or bool(row and row["tipo"] == "permisos"),
-            evidence=_evidence(evidences.get(rule.id), rule, commit),
+            evidence=evidence, crosscheck=crosscheck(test.run if test else None, evidence),
         ))
     return TestsView(**base, rules=rows)
 

@@ -2,8 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Chip, Icon, SeverityBadge, Spinner } from '@/shared/ui'
+import { cn } from '@/shared/utils/cn'
 import { projectRulesQuery, RULES_FILENAME, rulesApi } from '../api/rules.api'
-import type { ProjectRules, RuleApproval, RulePreview } from '../types'
+import type { DoubtAnswer, ProjectRules, RuleApproval, RulePreview } from '../types'
 import { saveText } from '../utils/rules'
 
 const KIND_LABEL: Record<string, string> = {
@@ -18,6 +19,7 @@ const KIND_LABEL: Record<string, string> = {
 
 const FILTERS = [
   { id: 'todas', label: 'Todas' },
+  { id: 'decision', label: 'Necesitan mi decisión' },
   { id: 'borrador', label: 'Borradores' },
   { id: 'aprobada', label: 'Aprobadas' },
 ] as const
@@ -29,7 +31,7 @@ const sameText = (a: string, b: string) => norm(a) === norm(b)
 
 const approval = (r: RulePreview): RuleApproval => r.status ?? 'aprobada'
 
-function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResolve }: {
+function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResolve, onAnswer, onRevert }: {
   rule: RulePreview
   open: boolean
   selected: boolean
@@ -38,6 +40,8 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
   onToggle: () => void
   onSelect: () => void
   onResolve: (doubt: string) => void
+  onAnswer: (doubt: string, answer: DoubtAnswer) => void
+  onRevert: () => void
 }) {
   const doubts = rule.doubts ?? []
   const scenarios = rule.scenarios ?? []
@@ -57,13 +61,31 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
           <SeverityBadge sev={rule.severity} />
           {rule.tipo && <Chip>{KIND_LABEL[rule.tipo] ?? rule.tipo}</Chip>}
           {doubts.length > 0 && <Chip tone="danger">{doubts.length} duda{doubts.length === 1 ? '' : 's'}</Chip>}
-          <Chip tone={approval(rule) === 'aprobada' ? 'success' : 'neutral'}>{approval(rule) === 'aprobada' ? 'Aprobada' : 'Borrador'}</Chip>
+          <Chip tone={approval(rule) === 'aprobada' ? 'success' : 'neutral'}>{approval(rule) === 'aprobada' ? (rule.approved_by === 'programa' ? 'Aprobada por el programa' : 'Aprobada') : 'Borrador'}</Chip>
         </span>
       </div>
       {open && (
         <div className="mt-2 ml-6 space-y-2.5 text-sm text-slate-600 dark:text-slate-300">
           {rule.description && !sameText(rule.description, rule.title) && <p>{rule.description}</p>}
           {rule.source && <p className="text-xs text-slate-400">Fuente: {rule.source}</p>}
+          {rule.approved_by === 'programa' && approval(rule) === 'aprobada' && (
+            <p className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              La aprobó el programa: cumplía todas las condiciones (sin dudas y con la cita en el documento).
+              {editable && (
+                <Button variant="ghost" disabled={busy} onClick={onRevert}>
+                  Revertir a borrador
+                </Button>
+              )}
+            </p>
+          )}
+          {rule.quote && (
+            <blockquote className="border-l-2 border-slate-300 dark:border-slate-600 pl-3 text-xs italic text-slate-500">
+              «{rule.quote}»
+              <span className={cn('not-italic ml-2 font-medium', rule.quote_ok === false ? 'text-rose-600 dark:text-rose-400' : rule.quote_ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400')}>
+                {rule.quote_ok === false ? '⚠ No está en el documento' : rule.quote_ok ? '✓ Comprobada en el documento' : 'Sin comprobar'}
+              </span>
+            </blockquote>
+          )}
           {scenarios.length > 0 && (
             <ul className="space-y-1.5">
               {scenarios.map((s, i) => (
@@ -75,15 +97,23 @@ function Row({ rule, open, selected, editable, busy, onToggle, onSelect, onResol
           )}
           {doubts.length > 0 && (
             <div>
-              <p className="text-xs font-medium text-rose-700 dark:text-rose-300">Dudas abiertas (resuélvelas antes de aprobar)</p>
+              <p className="text-xs font-medium text-rose-700 dark:text-rose-300">Dudas abiertas: contesta Sí o No (el programa recuerda la respuesta)</p>
               <ul className="mt-1 space-y-1">
                 {doubts.map((d) => (
                   <li key={d} className="flex items-start gap-2 text-xs">
                     <span className="flex-1">{d}</span>
                     {editable && (
-                      <Button variant="ghost" className="shrink-0" disabled={busy} onClick={() => onResolve(d)}>
-                        Resuelta
-                      </Button>
+                      <span className="flex shrink-0 gap-1">
+                        <Button variant="secondary" disabled={busy} onClick={() => onAnswer(d, 'si')} aria-label={`Responder sí: ${d}`}>
+                          Sí
+                        </Button>
+                        <Button variant="secondary" disabled={busy} onClick={() => onAnswer(d, 'no')} aria-label={`Responder no: ${d}`}>
+                          No
+                        </Button>
+                        <Button variant="ghost" disabled={busy} onClick={() => onResolve(d)} title="Cerrar la duda sin guardar una respuesta">
+                          Resuelta
+                        </Button>
+                      </span>
                     )}
                   </li>
                 ))}
@@ -128,8 +158,15 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
     onError: (e) => toast(e.message, { tone: 'err' }),
   })
 
+  const answer = useMutation({
+    mutationFn: ({ id, doubt, value }: { id: string; doubt: string; value: DoubtAnswer }) => rulesApi.answerDoubt(repoId, id, doubt, value),
+    onSuccess: done,
+    onError: (e) => toast(e.message, { tone: 'err' }),
+  })
+
   if (rules.length === 0) return null
-  const shown = rules.filter((r) => filter === 'todas' || approval(r) === filter)
+  const needsDecision = (r: RulePreview) => approval(r) === 'borrador' && (r.doubts ?? []).length > 0
+  const shown = rules.filter((r) => filter === 'todas' || (filter === 'decision' ? needsDecision(r) : approval(r) === filter))
   const drafts = rules.filter((r) => approval(r) === 'borrador')
   const ready = drafts.filter((r) => (r.doubts ?? []).length === 0)
   const toggle = (set: Set<string>, id: string) => {
@@ -138,7 +175,7 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
     return next
   }
   const chosen = [...selected].filter((id) => rules.some((r) => r.id === id))
-  const busy = states.isPending || doubts.isPending
+  const busy = states.isPending || doubts.isPending || answer.isPending
 
   return (
     <Card className="p-5 sm:p-6">
@@ -167,7 +204,7 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
         </ul>
       )}
       {shown.length === 0 ? (
-        <p className="text-sm text-slate-400 py-4">No hay reglas en este filtro.</p>
+        <p className="text-sm text-slate-400 py-4">{filter === 'decision' ? 'Nada necesita tu decisión: todas las reglas están aprobadas o sin dudas.' : 'No hay reglas en este filtro.'}</p>
       ) : (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {shown.map((r) => (
@@ -181,6 +218,8 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
               onToggle={() => setOpenIds((s) => toggle(s, r.id))}
               onSelect={() => setSelected((s) => toggle(s, r.id))}
               onResolve={(d) => doubts.mutate({ id: r.id, list: (r.doubts ?? []).filter((x) => x !== d) })}
+              onAnswer={(d, value) => answer.mutate({ id: r.id, doubt: d, value })}
+              onRevert={() => states.mutate({ ids: [r.id], status: 'borrador' })}
             />
           ))}
         </ul>
@@ -196,6 +235,14 @@ export function RulesApprovalTable({ repoId, data }: { repoId: string; data: Pro
           </Button>
           <Button variant="ghost" onClick={() => states.mutate({ ids: chosen, status: 'borrador' })} disabled={chosen.length === 0 || busy}>
             Volver a borrador
+          </Button>
+          <Button variant="secondary" onClick={() => void rulesApi.viewDocument(repoId).catch((e: Error) => toast(e.message, { tone: 'err' }))} title="Las reglas sin TOML: resumen, ejemplos, dudas y fuente. Se puede imprimir o guardar como PDF">
+            <Icon name="doc" className="w-4 h-4" />
+            Documento para presentar
+          </Button>
+          <Button variant="ghost" onClick={() => void rulesApi.downloadDocument(repoId).catch((e: Error) => toast(e.message, { tone: 'err' }))}>
+            <Icon name="download" className="w-4 h-4" />
+            Markdown
           </Button>
           {fromRepo && data.repo && (
             <Button variant="ghost" onClick={() => saveText(RULES_FILENAME, data.repo?.content ?? '')}>

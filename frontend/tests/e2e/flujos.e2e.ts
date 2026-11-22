@@ -165,6 +165,7 @@ test('reglas de negocio: matriz del reporte y carga desde configuración', async
   await page.goto('/repos/r2/settings?tab=reglas')
   await expect(page.getByRole('tab', { name: 'Reglas de negocio' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('Sin reglas')).toBeVisible()
+  await page.getByText('Avanzado: archivo reglas_negocio.toml').click()
   const editor = page.getByLabel('Contenido de reglas_negocio.toml')
   await editor.fill('[proyecto]\nnombre = "ETL"\n\n[[regla]]\nid = "RN-1"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n')
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
@@ -243,6 +244,7 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await page.goto('/repos/r3/settings?tab=reglas')
   await page.getByRole('button', { name: 'Sacar reglas de Requerimientos.pdf' }).click()
   await expect(page.getByText('3 regla(s) sacadas de')).toBeVisible()
+  await page.getByText('Avanzado: archivo reglas_negocio.toml').click()
   await expect(page.getByLabel('Contenido de reglas_negocio.toml')).toHaveValue(/nombre = "equipo\/bot-soporte"/)
   await page.getByRole('button', { name: 'Guardar en la app' }).click()
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
@@ -252,6 +254,10 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await expect(table.getByText(/3 de 3 reglas son borrador/)).toBeVisible()
   // Cada regla dice de qué capítulo y página del documento salió
   await expect(table.getByText('Cap. 2 «Tickets» · pág. 3').first()).toBeVisible()
+  // Y la frase del documento que la respalda (en un PDF no se puede comprobar automáticamente)
+  await table.getByRole('button', { name: 'Ver RN-001' }).click()
+  await expect(table.getByText('«Solo un agente de soporte puede cerrar un ticket.»')).toBeVisible()
+  await expect(table.getByText('Sin comprobar').first()).toBeVisible()
   await table.getByRole('button', { name: /Aprobar las que no tienen dudas/ }).click()
   await expect(table.getByText(/2 de 3 reglas son borrador/)).toBeVisible()
   await table.getByLabel('Elegir RN-002').check()
@@ -447,4 +453,29 @@ test('repositorios: eliminar uno con confirmación', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Eliminar' }).click()
   await expect(page.getByText('Se eliminó equipo/cli-utilidades')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Eliminar equipo/cli-utilidades' })).toBeHidden()
+})
+
+test('reglas de negocio: documento para presentar, sin TOML', async ({ page }) => {
+  await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  const popup = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Documento para presentar' }).click()
+  const doc = await popup
+  await expect(doc.getByRole('heading', { level: 1 })).toContainText('Reglas de negocio · ')
+  await expect(doc.getByText('Fuente:').first()).toBeVisible()
+
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Markdown' }).click()
+  expect((await download).suggestedFilename()).toBe('reglas_de_negocio.md')
+})
+
+test('reglas de negocio: «Preparar todo» hace solo el arnés, las pruebas y la prueba de fuerza', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.goto(`/repos/${REPO}/settings?tab=reglas`)
+  await page.getByRole('button', { name: 'Preparar todo' }).click()
+  const steps = page.getByRole('list', { name: 'Avance de la preparación' })
+  await expect(steps.getByText('Preparar el entorno de pruebas del proyecto')).toBeVisible()
+  // Termina con el resumen y sin pasos fallidos
+  await expect(page.getByText('Listo. El siguiente análisis usará estas reglas y pruebas.')).toBeVisible({ timeout: 90_000 })
+  await expect(steps.getByText(/pruebas aprobadas por el programa/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Volver a preparar' })).toBeVisible()
 })

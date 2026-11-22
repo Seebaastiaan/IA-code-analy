@@ -98,6 +98,15 @@ export async function download(path: string, query: Query, fallbackName: string)
   URL.revokeObjectURL(url)
 }
 
+/** Abre en otra pestaña un documento HTML que pide el API (un enlace directo no llevaría la sesión). */
+export async function openDocument(path: string, query: Query) {
+  const res = await send(path, { method: 'GET', query, headers: { Accept: 'text/html' } })
+  const url = URL.createObjectURL(new Blob([await res.text()], { type: 'text/html;charset=utf-8' }))
+  window.open(url, '_blank')
+  // El navegador necesita unos segundos para cargar la pestaña antes de soltar el archivo
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 export const http = {
   get: <T>(path: string, query?: Query, opts?: RequestOptions) => request<T>(path, { ...opts, method: 'GET', query }),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>(path, { ...opts, method: 'POST', body }),

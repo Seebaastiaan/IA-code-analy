@@ -78,6 +78,38 @@ class RulesStore:
         self.conn.commit()
 
 
+    # ─── Respuestas a las dudas (memoria del proyecto) ───
+
+    def answers(self, repo_id: str) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM business_rule_answers WHERE repo_id = ? ORDER BY answered_at", (repo_id,)).fetchall()
+
+    def save_answer(self, repo_id: str, key: str, title: str, question: str, answer: str, user_id: str | None) -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO business_rule_answers (repo_id, question_key, title, question, answer, answered_by, answered_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (repo_id, key, title, question, answer, user_id, _now()),
+        )
+        self.conn.commit()
+
+
+    # ─── Casos de control ───
+
+    def expected(self, repo_id: str) -> dict[str, str]:
+        rows = self.conn.execute("SELECT rule_id, expected FROM business_rule_expected WHERE repo_id = ?", (repo_id,)).fetchall()
+        return {r["rule_id"]: r["expected"] for r in rows}
+
+    def set_expected(self, repo_id: str, rule_id: str, expected: str | None, user_id: str | None) -> None:
+        """`None` quita el caso de control."""
+        if expected is None:
+            self.conn.execute("DELETE FROM business_rule_expected WHERE repo_id = ? AND rule_id = ?", (repo_id, rule_id))
+        else:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO business_rule_expected (repo_id, rule_id, expected, set_by, set_at) VALUES (?, ?, ?, ?, ?)",
+                (repo_id, rule_id, expected, user_id, _now()),
+            )
+        self.conn.commit()
+
+
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

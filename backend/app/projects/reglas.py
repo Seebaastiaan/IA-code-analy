@@ -33,7 +33,10 @@ from app.assistant.router import get_llm
 from app.errors import ApiError
 from app.github.client import GithubAuthError, GithubError
 from app.github.deps import Client, Store
+from app.projects import reglas_concordancia as concordancia
+from app.projects import reglas_documento as documento
 from app.projects import reglas_importar as importar
+from app.projects import reglas_respuestas as respuestas
 from app.teams.store import team_id_of
 
 router = APIRouter(tags=["reglas de negocio"])
@@ -63,12 +66,17 @@ class RulePreview(BaseModel):
     source: str | None = None
     doubts: list[str] = Field(default_factory=list)
     scenarios: list[ScenarioOut] = Field(default_factory=list)
+    # Frase del documento de requisitos y si el programa la encontró ahí (null = no se pudo comprobar, p. ej. un PDF)
+    quote: str | None = None
+    quote_ok: bool | None = None
+    # "programa" si la aprobó el programa solo (se puede revertir); null si la aprobó el equipo
+    approved_by: str | None = None
 
 
 def preview(r: reglas.BusinessRule) -> RulePreview:
     return RulePreview(
         id=r.id, title=r.title, severity=r.severity, pattern=bool(r.forbidden or r.required), description=r.description,
-        tipo=r.tipo, status=r.status, source=r.source or r.story, doubts=list(r.doubts),
+        tipo=r.tipo, status=r.status, source=r.source or r.story, doubts=list(r.doubts), quote=r.quote, quote_ok=r.quote_ok, approved_by=r.approved_by,
         scenarios=[ScenarioOut(given=s.given, when=s.when, then=s.then) for s in r.scenarios],
     )
 
@@ -116,6 +124,14 @@ class ProjectRules(BaseModel):
 class RuleStates(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=reglas.MAX_RULES)
     status: Literal["borrador", "aprobada"]
+    # Quién aprueba: el equipo o el programa solo («Preparar todo»); lo que aprueba el programa se marca y se revierte en un clic
+    by: Literal["equipo", "programa"] = "equipo"
+
+
+class DoubtAnswer(BaseModel):
+    # La duda tal como está abierta y su respuesta de sí o no
+    doubt: str = Field(max_length=reglas.MAX_DOUBT)
+    answer: Literal["si", "no"]
 
 
 class RuleDoubts(BaseModel):
@@ -191,8 +207,11 @@ def upload_rules(project_id: str, body: RulesContent, store: Analyses, user_id: 
     result = validate(body.content)
     if not result.valid:
         raise ApiError(422, "invalid_rules", result.error or "Reglas no válidas")
-    RulesStore(store.conn).save_upload(project_id, body.content, user_id)
-    return _project_rules(store, settings, project_id)
+    rules_store = RulesStore(store.conn)
+    # Lo que el equipo ya contestó antes (misma pregunta de la misma regla) no se vuelve a preguntar
+    content, remembered = respuestas.apply(body.content, [dict(r) for r in rules_store.answers(project_id)])
+    rules_store.save_upload(project_id, content, user_id)
+    return _project_rules(store, settings, project_id).model_copy(update={"messages": remembered})
 
 
 @router.delete("/api/projects/{project_id}/reglas", response_model=ProjectRules)
@@ -254,7 +273,8 @@ def set_states(project_id: str, body: RuleStates, store: Analyses, user_id: User
         if body.status == "aprobada" and rule.doubts:
             messages.append(f"{rid}: tiene {len(rule.doubts)} duda(s) abierta(s); resuélvelas antes de aprobarla")
             continue
-        text = reglas.set_fields(text, rid, {"estado": body.status})
+        by_program = body.status == "aprobada" and body.by == "programa"
+        text = reglas.set_fields(text, rid, {"estado": body.status, "aprobada_por": "programa" if by_program else None})
         changed = True
     if changed:
         save(text)
@@ -279,6 +299,127 @@ def set_doubts(project_id: str, rule_id: str, body: RuleDoubts, store: Analyses,
     return _project_rules(store, settings, project_id).model_copy(update={"messages": [REPO_COPY_NOTE] if in_repo else []})
 
 
+@router.post("/api/projects/{project_id}/reglas/{rule_id}/respuesta", response_model=ProjectRules)
+def answer_doubt(project_id: str, rule_id: str, body: DoubtAnswer, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
+    """
+    Contesta una duda de una regla con sí o no: la duda se cierra, la respuesta queda en la descripción de la regla y en la
+    memoria del proyecto (una importación nueva con la misma pregunta se contesta sola).
+    """
+    require_repo(store, user_id, project_id)
+    text, rs, save, in_repo = _editable(store, settings, project_id, user_id)
+    rule = next((r for r in rs.rules if r.id == rule_id), None)
+    if rule is None:
+        raise ApiError(404, "unknown_rule", f"{rule_id} no está en las reglas del proyecto")
+    if body.doubt not in rule.doubts:
+        raise ApiError(409, "unknown_doubt", f"{rule_id} ya no tiene esa duda abierta")
+    try:
+        text = reglas.set_fields(text, rule_id, {
+            "descripcion": respuestas.with_note(rule.description, body.doubt, body.answer),
+            "dudas": [d for d in rule.doubts if d != body.doubt],
+        })
+    except reglas.RulesError as exc:
+        raise ApiError(422, "invalid_rules", str(exc)) from exc
+    save(text)
+    RulesStore(store.conn).save_answer(project_id, respuestas.key_of(rule.title, body.doubt), rule.title, body.doubt, body.answer, user_id)
+    return _project_rules(store, settings, project_id).model_copy(update={"messages": [REPO_COPY_NOTE] if in_repo else []})
+
+
+class SentenceBody(BaseModel):
+    text: str = Field(min_length=1, max_length=importar.MAX_SENTENCE)
+
+
+class ControlItem(BaseModel):
+    rule_id: str
+    title: str
+    expected: Literal["cumple", "viola"] | None
+    status: str | None
+    outcome: Literal["acerto", "fallo", "sin_resultado"] | None
+    # Con qué solidez se comprobó en el último análisis: alta | media | baja | ninguna
+    confidence: str | None
+
+
+class Concordance(BaseModel):
+    items: list[ControlItem]
+    # Reglas con caso de control, y de ellas las que el programa acertó, falló o no pudo comprobar
+    known: int
+    hits: int
+    misses: int
+    unverified: int
+    # Número del último análisis con el que se compara (None = todavía no hay)
+    report_num: int | None
+
+
+class ExpectedBody(BaseModel):
+    expected: Literal["cumple", "viola"] | None
+
+
+def _concordance(store: Analyses, settings: Config, project_id: str) -> Concordance:
+    current = _project_rules(store, settings, project_id)
+    source = current.repo if current.active == "repo" else current.uploaded
+    rules = [(r.id, r.title) for r in source.rules] if source and source.valid else []
+    rules_store = RulesStore(store.conn)
+    latest = store.latest_report(project_id)
+    results = {r["rule_id"]: (r["status"], r["level"]) for r in rules_store.results(latest["id"])} if latest else {}
+    items = concordancia.build(rules, rules_store.expected(project_id), results)
+    known = [i for i in items if i.expected]
+    return Concordance(
+        items=[ControlItem(**i.__dict__) for i in items], known=len(known), hits=sum(i.outcome == "acerto" for i in known),
+        misses=sum(i.outcome == "fallo" for i in known), unverified=sum(i.outcome == "sin_resultado" for i in known),
+        report_num=latest["num"] if latest else None,
+    )
+
+
+@router.get("/api/projects/{project_id}/reglas/concordancia", response_model=Concordance)
+def get_concordance(project_id: str, store: Analyses, user_id: UserId, settings: Config) -> Concordance:
+    """Las reglas con su caso de control y cuántas acertó el programa en el último análisis."""
+    require_repo(store, user_id, project_id)
+    return _concordance(store, settings, project_id)
+
+
+@router.put("/api/projects/{project_id}/reglas/{rule_id}/esperado", response_model=Concordance)
+def set_expected(project_id: str, rule_id: str, body: ExpectedBody, store: Analyses, user_id: UserId, settings: Config) -> Concordance:
+    """Caso de control: lo que el equipo sabe de la regla (`cumple`, `viola` o null para quitarlo). No cambia resultados."""
+    require_repo(store, user_id, project_id)
+    current = _concordance(store, settings, project_id)
+    if rule_id not in {i.rule_id for i in current.items}:
+        raise ApiError(404, "unknown_rule", f"{rule_id} no está en las reglas del proyecto")
+    RulesStore(store.conn).set_expected(project_id, rule_id, body.expected, user_id)
+    return _concordance(store, settings, project_id)
+
+
+@router.post("/api/projects/{project_id}/reglas/redactar", response_model=ProjectRules)
+async def write_rule(
+    project_id: str, body: SentenceBody, store: Analyses, user_id: UserId, settings: Config, llm: Annotated[LLM, Depends(get_llm)],
+) -> ProjectRules:
+    """
+    «Escribe una regla con tus palabras»: la IA la convierte en una regla verificable (con ejemplos y dudas) y se agrega
+    en borrador a las reglas del proyecto. Sin reglas todavía, arma el archivo con ella.
+    """
+    repo = require_repo(store, user_id, project_id)
+    current = _project_rules(store, settings, project_id)
+    if current.active == "repo" or current.uploaded:
+        text, _, save, in_repo = _editable(store, settings, project_id, user_id)
+    else:
+        text, in_repo = None, False
+
+        def save(new: str) -> None:
+            RulesStore(store.conn).save_upload(project_id, new, user_id)
+
+    try:
+        content, new_id, _ = await asyncio.to_thread(importar.draft_from_sentence, llm, repo["name"], body.text, text)
+    except ValueError as exc:
+        raise ApiError(422, "invalid_sentence", str(exc)) from exc
+    except LlmError as exc:
+        code, message = LLM_ERRORS.get(exc.kind or "", ("llm_unavailable", f"La IA no pudo redactar la regla: {exc}"))
+        raise ApiError(503, code, message) from exc
+    try:
+        reglas.parse(content)
+    except reglas.RulesError as exc:
+        raise ApiError(422, "invalid_rules", str(exc)) from exc
+    save(content)
+    return _project_rules(store, settings, project_id).model_copy(update={"messages": [f"{new_id} agregada en borrador: revísala y apruébala", *([REPO_COPY_NOTE] if in_repo else [])]})
+
+
 @router.post("/api/projects/{project_id}/reglas/validar", response_model=Validation)
 def validate_rules(project_id: str, body: RulesContent, store: Analyses, user_id: UserId, settings: Config) -> Validation:
     """Valida un reglas_negocio.toml del proyecto sin guardarlo (botón Validar): sintaxis y rutas de su repositorio."""
@@ -295,6 +436,23 @@ def template(project_id: str, store: Analyses, user_id: UserId, settings: Config
         reglas.template_for(repo["name"], ws.list_files([])), media_type="application/toml; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{reglas.FILENAME}"'},
     )
+
+
+@router.get("/api/projects/{project_id}/reglas/documento")
+def readable_document(project_id: str, store: Analyses, user_id: UserId, settings: Config, formato: Literal["html", "md"] = "html") -> Response:
+    """
+    Las reglas que usa el análisis como un documento para leer y presentar (HTML imprimible o Markdown), sin TOML:
+    resumen, cómo leerlo y, por regla, sus ejemplos, dudas y fuente (reglas_documento.py).
+    """
+    require_repo(store, user_id, project_id)
+    current = _project_rules(store, settings, project_id)
+    source = current.repo if current.active == "repo" else current.uploaded
+    if source is None or not source.valid:
+        raise ApiError(409, "no_rules", "El proyecto no tiene reglas válidas para armar el documento")
+    rule_set = reglas.parse(source.content)
+    if formato == "md":
+        return Response(documento.markdown(rule_set), media_type="text/markdown; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="reglas_de_negocio.md"'})
+    return Response(documento.html(rule_set), media_type="text/html; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="reglas_de_negocio.html"'})
 
 
 # ───────────────────────── Revisión al cargar el repo (Nuevo análisis) ─────────────────────────

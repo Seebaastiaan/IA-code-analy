@@ -17,11 +17,32 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 - Las reglas del repositorio también se aprueban desde la tabla (se guardan en la copia de trabajo; hay que descargar el
   archivo y hacer commit). El análisis normal (pytest, cobertura, pip-audit) trabaja desde la carpeta del código si está en
   una subcarpeta (`backend/`).
+- Las dudas de una regla se contestan con **Sí o No** en la tabla de aprobación: la respuesta queda en la descripción de la
+  regla y el proyecto la recuerda; si una importación nueva trae la misma pregunta de la misma regla, se contesta sola.
+- Resultado de las reglas en lenguaje normal (semáforo y una frase por regla), el `.toml` en «Avanzado» y «Escribe una regla
+  con tus palabras» (la IA la redacta y entra en borrador).
+- Casos de control opcionales («sé que se cumple / se viola») y panel de concordancia con el último análisis, con la
+  confianza de cada regla.
+- Lo que aprueba «Preparar todo» se marca «Aprobada por el programa» y se revierte a borrador en un clic.
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
 - Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
   de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.
 - Subir el documento de requisitos arrastrándolo o eligiéndolo, con aviso de «Tipo de archivo no válido»; la tabla de
   aprobación muestra de qué capítulo y página (u hoja) salió cada regla y la ayuda explica cómo escribir un patrón (regex).
+
+- «Documento para presentar»: las reglas como documento legible (HTML imprimible a PDF o Markdown) con resumen, guía de
+  lectura, ejemplos Dado/Cuando/Entonces, dudas y fuente (`GET /api/projects/{id}/reglas/documento`). El `.toml` que
+  genera la IA lleva al inicio una guía de lectura de sus campos.
+
+- «Preparar todo» (Configuración → Reglas de negocio): aprueba las reglas sin dudas, prepara el entorno de pruebas, lo
+  prueba, escribe y corre una prueba por regla y comprueba que detecten violaciones, sin pasos manuales
+  (docs/PLAN_REGLAS_AUTOMATICO.md). Aprueba las pruebas que pasan y son fuertes; el filtro «Necesitan mi decisión» lista
+  el resto.
+- Cada regla sacada de un documento trae la `cita` textual que la respalda y el programa comprueba que esté en el
+  documento, Word o PDF con texto (`cita_verificada`; agrega la dependencia `pypdf`); una regla sin cita o con una cita que
+  no aparece queda con una duda. También avisa de frases que parecen reglas y no se extrajeron.
+- Segunda lectura del código sin ver la prueba y contraste con su resultado (coincide / discrepa); «Preparar todo» solo
+  aprueba solas las pruebas fuertes que coinciden.
 
 ### Cambiado
 - Los mensajes de los hallazgos de Ruff y Bandit salen en español (`app/analyses/mensajes.py`); lo que no está en el

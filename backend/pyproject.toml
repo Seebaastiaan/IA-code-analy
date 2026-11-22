@@ -15,6 +15,8 @@ dependencies = [
     "radon>=6.0",
     # Similitud de embeddings del asistente
     "numpy>=2.0",
+    # Leer el texto de un PDF para comprobar las citas de las reglas de negocio
+    "pypdf>=5",
 ]
 
 [project.optional-dependencies]

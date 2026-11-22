@@ -295,7 +295,7 @@ def test_reanalizar_respeta_los_analizadores_del_reporte(demo, settings):
 
     ws = Workspace(settings, demo)
     content = ws.read("api.py")
-    tools = lambda analyzers: {f.tool for f in analyze_file(ws, "api.py", content, {"analyzers": analyzers})}  # noqa: E731
+    tools = lambda analyzers: {f.tool for f in analyze_file(ws, "api.py", content, {"analyzers": analyzers})}
     assert tools('["ruff", "bandit"]') == {"Ruff", "Bandit"}
     # Un análisis sin Bandit no gana hallazgos de Bandit al guardar o corregir
     assert tools('["ruff", "pytest"]') == {"Ruff"}

@@ -4,6 +4,7 @@
  * salen «no cumple» (como un código con reglas rotas) y una prueba sin `preparar` en la firma sale rota.
  */
 import type { GeneratedTest, MatrixCell, PermissionMatrix, RuleTestRow, RuleTestsView, StrengthResult, SupportEvidence } from '@/features/rules/types'
+import { crosscheck } from '@/features/rules/utils/rules'
 import { harnessView } from './harness'
 import { projectRules } from './rules'
 
@@ -77,6 +78,7 @@ export function ruleTestsView(repoId: string): RuleTestsView {
       id: r.id, title: r.title, description: r.title, severity: r.severity, criterion: null, repo_tests: 0, test,
       state: !test ? 'sin_prueba' : test.approved ? 'aprobada' : 'borrador',
       permissions: /permis|\broles?\b|autoriz/i.test(r.title) || test?.tipo === 'permisos', evidence: evidences.get(repoId)?.get(r.id) ?? null,
+      crosscheck: crosscheck(test?.run ?? null, evidences.get(repoId)?.get(r.id) ?? null),
     }
   })
   return {

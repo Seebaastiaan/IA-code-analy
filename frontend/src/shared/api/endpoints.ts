@@ -41,6 +41,8 @@ export const EP = {
     /** Las reglas son de cada proyecto: se validan contra su repositorio y la plantilla lleva su nombre */
     validate: (projectId: string) => `/api/projects/${projectId}/reglas/validar`,
     template: (projectId: string) => `/api/projects/${projectId}/reglas/plantilla`,
+    /** Las reglas como documento para leer y presentar (formato = html | md) */
+    document: (projectId: string) => `/api/projects/${projectId}/reglas/documento`,
     /** Revisa las reglas de un repo antes de analizarlo (Nuevo análisis), sin clonarlo */
     precheck: '/api/reglas/revisar',
     /** Saca las reglas de un documento de requisitos (PDF, Word, Markdown) con IA */
@@ -49,6 +51,10 @@ export const EP = {
     states: (projectId: string) => `/api/projects/${projectId}/reglas/estado`,
     /** PUT: las dudas que siguen abiertas de una regla (quitar una = resolverla) */
     doubts: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/dudas`,
+    control: (projectId: string) => `/api/projects/${projectId}/reglas/concordancia`,
+    expected: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/esperado`,
+    write: (projectId: string) => `/api/projects/${projectId}/reglas/redactar`,
+    answer: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/respuesta`,
     /** Mapa del proyecto (endpoints, modelos, roles) leído del código sin IA */
     map: (projectId: string) => `/api/projects/${projectId}/reglas/mapa`,
     /** Arnés de pruebas: GET / POST (proponer con IA) / PUT (editar) / DELETE */

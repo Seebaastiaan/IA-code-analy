@@ -11,8 +11,10 @@ import pytest
 from app.analyses import reglas
 from app.assistant import router as assistant_router
 from app.assistant.llm import Answer
+from app.projects import reglas_concordancia as concordancia
 from app.projects import reglas_importar as importar
 from app.projects import reglas_pruebas as pruebas
+from app.projects import reglas_respuestas as respuestas
 from tests.test_analysis import URL, wait_done
 from tests.test_reglas import correr, repo
 from tests.test_reglas_importar import docx
@@ -183,14 +185,14 @@ def test_editar_una_regla_que_no_esta():
 
 RESPUESTA = {
     "reglas": [
-        {"titulo": "El SKU no se repite", "descripcion": "Dos productos no tienen el mismo SKU.", "severidad": "alta", "tipo": "datos", "fuente": "§4.2",
+        {"titulo": "El SKU no se repite", "descripcion": "Dos productos no tienen el mismo SKU.", "severidad": "alta", "tipo": "datos", "fuente": "§4.2", "cita": "SKU y nombre únicos",
          "escenarios": [{"dado": "un producto con SKU CAF-001", "cuando": "se da de alta otro con CAF-001", "entonces": "se rechaza y queda uno solo"}], "dudas": []},
-        {"titulo": "El nombre interno no se repite", "descripcion": "Dos productos no tienen el mismo nombre.", "severidad": "media", "tipo": "datos", "fuente": "§4.2",
+        {"titulo": "El nombre interno no se repite", "descripcion": "Dos productos no tienen el mismo nombre.", "severidad": "media", "tipo": "datos", "fuente": "§4.2", "cita": "SKU y nombre únicos",
          "escenarios": [{"dado": "«Café molido»", "cuando": "se da de alta «café  Molido»", "entonces": "se rechaza"}],
          "dudas": ["¿Se comparan sin mayúsculas ni espacios repetidos?", "  "]},
-        {"titulo": "El gerente firma las mermas cada lunes", "descripcion": "Revisión semanal.", "severidad": "baja", "tipo": "proceso", "fuente": "§9.2",
+        {"titulo": "El gerente firma las mermas cada lunes", "descripcion": "Revisión semanal.", "severidad": "baja", "tipo": "proceso", "fuente": "§9.2", "cita": "SKU y nombre únicos",
          "escenarios": [{"dado": "x", "cuando": "y", "entonces": "z"}], "dudas": []},
-        {"titulo": "Sin tipo válido", "descripcion": "D", "severidad": "rara", "tipo": "magia", "fuente": "", "escenarios": [{"dado": "", "cuando": "b", "entonces": "c"}], "dudas": []},
+        {"titulo": "Sin tipo válido", "descripcion": "D", "severidad": "rara", "tipo": "magia", "fuente": "", "cita": "SKU y nombre únicos", "escenarios": [{"dado": "", "cuando": "b", "entonces": "c"}], "dudas": []},
     ],
     "contradicciones": [],
     "dudas": ["El documento no trae la sección 6"],
@@ -267,6 +269,40 @@ def test_aprobar_desde_la_app(client, rid):
     assert res.status_code == 404 and res.json()["error"]["code"] == "unknown_rule"
 
 
+def test_contestar_una_duda_con_si_o_no_queda_en_la_regla_y_se_recuerda(client, rid):
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": V2}).status_code == 200
+    doubt = "¿Cuenta el precio con impuestos?"
+    body = client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": "no"}).json()
+    rule = {r["id"]: r for r in body["uploaded"]["rules"]}["RN-002"]
+    assert rule["doubts"] == ["«alerta/bloqueo»: ¿se avisa o se rechaza?"]
+    assert rule["description"].endswith(f"Aclaración del equipo: {doubt} No.")
+    # Una duda que ya no está abierta no se contesta dos veces
+    assert client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": "si"}).status_code == 409
+    assert client.post(f"/api/projects/{rid}/reglas/RN-099/respuesta", json={"doubt": doubt, "answer": "si"}).status_code == 404
+    assert client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": "tal vez"}).status_code == 422
+
+    # Una importación nueva con la misma pregunta (aunque la redacte distinto) se contesta sola
+    again = V2.replace(doubt, "¿Cuenta el precio con impuestos incluidos?").replace("RN-002", "RN-007")
+    body = client.put(f"/api/projects/{rid}/reglas", json={"content": again}).json()
+    rule = {r["id"]: r for r in body["uploaded"]["rules"]}["RN-007"]
+    assert rule["doubts"] == ["«alerta/bloqueo»: ¿se avisa o se rechaza?"] and "Aclaración del equipo" in rule["description"]
+    assert body["messages"] == ["RN-007: ya respondiste «¿Cuenta el precio con impuestos incluidos?»: No"]
+
+
+def test_la_respuesta_recordada_no_se_aplica_a_otra_regla():
+    memory = [{"title": "Precio de venta menor al costo", "question": "¿Cuenta el precio con impuestos?", "answer": "si"}]
+    text, messages = respuestas.apply(V2.replace("Precio de venta menor al costo", "El gerente aprueba descuentos"), memory)
+    assert messages == [] and text.count("¿Cuenta el precio con impuestos?") == 1
+    assert respuestas.apply(V2, [])[1] == []
+
+
+def test_la_aclaracion_no_pasa_del_largo_permitido():
+    long = "x" * (reglas.MAX_TEXT - 20)
+    out = respuestas.with_note(long, "¿Una pregunta bastante larga que no cabe?", "si")
+    assert len(out) <= reglas.MAX_TEXT
+    assert respuestas.with_note("x" * reglas.MAX_TEXT, "¿Cabe?", "si") == "x" * reglas.MAX_TEXT
+
+
 def test_sin_reglas_en_la_app_no_hay_nada_que_aprobar(client, rid):
     res = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "aprobada"})
     assert res.status_code == 409 and res.json()["error"]["code"] == "no_rules"
@@ -331,6 +367,126 @@ def test_escenarios_y_tipo_van_a_la_ia():
     assert "tipo: datos" in text and "dado un producto con stock 3 · cuando se venden 5 · entonces se rechaza y el stock sigue en 3" in text
 
 
+def test_lo_que_aprueba_el_programa_se_marca_y_se_revierte(client, rid):
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": V2.replace('estado      = "aprobada"\nfuente', 'estado      = "borrador"\nfuente', 1)}).status_code == 200
+    body = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "aprobada", "by": "programa"}).json()
+    rule = {r["id"]: r for r in body["uploaded"]["rules"]}["RN-001"]
+    assert (rule["status"], rule["approved_by"]) == ("aprobada", "programa") and 'aprobada_por = "programa"' in body["uploaded"]["content"]
+    # Revertir en un clic: vuelve a borrador y la marca desaparece
+    body = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "borrador"}).json()
+    rule = {r["id"]: r for r in body["uploaded"]["rules"]}["RN-001"]
+    assert (rule["status"], rule["approved_by"]) == ("borrador", None) and "aprobada_por" not in body["uploaded"]["content"]
+    # Aprobada por el equipo: sin marca
+    body = client.post(f"/api/projects/{rid}/reglas/estado", json={"ids": ["RN-001"], "status": "aprobada"}).json()
+    assert {r["id"]: r for r in body["uploaded"]["rules"]}["RN-001"]["approved_by"] is None
+
+
+def test_el_programa_acierta_si_coincide_con_lo_que_el_equipo_sabe():
+    out = concordancia.outcome
+    assert (out("cumple", "cumple"), out("viola", "no_cumple"), out("viola", "no_implementada")) == ("acerto", "acerto", "acerto")
+    assert (out("cumple", "no_cumple"), out("viola", "cumple")) == ("fallo", "fallo")
+    assert (out("cumple", "sin_verificar"), out("viola", "prueba_rota"), out("cumple", None)) == ("sin_resultado",) * 3
+    assert out(None, "cumple") is None
+    items = concordancia.build([("RN-001", "A"), ("RN-002", "B")], {"RN-001": "cumple"}, {"RN-001": ("cumple", "pruebas_y_patron")})
+    assert [(i.outcome, i.confidence) for i in items] == [("acerto", "alta"), (None, None)]
+
+
+def test_casos_de_control_y_panel_de_concordancia(client, rid):
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": V2}).status_code == 200
+    body = client.get(f"/api/projects/{rid}/reglas/concordancia").json()
+    assert [i["rule_id"] for i in body["items"]] == ["RN-001", "RN-002", "RN-003"] and body["known"] == 0
+
+    body = client.put(f"/api/projects/{rid}/reglas/RN-001/esperado", json={"expected": "cumple"}).json()
+    item = body["items"][0]
+    # El análisis no tiene resultado para ella todavía: no se cuenta ni como acierto ni como fallo
+    assert (item["expected"], item["outcome"]) == ("cumple", "sin_resultado")
+    assert (body["known"], body["hits"], body["misses"], body["unverified"]) == (1, 0, 0, 1)
+
+    body = client.put(f"/api/projects/{rid}/reglas/RN-001/esperado", json={"expected": None}).json()
+    assert body["known"] == 0 and body["items"][0]["expected"] is None
+    assert client.put(f"/api/projects/{rid}/reglas/RN-099/esperado", json={"expected": "viola"}).status_code == 404
+    assert client.put(f"/api/projects/{rid}/reglas/RN-001/esperado", json={"expected": "quizá"}).status_code == 422
+
+
+def test_escribir_una_regla_con_palabras_normales_la_agrega_en_borrador(client, rid):
+    reply = {
+        "titulo": "Un descuento mayor al 20% necesita al gerente", "descripcion": "Solo el gerente aprueba descuentos de más del 20%.", "severidad": "alta",
+        "tipo": "permisos", "escenarios": [{"dado": "un vendedor", "cuando": "aplica 25%", "entonces": "se rechaza"}], "dudas": ["¿El 20% exacto necesita al gerente?"],
+    }
+    llm = FakeLLM(reply)
+    client.app.dependency_overrides[assistant_router.get_llm] = lambda: llm
+    try:
+        # Sin reglas todavía: arma el archivo con ella
+        body = client.post(f"/api/projects/{rid}/reglas/redactar", json={"text": "Los descuentos de más del 20% los aprueba el gerente"}).json()
+        assert body["messages"] == ["RN-001 agregada en borrador: revísala y apruébala"]
+        # Con reglas: sigue la numeración y no toca lo demás
+        assert client.put(f"/api/projects/{rid}/reglas", json={"content": V2}).status_code == 200
+        body = client.post(f"/api/projects/{rid}/reglas/redactar", json={"text": "Otra regla"}).json()
+        rules = {r["id"]: r for r in body["uploaded"]["rules"]}
+        assert list(rules) == ["RN-001", "RN-002", "RN-003", "RN-004"]
+        assert rules["RN-004"]["status"] == "borrador" and rules["RN-004"]["doubts"] == ["¿El 20% exacto necesita al gerente?"]
+        assert rules["RN-004"]["source"] == "Escrita por el equipo" and "# Reglas del inventario" in body["uploaded"]["content"]
+        assert client.post(f"/api/projects/{rid}/reglas/redactar", json={"text": "   "}).status_code == 422
+    finally:
+        client.app.dependency_overrides.pop(assistant_router.get_llm, None)
+
+
 def test_get_llm_override_no_queda(client):
     # Las pruebas de arriba no dejan un modelo falso puesto para las demás
     assert assistant_router.get_llm not in client.app.dependency_overrides
+
+
+# ─── Documento para leer y presentar ───
+
+TOML_DOC = """[proyecto]
+nombre  = "Tienda"
+formato = 2
+
+[[regla]]
+id          = "RN-001"
+titulo      = "El stock nunca es negativo"
+descripcion = "El stock nunca es negativo"
+severidad   = "alta"
+tipo        = "datos"
+estado      = "aprobada"
+fuente      = "Cap. 2 «Inventario» · pág. 4"
+
+  [[regla.escenario]]
+  dado     = "un producto con stock 3"
+  cuando   = "se venden 5"
+  entonces = "se rechaza y el stock sigue en 3"
+
+[[regla]]
+id          = "RN-002"
+titulo      = "Reporte semanal"
+descripcion = "El gerente <revisa> el reporte cada lunes."
+severidad   = "baja"
+tipo        = "proceso"
+estado      = "borrador"
+dudas       = ["¿A qué hora?"]
+"""
+
+
+def test_el_documento_de_reglas_se_lee_sin_toml():
+    from app.projects import reglas_documento as documento
+
+    rs = reglas.parse(TOML_DOC)
+    md = documento.markdown(rs)
+    assert "# Reglas de negocio · Tienda" in md and "2 reglas: 1 aprobadas y 1 en borrador." in md
+    assert "**Dado** un producto con stock 3; **cuando** se venden 5; **entonces** se rechaza y el stock sigue en 3." in md
+    # La descripción igual al título no se repite; las dudas y la fuente sí salen
+    assert md.count("El stock nunca es negativo") == 2 and "- ¿A qué hora?" in md and "Cap. 2 «Inventario» · pág. 4" in md
+    assert "Fuera del código" in md
+    page = documento.html(rs)
+    assert page.startswith("<!doctype html>") and "&lt;revisa&gt;" in page and "<revisa>" not in page
+
+
+def test_el_api_entrega_el_documento_en_html_y_markdown(client):
+    rid = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])["repo_id"]
+    assert client.get(f"/api/projects/{rid}/reglas/documento").json()["error"]["code"] == "no_rules"
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": TOML_DOC}).status_code == 200
+    res = client.get(f"/api/projects/{rid}/reglas/documento")
+    assert res.status_code == 200 and "text/html" in res.headers["content-type"] and "reglas_de_negocio.html" in res.headers["content-disposition"]
+    assert "Reglas de negocio · Tienda" in res.text
+    md = client.get(f"/api/projects/{rid}/reglas/documento", params={"formato": "md"})
+    assert "text/markdown" in md.headers["content-type"] and md.text.startswith("# Reglas de negocio · Tienda")

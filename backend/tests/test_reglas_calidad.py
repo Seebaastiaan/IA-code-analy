@@ -548,3 +548,44 @@ def test_la_prueba_de_fuerza_acepta_varias_pruebas_por_regla(tmp_path, monkeypat
     assert solo_a["mutantes"][0]["codigo_salida"] == 0  # la prueba floja no lo nota
     assert ambas["base"] == 0 and ambas["mutantes"][0]["codigo_salida"] != 0
     assert (tmp_path / "calc.py").read_text(encoding="utf-8") == "def doble(x):\n    return x * 2\n"
+
+
+# ─── Contraste entre la prueba y la lectura independiente del código ───
+
+
+def _run(verdict: str):
+    from app.projects.pruebas import RunOut
+
+    return RunOut(verdict=verdict, detail="")
+
+
+def _evidence(verdict: str, stale: bool = False):
+    from app.projects.pruebas import EvidenceOut
+
+    return EvidenceOut(verdict=verdict, summary="", places=[], model="m", search=[], created_at="", stale=stale)
+
+
+@pytest.mark.parametrize(
+    ("verdict", "reading", "status"),
+    [
+        ("cumple", "implementada", "coincide"),
+        ("no_cumple", "no_encontrada", "coincide"),
+        ("no_cumple", "parcial", "coincide"),
+        ("cumple", "parcial", "discrepa"),
+        ("cumple", "no_encontrada", "discrepa"),
+        ("no_cumple", "implementada", "discrepa"),
+    ],
+)
+def test_el_contraste_compara_la_prueba_con_la_lectura(verdict, reading, status):
+    from app.projects.pruebas import crosscheck
+
+    assert crosscheck(_run(verdict), _evidence(reading)).status == status
+
+
+def test_sin_corrida_clara_o_sin_lectura_vigente_no_hay_contraste():
+    from app.projects.pruebas import crosscheck
+
+    assert crosscheck(None, _evidence("implementada")).status == "sin_revisar"
+    assert crosscheck(_run("prueba_rota"), _evidence("implementada")).status == "sin_revisar"
+    assert crosscheck(_run("cumple"), None).status == "sin_revisar"
+    assert crosscheck(_run("cumple"), _evidence("implementada", stale=True)).status == "sin_revisar"

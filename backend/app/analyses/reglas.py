@@ -61,7 +61,7 @@ OPTIONAL_TEXT = ("historia", "responsable", "criterio")
 # Formato v2 (docs/PROPUESTA_REGLAS_VERIFICABLES.md §5): todos opcionales, un archivo v1 sigue siendo válido
 TYPES = ("datos", "flujo", "calculo", "permisos", "auditoria", "integracion", "proceso")
 STATES = ("borrador", "aprobada")
-V2_FIELDS = {"tipo", "estado", "fuente", "dudas", "escenario"}
+V2_FIELDS = {"tipo", "estado", "fuente", "dudas", "escenario", "cita", "cita_verificada", "aprobada_por"}
 RULE_FIELDS = {*REQUIRED, *OPTIONAL_TEXT, "rutas", "prohibido", "obligatorio", "ia", *V2_FIELDS}
 PROJECT_FIELDS = {"nombre", "version", "formato"}
 SCENARIO_FIELDS = ("dado", "cuando", "entonces")
@@ -290,6 +290,11 @@ class BusinessRule:
     status: str = "aprobada"
     source: str | None = None
     doubts: tuple[str, ...] = ()
+    # Frase del documento de requisitos que respalda la regla y si el programa la encontró ahí (None = no se pudo comprobar)
+    quote: str | None = None
+    quote_ok: bool | None = None
+    # Quién la aprobó: "programa" (aprobación automática, reversible en un clic) o None (el equipo)
+    approved_by: str | None = None
     # Los de `[[regla.escenario]]` o, si no hay, el `criterio` leído como escenario
     scenarios: tuple[Scenario, ...] = ()
 
@@ -486,6 +491,13 @@ def criterion_scenario(criterion: str | None) -> Scenario | None:
     return Scenario(m.group("dado"), m.group("cuando"), m.group("entonces")) if m else None
 
 
+def _flag(raw: dict, key: str, where: str) -> bool | None:
+    value = raw.get(key)
+    if value is not None and not isinstance(value, bool):
+        raise RulesError(f"{where}: `{key}` debe ser true o false")
+    return value
+
+
 def _doubts(raw: dict, where: str) -> tuple[str, ...]:
     items = raw.get("dudas", [])
     if not isinstance(items, list) or not all(isinstance(d, str) for d in items):
@@ -546,6 +558,9 @@ def _rule(raw: object, where: str) -> BusinessRule:
         status=_choice(raw, "estado", where, STATES) or "aprobada",
         source=_text(raw, "fuente", where, MAX_TITLE, required=False),
         doubts=_doubts(raw, where),
+        quote=_text(raw, "cita", where, MAX_TEXT, required=False),
+        quote_ok=_flag(raw, "cita_verificada", where),
+        approved_by=_choice(raw, "aprobada_por", where, ("programa",)),
         scenarios=scenarios,
     )
 
