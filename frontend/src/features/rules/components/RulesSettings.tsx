@@ -59,11 +59,14 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
   const [result, setResult] = useState<RulesValidation | null>(null)
   const [notice, setNotice] = useState<ImportedRules | null>(null)
   const [reading, setReading] = useState<string | null>(null)
+  // «Avanzado» (el archivo .toml): cerrado, salvo que haya un error que corregir. Se controla aquí para que no se cierre al escribir
+  const [advanced, setAdvanced] = useState(false)
   // Reemplaza el contenido del editor: no se guarda hasta "Guardar en la app"
   const importRules = useImportRules((done) => {
     setText(done.content)
     setResult(done.validation)
     setNotice(done)
+    if (!done.validation.valid) setAdvanced(true)
   })
   const fromDocument = (path: string) => {
     setReading(path)
@@ -87,7 +90,10 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
       onSaved(saved, saved.active === 'repo' ? 'Guardadas en la app (el análisis usa las del repositorio)' : 'Reglas guardadas: se usarán en el siguiente análisis')
     },
     // 422 invalid_rules: el mensaje trae la línea del error
-    onError: (e) => setResult({ valid: false, error: e.message, project: null, rules: [] }),
+    onError: (e) => {
+      setResult({ valid: false, error: e.message, project: null, rules: [] })
+      setAdvanced(true)
+    },
   })
   const remove = useMutation({
     mutationFn: () => rulesApi.remove(repoId),
@@ -165,7 +171,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
       )}
       {result?.valid === false && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">Las reglas tienen un error: corrígelo en «Avanzado» para poder guardarlas.</p>}
       {/* El archivo .toml es un formato interno: queda en «Avanzado», cerrado salvo que haya un error que corregir */}
-      <details open={result?.valid === false ? true : undefined} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
+      <details open={advanced} onToggle={(e) => setAdvanced(e.currentTarget.open)} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
         <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">Avanzado: archivo {RULES_FILENAME}, plantilla y patrones</summary>
         <div className="mt-3 mb-3 flex flex-wrap items-center gap-2">
           <Button variant="ghost" onClick={() => template.mutate()} disabled={template.isPending}>

@@ -178,7 +178,8 @@ test('reglas de negocio: matriz del reporte y carga desde configuración', async
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
   await expect(page.getByText('Cargadas en la app', { exact: true })).toBeVisible()
 
-  // Las reglas son de este proyecto: las rutas se revisan contra su repositorio
+  // Las reglas son de este proyecto: las rutas se revisan contra su repositorio (al guardar, «Avanzado» vuelve a cerrarse)
+  await page.getByText('Avanzado: archivo reglas_negocio.toml').click()
   await editor.fill('[proyecto]\nnombre = "ETL"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\nrutas = ["no_existe/"]\n')
   await page.getByRole('button', { name: 'Validar' }).click()
   await expect(page.getByText(/Aviso: RN-001: la ruta `no_existe\/` no existe en/)).toBeVisible()
@@ -250,7 +251,7 @@ test('reglas de negocio desde el documento de requisitos del repo', async ({ pag
   await expect(page.getByText('Reglas guardadas: se usarán en el siguiente análisis')).toBeVisible()
 
   // Tabla de aprobación: lo importado entra en borrador y una regla con dudas no se aprueba
-  const table = page
+  const table = page.getByRole('heading', { name: 'Aprobación de las reglas' }).locator('xpath=../..')
   await expect(table.getByText(/3 de 3 reglas son borrador/)).toBeVisible()
   // Cada regla dice de qué capítulo y página del documento salió
   await expect(table.getByText('Cap. 2 «Tickets» · pág. 3').first()).toBeVisible()

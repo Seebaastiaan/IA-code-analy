@@ -41,7 +41,7 @@ describe('validación simulada de reglas_negocio.toml', () => {
   const base = '[proyecto]\nnombre = "Tienda"\n\n[[regla]]\nid = "RN-001"\ntitulo = "T"\ndescripcion = "D"\nseveridad = "alta"\n'
 
   it('acepta un archivo válido', () => {
-    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false, description: 'D', tipo: null, status: 'aprobada', source: null, doubts: [], scenarios: [], quote: null, quote_ok: null }], warnings: [] })
+    expect(validate(base)).toEqual({ valid: true, error: null, project: 'Tienda', rules: [{ id: 'RN-001', title: 'T', severity: 'alta', pattern: false, description: 'D', tipo: null, status: 'aprobada', source: null, doubts: [], scenarios: [], quote: null, quote_ok: null, approved_by: null }], warnings: [] })
   })
 
   it('lee el formato v2: tipo, estado, dudas y escenarios', () => {
