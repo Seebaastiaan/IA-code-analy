@@ -589,13 +589,14 @@ export function setStates(repoId: string, ids: string[], status: RuleApproval, b
   return { ...projectRules(repoId), messages }
 }
 
-export function answerDoubt(repoId: string, ruleId: string, doubt: string, answer: 'si' | 'no'): ProjectRules | string {
+export function answerDoubt(repoId: string, ruleId: string, doubt: string, answer: string): ProjectRules | string {
+  if (!answer.trim()) return 'Escribe tu respuesta'
   const cur = editable(repoId)
   if (typeof cur === 'string') return cur
   const rule = cur.rules.find((r) => r.id === ruleId)
   if (!rule) return `${ruleId} no está en las reglas del proyecto`
   if (!(rule.doubts ?? []).includes(doubt)) return `${ruleId} ya no tiene esa duda abierta`
-  const description = `${rule.description} Aclaración del equipo: ${doubt} ${answer === 'si' ? 'Sí' : 'No'}.`
+  const description = `${rule.description} Aclaración del equipo: ${doubt} ${answer === 'si' ? 'Sí' : answer === 'no' ? 'No' : answer.trim().replace(/\.$/, '')}.`
   let text = setField(cur.text, ruleId, 'descripcion', `descripcion = ${q(description)}`)
   text = setField(text, ruleId, 'dudas', `dudas       = [${(rule.doubts ?? []).filter((d) => d !== doubt).map(q).join(', ')}]`)
   cur.save(text)

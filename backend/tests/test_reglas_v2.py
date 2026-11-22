@@ -281,7 +281,7 @@ def test_contestar_una_duda_con_si_o_no_queda_en_la_regla_y_se_recuerda(client, 
     # Una duda que ya no está abierta no se contesta dos veces
     assert client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": "si"}).status_code == 409
     assert client.post(f"/api/projects/{rid}/reglas/RN-099/respuesta", json={"doubt": doubt, "answer": "si"}).status_code == 404
-    assert client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": "tal vez"}).status_code == 422
+    assert client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": ""}).status_code == 422
 
     # Una importación nueva con la misma pregunta (aunque la redacte distinto) se contesta sola
     again = V2.replace(doubt, "¿Cuenta el precio con impuestos incluidos?").replace("RN-002", "RN-007")
@@ -289,6 +289,16 @@ def test_contestar_una_duda_con_si_o_no_queda_en_la_regla_y_se_recuerda(client, 
     rule = {r["id"]: r for r in body["uploaded"]["rules"]}["RN-007"]
     assert rule["doubts"] == ["«alerta/bloqueo»: ¿se avisa o se rechaza?"] and "Aclaración del equipo" in rule["description"]
     assert body["messages"] == ["RN-007: ya respondiste «¿Cuenta el precio con impuestos incluidos?»: No"]
+
+
+def test_una_pregunta_abierta_se_contesta_con_texto_y_queda_en_la_regla(client, rid):
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": V2}).status_code == 200
+    doubt = "¿Cuenta el precio con impuestos?"
+    body = client.post(f"/api/projects/{rid}/reglas/RN-002/respuesta", json={"doubt": doubt, "answer": "Cuenta con IVA del 16%."}).json()
+    rule = {r["id"]: r for r in body["uploaded"]["rules"]}["RN-002"]
+    assert rule["description"].endswith(f"Aclaración del equipo: {doubt} Cuenta con IVA del 16%.")
+    assert doubt not in rule["doubts"]
+    assert respuestas.answer_text("si") == "Sí" and respuestas.answer_text(" Con IVA. ") == "Con IVA"
 
 
 def test_la_respuesta_recordada_no_se_aplica_a_otra_regla():

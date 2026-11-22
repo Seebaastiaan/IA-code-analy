@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { toastError } from '../utils/errors'
 import { toast } from '@/shared/hooks/useToast'
 import { Button, Card, Icon, Spinner } from '@/shared/ui'
 import { projectRulesQuery, rulesApi } from '../api/rules.api'
@@ -15,7 +16,7 @@ export function WriteRuleCard({ repoId, canWrite }: { repoId: string; canWrite?:
       setText('')
       toast(saved.messages?.[0] ?? 'Regla agregada en borrador')
     },
-    onError: (e) => toast(e.message, { tone: 'err' }),
+    onError: (e) => toastError(e, () => write.mutate()),
   })
 
   return (

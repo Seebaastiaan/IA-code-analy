@@ -14,7 +14,7 @@ export const rulesApi = {
   setStates: (repoId: string, ids: string[], status: RuleApproval, by: 'equipo' | 'programa' = 'equipo') => http.post<ProjectRules>(EP.rules.states(repoId), { ids, status, by }),
   setDoubts: (repoId: string, ruleId: string, doubts: string[]) => http.put<ProjectRules>(EP.rules.doubts(repoId, ruleId), { doubts }),
   /** Contesta una duda con sí o no: la duda se cierra, la respuesta queda en la regla y el proyecto la recuerda */
-  answerDoubt: (repoId: string, ruleId: string, doubt: string, answer: DoubtAnswer) => http.post<ProjectRules>(EP.rules.answer(repoId, ruleId), { doubt, answer }),
+  answerDoubt: (repoId: string, ruleId: string, doubt: string, answer: DoubtAnswer | string) => http.post<ProjectRules>(EP.rules.answer(repoId, ruleId), { doubt, answer }),
   /** «Escribe una regla con tus palabras»: la IA la redacta y se agrega en borrador */
   writeRule: (repoId: string, text: string) => http.post<ProjectRules>(EP.rules.write(repoId), { text }),
   /** El documento manda: parches de la IA para que el código cumpla la regla */

@@ -131,9 +131,9 @@ class RuleStates(BaseModel):
 
 
 class DoubtAnswer(BaseModel):
-    # La duda tal como está abierta y su respuesta de sí o no
+    # La duda tal como está abierta y su respuesta: «si», «no» o, si la pregunta no es de sí o no, lo que escribe el equipo
     doubt: str = Field(max_length=reglas.MAX_DOUBT)
-    answer: Literal["si", "no"]
+    answer: str = Field(min_length=1, max_length=300)
 
 
 class RuleDoubts(BaseModel):

@@ -89,6 +89,8 @@ Reglas:
 - "dudas" de cada regla: lo ambiguo o incompleto que impide verificarla (un límite que no dice si incluye el valor
   exacto, "y/o", "alerta o bloqueo", dos criterios que chocan, montos o tasas sin valor, una matriz de permisos
   incompleta, qué pasa en el caso que no menciona). Pregunta corta con su sección. Una regla sin dudas lleva [].
+  Formúlala SIEMPRE como pregunta de sí o no y di qué cambia con cada respuesta, así: «¿El límite incluye el valor exacto?
+  (Sí = 100 se permite; No = 100 se rechaza)». Nunca preguntes «¿qué dato…?» ni «¿cuál…?».
 - "cita": la frase del documento que respalda la regla, COPIADA palabra por palabra (sin parafrasear, resumir ni
   traducir), de máximo 250 caracteres. Es lo que el programa busca en el documento para comprobar que la regla no es
   inventada: si no la encuentra, la regla queda con una duda.

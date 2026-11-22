@@ -28,11 +28,15 @@ export function QuestionsCard({ repoId, data }: { repoId: string; data: ProjectR
   const rules = source?.valid ? source.rules : []
   const questions = pendingQuestions(rules)
   const [index, setIndex] = useState(0)
+  const [written, setWritten] = useState('')
 
   const saved = (next: ProjectRules) => queryClient.setQueryData(projectRulesQuery(repoId).queryKey, next)
   const answer = useMutation({
-    mutationFn: ({ q, value }: { q: Question; value: DoubtAnswer }) => rulesApi.answerDoubt(repoId, q.rule.id, q.doubt, value),
-    onSuccess: saved,
+    mutationFn: ({ q, value }: { q: Question; value: DoubtAnswer | string }) => rulesApi.answerDoubt(repoId, q.rule.id, q.doubt, value),
+    onSuccess: (next) => {
+      saved(next)
+      setWritten('')
+    },
     onError: (e) => toast(e.message, { tone: 'err' }),
   })
   const close = useMutation({
@@ -106,6 +110,25 @@ export function QuestionsCard({ repoId, data }: { repoId: string; data: ProjectR
           </div>
         ))}
       </div>
+      {yes === null && (
+        <div className="mt-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
+          <label className="text-sm font-medium" htmlFor="respuesta-escrita">
+            O escribe tu respuesta
+          </label>
+          <textarea
+            id="respuesta-escrita"
+            value={written}
+            onChange={(e) => setWritten(e.target.value)}
+            maxLength={300}
+            rows={2}
+            placeholder="Por ejemplo: cuenta con IVA del 16%"
+            className="mt-1.5 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent p-2 text-sm outline-none focus:border-brand-500"
+          />
+          <Button className="mt-2" variant="secondary" disabled={busy || !written.trim()} onClick={() => answer.mutate({ q, value: written.trim() })}>
+            Guardar mi respuesta
+          </Button>
+        </div>
+      )}
       <p className="mt-3 text-xs text-slate-400">
         El programa recuerda tu respuesta para próximas importaciones.{' '}
         <button type="button" className="underline" disabled={busy} onClick={() => close.mutate(q)}>

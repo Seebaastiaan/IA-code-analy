@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { toast } from '@/shared/hooks/useToast'
+import { toastError } from '../utils/errors'
 import { rulesApi } from '../api/rules.api'
 import type { ImportedRules, ImportRulesRequest } from '../types'
 import { fileToBase64, INVALID_DOCUMENT, isDocument, MAX_DOCUMENT_BYTES } from '../utils/rules'
@@ -11,7 +11,7 @@ export type ImportInput = { request: ImportRulesRequest } | { file: File; extra:
  * (`file`; `extra` lleva la url del repo o el project_id para el nombre del proyecto). No guarda nada.
  */
 export function useImportRules(onImported: (imported: ImportedRules) => void) {
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async (input: ImportInput) => {
       if ('request' in input) return rulesApi.importDocument(input.request)
       const { file, extra } = input
@@ -20,6 +20,7 @@ export function useImportRules(onImported: (imported: ImportedRules) => void) {
       return rulesApi.importDocument({ ...extra, filename: file.name, data: await fileToBase64(file) })
     },
     onSuccess: onImported,
-    onError: (e) => toast(e.message, { tone: 'err' }),
+    onError: (e, input) => toastError(e, () => mutation.mutate(input)),
   })
+  return mutation
 }

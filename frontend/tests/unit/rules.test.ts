@@ -4,6 +4,8 @@ import {
   baseName, crosscheck, EVIDENCE, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, markedCells, matrixFromCode, matrixPayload, nextCell, OUTCOME,
   concordanceText, parseDoubt, plain, plainSummary, precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
 } from '@/features/rules/utils/rules'
+import { friendlyError } from '@/features/rules/utils/errors'
+import { ApiError } from '@/shared/api/errors'
 import * as ruleTests from '@/mocks/ruleTests'
 import * as harness from '@/mocks/harness'
 import { fromAnalyze, importDocument, precheck, templateFor, validate, validateFor } from '@/mocks/rules'
@@ -479,5 +481,21 @@ describe('parseDoubt', () => {
   })
   it('una duda sin esa forma queda tal cual', () => {
     expect(parseDoubt('§4 menciona "horario de atención" sin decir cuál es')).toEqual({ question: '§4 menciona "horario de atención" sin decir cuál es', yes: null, no: null })
+  })
+})
+
+describe('friendlyError', () => {
+  it('la IA saturada se explica en palabras y ofrece reintentar', () => {
+    const out = friendlyError(new ApiError(503, 'llm_busy', 'Los modelos de IA están saturados'))
+    expect(out.retry).toBe(true)
+    expect(out.message).toContain('Espera unos segundos')
+  })
+  it('un archivo que no sirve no ofrece reintentar y dice qué subir', () => {
+    const out = friendlyError(new ApiError(415, 'unsupported_type', 'x'))
+    expect(out).toEqual({ message: 'Ese tipo de archivo no sirve: sube un PDF o un Word (.docx).', retry: false })
+  })
+  it('sin reglas en el documento sugiere otro archivo o escribirlas; un error desconocido queda como llegó', () => {
+    expect(friendlyError(new ApiError(422, 'no_rules_found', 'No se encontraron reglas')).message).toContain('escribe una regla con tus palabras')
+    expect(friendlyError(new Error('algo raro'))).toEqual({ message: 'algo raro', retry: false })
   })
 })

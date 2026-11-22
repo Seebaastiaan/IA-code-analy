@@ -210,7 +210,7 @@ export const handlers = [
   })),
   http.post(EP.rules.testFixCode(':projectId', ':ruleId'), route(() => fail(409, 'fix_unavailable', 'La corrección del código con IA no está disponible en la demo'))),
   http.post(EP.rules.answer(':projectId', ':ruleId'), route(async ({ request, params }) => {
-    const { doubt, answer } = (await request.json()) as { doubt: string; answer: 'si' | 'no' }
+    const { doubt, answer } = (await request.json()) as { doubt: string; answer: string }
     const done = rules.answerDoubt(params.projectId as string, params.ruleId as string, doubt, answer)
     return typeof done === 'string' ? fail(409, 'unknown_doubt', done) : json(done)
   })),

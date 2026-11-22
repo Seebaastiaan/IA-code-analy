@@ -594,10 +594,11 @@ test('reglas de negocio: «Preguntas para ti» junta las dudas de todas las regl
   const card = page.getByLabel('Preguntas para ti')
   await expect(card.getByText('Pregunta 1 de 2')).toBeVisible()
   await expect(card.getByText('Lo que dice el documento')).toBeVisible()
-  // Contestar Sí la guarda en la regla y pasa a la siguiente
-  await card.getByRole('button', { name: /^Responder sí:/ }).click()
+  // Una pregunta abierta se contesta con texto; la otra, con Sí
+  await card.getByLabel('O escribe tu respuesta').fill('Cuenta con IVA del 16%')
+  await card.getByRole('button', { name: 'Guardar mi respuesta' }).click()
   await expect(card.getByText('Pregunta 1 de 1')).toBeVisible()
-  await card.getByRole('button', { name: /^Responder no:/ }).click()
+  await card.getByRole('button', { name: /^Responder sí:/ }).click()
   await expect(card.getByText('No tienes preguntas pendientes.')).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'Siguiente:' })).toContainText('en borrador por aprobar')
 })

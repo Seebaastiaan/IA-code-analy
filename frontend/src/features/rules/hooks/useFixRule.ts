@@ -1,3 +1,4 @@
+import { toastError } from '../utils/errors'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { fileQuery } from '@/features/editor/api/file.api'
 import { fileKey, useEditorStore } from '@/features/editor/store/editor.store'
@@ -13,7 +14,7 @@ import { rulesApi } from '../api/rules.api'
  */
 export function useFixRule(repoId: string) {
   const queryClient = useQueryClient()
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async (ruleId: string) => {
       const { patches, notes = [] } = await rulesApi.fixCode(repoId, ruleId)
       let missed = 0
@@ -33,6 +34,7 @@ export function useFixRule(repoId: string) {
       if (missed) toast('Parte de la corrección no se pudo aplicar porque el código cambió. Revisa el diff.', { tone: 'err' })
       else toast(notes.length ? `Propuesta de la IA: ${notes.join(' ')} Revisa el diff y guarda.` : 'Corrección lista. Revisa el diff y guarda.', { tone: 'info' })
     },
-    onError: (e) => toast(e.message, { tone: 'err' }),
+    onError: (e, ruleId) => toastError(e, () => mutation.mutate(ruleId)),
   })
+  return mutation
 }

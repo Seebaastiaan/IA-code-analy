@@ -48,9 +48,14 @@ def remembered(memory: list[dict], title: str, question: str) -> dict | None:
     return None
 
 
+def answer_text(answer: str) -> str:
+    """'si' y 'no' se escriben Sí y No; una respuesta escrita por el equipo va tal cual, sin el punto final."""
+    return ANSWERS.get(answer) or answer.strip().rstrip(".")
+
+
 def note(question: str, answer: str) -> str:
     """Lo que se agrega a la descripción: la pregunta y su respuesta."""
-    return f"Aclaración del equipo: {question.strip()} {ANSWERS[answer]}."
+    return f"Aclaración del equipo: {question.strip()} {answer_text(answer)}."
 
 
 def with_note(description: str, question: str, answer: str) -> str:
@@ -116,7 +121,7 @@ def apply(text: str, memory: list[dict], embed: Embed | None = None) -> tuple[st
                 open_doubts.append(doubt)
                 continue
             description = with_note(description, doubt, match["answer"])
-            messages.append(f"{rule.id}: ya respondiste «{doubt}»: {ANSWERS[match['answer']]}")
+            messages.append(f"{rule.id}: ya respondiste «{doubt}»: {answer_text(match['answer'])}")
         if len(open_doubts) != len(rule.doubts):
             text = reglas.set_fields(text, rule.id, {"descripcion": description, "dudas": open_doubts})
     return text, messages

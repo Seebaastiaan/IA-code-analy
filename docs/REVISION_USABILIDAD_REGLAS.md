@@ -74,8 +74,8 @@ Configuración → Reglas ahora muestra **un paso a la vez** (Importar → Pregu
 curso según el estado de las reglas (sin reglas, con borradores, todo aprobado), avanza solo cuando el proyecto avanza y una franja «Siguiente:» dice
 qué hacer ahora con un botón que lleva al paso. Se puede saltar a cualquier paso; los pasos no se desmontan, así que lo escrito en el editor no se
 pierde. «Preguntas para ti» junta las dudas de todas las reglas en borrador y las muestra una por una, con la frase del documento al lado y lo que cambia con el Sí y con el No
-(cuando la duda trae «(Sí = …; No = …)», como los plazos ambiguos). Pendiente de la propuesta: errores en palabras con un
-botón, ayuda «?» junto a los términos y la comparación con el análisis anterior.
+(cuando la duda trae «(Sí = …; No = …)», como los plazos ambiguos). Las preguntas abiertas se contestan escribiendo (el backend acepta texto además de sí/no) y el importador ahora pide formular las dudas como sí/no con su efecto.
+Los errores de la IA y del documento salen en palabras y con «Reintentar» cuando suelen pasar solos. Pendiente de la propuesta: ayuda «?» junto a los términos y la comparación con el análisis anterior.
 
 ## Para validar de verdad
 
