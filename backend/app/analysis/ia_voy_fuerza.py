@@ -23,8 +23,10 @@ TIMEOUT_S = 90
 TIMEOUT_CODE = 124
 
 
-def _pytest(target: str) -> int:
-    cmd = [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", "-o", "addopts=", "-p", "ia_voy_reglas", target]
+def _pytest(target: str | list[str]) -> int:
+    # `prueba` puede ser una lista (varias pruebas de la misma regla): el cambio se nota si alguna lo detecta
+    targets = [target] if isinstance(target, str) else [str(t) for t in target]
+    cmd = [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", "-o", "addopts=", "-p", "ia_voy_reglas", *targets]
     try:
         return subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=TIMEOUT_S, check=False).returncode  # nosec B603
     except subprocess.TimeoutExpired:
@@ -34,7 +36,7 @@ def _pytest(target: str) -> int:
 def run(spec: dict, root: Path) -> dict:
     out = []
     for obj in spec.get("objetivos") or []:
-        target = str(obj.get("prueba") or "")
+        target = obj.get("prueba") or ""
         base = _pytest(target)
         result = {"regla": obj.get("regla"), "base": base, "mutantes": []}
         out.append(result)

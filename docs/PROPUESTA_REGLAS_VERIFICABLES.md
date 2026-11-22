@@ -649,7 +649,7 @@ resultado se guarda por hash de la regla y commit; el análisis **nunca** llama 
 | **2 · Repos demo** (**hecho**) | `inventario_demo` y `reservas_demo` con sus documentos, pruebas manuales de referencia y tabla de resultados esperados | Con las pruebas **escritas a mano** y el plugin actual, el reporte da 13/5 (inventario) y 11/4 (reservas) ([test_demos_reglas.py](../backend/tests/test_demos_reglas.py)). Es la referencia para todo lo que sigue |
 | **3 · Mapa y arnés** (**hecho**; repos públicos en §7.6) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno (§7.6). **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en repos públicos se probaron en Docker (§7.6): pasan FastAPI y Flask; Django no instala sus dependencias de 2022 |
 | **4 · Pruebas generadas** (**hecho**, §6.6) | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo`. **Resultado** con Gemini 3.5 Flash Lite: 17 de 18 sin editar, 5 de 5 rotas detectadas, 0 falsos positivos tras aprobar y 1 prueba rota (6 %). En `reservas_demo`: 15 de 15 y 4 de 4 rotas detectadas |
-| **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (Gemini real y sandbox WSL): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más; la evidencia señala 7 de 9 errores sembrados; de las pruebas buenas, 16 salen fuertes, 6 parciales (huecos reales) y 1 débil (falsa alarma) |
+| **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (Gemini real y sandbox WSL): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más; la evidencia señala 7 de 9 errores sembrados; de las pruebas buenas, 16 salen fuertes, 6 parciales (huecos reales) y 1 débil (falsa alarma). **Segunda medición** (Docker, §14.1): 18 fuertes, 4 parciales, 0 débiles y 2 no aplica |
 | **6 · Score** (**hecho**, §9) | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |
 | Después | Pruebas HTTP de caja negra con docker-compose (otros lenguajes); PostgreSQL efímero | — |
 
@@ -740,6 +740,25 @@ generadas aciertan.
   | Reglas implementadas que la evidencia da por «no encontrada» | 0 | 0 (RN-001 sale «no encontrada» y es correcto: no está) |
   | Prueba de fuerza de las pruebas buenas | 9 fuerte, 2 parcial, 0 débil | 7 fuerte, 4 parcial, 1 débil, 1 no aplica |
 
+  **Segunda medición** (21 nov 2026, después de las correcciones de RN-016, con Gemini real —3.5 Flash Lite y su
+  respaldo 3.5 Flash— y el sandbox **Docker**, no WSL):
+
+  | Métrica | `reservas_demo` | `inventario_demo` |
+  |---|---|---|
+  | La evidencia señala la línea del error sembrado | 4 de 4 | 3 de 5 (RN-006 y RN-017 siguen sin verse) |
+  | Reglas implementadas que la evidencia da por «no encontrada» | 0 | 0 (RN-001 ahora sale «parcial» y señala la línea) |
+  | Prueba de fuerza de las pruebas buenas | 9 fuerte, 2 parcial, 0 débil | **9 fuerte, 2 parcial, 0 débil, 2 no aplica** |
+
+  - **La falsa alarma desapareció:** RN-016 sale «fuerte» (2 de 2) y no queda ninguna prueba «débil» en los dos demos.
+  - Los 4 «parcial» son huecos reales de las pruebas, todos de límite: reservas RN-008 (`<=` y `>` sin probar en las
+    horas exactas) y RN-009 (`>` contra `>=` a las 12 h); inventario RN-014 (precio igual al costo) y RN-013 (`gt=0`
+    contra `gt=1` en `esquemas.py:35`).
+  - Los 2 «no aplica» de inventario (RN-007 y RN-012): la evidencia las dio por implementadas, pero no hay líneas con
+    algo que mutar que se parezcan a la regla.
+  - La evidencia puede variar de una corrida a otra (es una IA): RN-001 de inventario pasó de «no encontrada» a «parcial».
+  - La prueba de fuerza acepta varias pruebas por regla (la lista va a pytest): se mide con todas las pruebas que la
+  verifican, no con una sola.
+
   Lo que salió al medir, y cómo se resolvió:
   - **La prueba de fuerza encontró una prueba débil real en nuestra propia referencia.** RN-011 tomaba
     `buzon[-1]`, y sin el correo de cancelación ese era el de confirmación (también trae el folio y $240.00). Se
@@ -769,8 +788,8 @@ generadas aciertan.
 
     Con eso RN-016 se mide en sus líneas (45 y 46) y salió algo que antes no se veía: una de sus dos pruebas solo
     comprobaba `iva > 0` y no los montos, y no notaba los cambios (0 de 2). Se reforzó con los montos (IEPS = 8, IVA =
-    17.28) y ahora las dos salen «fuertes» (2 de 2). El texto de «débil» sigue pidiendo revisar la prueba. Solo se volvió a
-    medir RN-016; las cifras de arriba son las de antes del cambio.
+    17.28) y ahora las dos salen «fuertes» (2 de 2). El texto de «débil» sigue pidiendo revisar la prueba. Las cifras de arriba son las de
+    antes del cambio; la segunda medición, más arriba, ya lo incluye.
 
 ## 15. Riesgos
 

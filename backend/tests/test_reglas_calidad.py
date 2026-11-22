@@ -527,3 +527,24 @@ def test_matriz_evidencia_y_fuerza_de_punta_a_punta(client, settings, local_sand
     assert rows(fixed)["RN-004"]["test"]["strength"] is None and rows(fixed)["RN-004"]["test"]["strength_status"] == "pendiente"
     res = client.post(f"/api/projects/{rid}/reglas/pruebas/fuerza", json={"ids": ["RN-004"]})
     assert res.status_code == 409 and res.json()["error"]["code"] == "nothing_to_test"  # hay que correrla primero
+
+
+def test_la_prueba_de_fuerza_acepta_varias_pruebas_por_regla(tmp_path, monkeypatch):
+    # Una regla con varias pruebas: el cambio se nota si alguna lo detecta (la lista va a pytest como argumentos)
+    from app.analysis import ia_voy_fuerza
+
+    (tmp_path / "calc.py").write_text("def doble(x):\n    return x * 2\n", encoding="utf-8")
+    (tmp_path / "test_a.py").write_text("from calc import doble\n\ndef test_a():\n    assert doble(0) == 0\n", encoding="utf-8")
+    (tmp_path / "test_b.py").write_text("from calc import doble\n\ndef test_b():\n    assert doble(2) == 4\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # El plugin de pytest que carga la prueba de fuerza (en el sandbox va en OUT/plugins)
+    monkeypatch.setenv("PYTHONPATH", str(Path(ia_voy_fuerza.__file__).parent))
+    mutante = {"id": "RN-001-1", "archivo": "calc.py", "codigo": "def doble(x):\n    return x * 3\n"}
+    spec = {"objetivos": [
+        {"regla": "RN-001", "prueba": ["test_a.py::test_a"], "mutantes": [mutante]},
+        {"regla": "RN-002", "prueba": ["test_a.py::test_a", "test_b.py::test_b"], "mutantes": [mutante]},
+    ]}
+    solo_a, ambas = ia_voy_fuerza.run(spec, tmp_path)["objetivos"]
+    assert solo_a["mutantes"][0]["codigo_salida"] == 0  # la prueba floja no lo nota
+    assert ambas["base"] == 0 and ambas["mutantes"][0]["codigo_salida"] != 0
+    assert (tmp_path / "calc.py").read_text(encoding="utf-8") == "def doble(x):\n    return x * 2\n"
