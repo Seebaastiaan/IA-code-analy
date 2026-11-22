@@ -588,3 +588,16 @@ test('reglas de negocio: el asistente marca el paso en curso y dice qué hacer a
   await goStep(page, 2)
   await expect(page.getByRole('heading', { name: 'Aprobación de las reglas' })).toBeVisible()
 })
+
+test('reglas de negocio: «Preguntas para ti» junta las dudas de todas las reglas y las contesta una por una', async ({ page }) => {
+  await importedRules(page)
+  const card = page.getByLabel('Preguntas para ti')
+  await expect(card.getByText('Pregunta 1 de 2')).toBeVisible()
+  await expect(card.getByText('Lo que dice el documento')).toBeVisible()
+  // Contestar Sí la guarda en la regla y pasa a la siguiente
+  await card.getByRole('button', { name: /^Responder sí:/ }).click()
+  await expect(card.getByText('Pregunta 1 de 1')).toBeVisible()
+  await card.getByRole('button', { name: /^Responder no:/ }).click()
+  await expect(card.getByText('No tienes preguntas pendientes.')).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Siguiente:' })).toContainText('en borrador por aprobar')
+})

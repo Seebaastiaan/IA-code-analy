@@ -309,3 +309,17 @@ export function matrixFromCode(matrix: PermissionMatrix): PermissionMatrix {
     ),
   }
 }
+
+export interface ParsedDoubt {
+  question: string
+  /** Lo que significa responder Sí / No cuando la duda lo dice con «(Sí = …; No = …)» */
+  yes: string | null
+  no: string | null
+}
+
+/** Separa la pregunta de lo que cambia según la respuesta: «¿…? (Sí = 24 horas exactas; No = el día anterior)». */
+export function parseDoubt(text: string): ParsedDoubt {
+  const m = /^(.*?)\s*\(\s*S[ií]\s*=\s*(.*?)\s*;\s*No\s*=\s*(.*?)\s*\)\s*$/s.exec(text.trim())
+  if (!m) return { question: text.trim(), yes: null, no: null }
+  return { question: m[1], yes: m[2], no: m[3] }
+}

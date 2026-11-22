@@ -73,7 +73,8 @@ dudas como preguntas con «Cerrar sin responder», título completo en la tabla,
 Configuración → Reglas ahora muestra **un paso a la vez** (Importar → Preguntas y aprobación → Preparar todo → Resultado). El programa marca el paso en
 curso según el estado de las reglas (sin reglas, con borradores, todo aprobado), avanza solo cuando el proyecto avanza y una franja «Siguiente:» dice
 qué hacer ahora con un botón que lleva al paso. Se puede saltar a cualquier paso; los pasos no se desmontan, así que lo escrito en el editor no se
-pierde. Pendiente de la propuesta: preguntas de todas las reglas en una sola lista, mostrar qué cambia según la respuesta, errores en palabras con un
+pierde. «Preguntas para ti» junta las dudas de todas las reglas en borrador y las muestra una por una, con la frase del documento al lado y lo que cambia con el Sí y con el No
+(cuando la duda trae «(Sí = …; No = …)», como los plazos ambiguos). Pendiente de la propuesta: errores en palabras con un
 botón, ayuda «?» junto a los términos y la comparación con el análisis anterior.
 
 ## Para validar de verdad

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BusinessRuleResult, HarnessView, MapSummary, PermissionMatrix, RulesPrecheck, RuleStatus, RulesValidation, RuleTestsView } from '@/features/rules/types'
 import {
   baseName, crosscheck, EVIDENCE, fileToBase64, filterRules, githubRepo, harnessStatus, isDocument, mapSummary, markedCells, matrixFromCode, matrixPayload, nextCell, OUTCOME,
-  concordanceText, plain, plainSummary, precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
+  concordanceText, parseDoubt, plain, plainSummary, precheckView, RULE_TEST_STATE, smokeLabel, STATUS, STRENGTH, testFunction, testName, testsSummary,
 } from '@/features/rules/utils/rules'
 import * as ruleTests from '@/mocks/ruleTests'
 import * as harness from '@/mocks/harness'
@@ -466,5 +466,18 @@ describe('concordancia', () => {
     expect(concordanceText(0, 0, 0, 0)).toMatch(/Marca las reglas/)
     expect(concordanceText(12, 11, 1, 0)).toBe('Acertó 11 de 12 reglas que conocías.')
     expect(concordanceText(3, 0, 0, 3)).toBe('Todavía no hay resultado para tus 3 reglas · 3 sin resultado todavía.')
+  })
+})
+
+describe('parseDoubt', () => {
+  it('separa la pregunta de lo que cambia según el Sí y el No', () => {
+    expect(parseDoubt('¿«un día antes» significa exactamente 24 horas antes? (Sí = 24 horas exactas; No = el día calendario anterior: ¿a qué hora?)')).toEqual({
+      question: '¿«un día antes» significa exactamente 24 horas antes?',
+      yes: '24 horas exactas',
+      no: 'el día calendario anterior: ¿a qué hora?',
+    })
+  })
+  it('una duda sin esa forma queda tal cual', () => {
+    expect(parseDoubt('§4 menciona "horario de atención" sin decir cuál es')).toEqual({ question: '§4 menciona "horario de atención" sin decir cuál es', yes: null, no: null })
   })
 })

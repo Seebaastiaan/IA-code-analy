@@ -14,6 +14,7 @@ import { ImportNotice } from './ImportNotice'
 import { RuleTestsCard } from './RuleTestsCard'
 import { WriteRuleCard } from './WriteRuleCard'
 import { RulesApprovalTable } from './RulesApprovalTable'
+import { QuestionsCard } from './QuestionsCard'
 import { ResultStep, RulesStepper, currentStep } from './RulesStepper'
 import { ValidationResult } from './ValidationResult'
 import { cn } from '@/shared/utils/cn'
@@ -281,7 +282,8 @@ function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
         <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
       </div>
-      <div className={show(1)}>
+      <div className={cn('space-y-4', show(1))}>
+        <QuestionsCard repoId={repoId} data={data} />
         <RulesApprovalTable repoId={repoId} data={data} />
       </div>
       <div className={show(2)}>
