@@ -202,6 +202,14 @@ def get_rules(project_id: str, store: Analyses, user_id: UserId, settings: Confi
     return _project_rules(store, settings, project_id)
 
 
+def _embedder(settings: Config) -> respuestas.Embed | None:
+    """Embeddings de Gemini para reconocer la misma duda redactada distinto; None si no hay clave."""
+    if not settings.gemini_api_key:
+        return None
+    llm = LLM(settings)
+    return lambda texts: llm.embed(texts, "SEMANTIC_SIMILARITY")
+
+
 @router.put("/api/projects/{project_id}/reglas", response_model=ProjectRules)
 def upload_rules(project_id: str, body: RulesContent, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
     """Guarda reglas de apoyo en la app. Solo se aceptan válidas (`422 invalid_rules` con la línea del error)."""
@@ -211,7 +219,7 @@ def upload_rules(project_id: str, body: RulesContent, store: Analyses, user_id: 
         raise ApiError(422, "invalid_rules", result.error or "Reglas no válidas")
     rules_store = RulesStore(store.conn)
     # Lo que el equipo ya contestó antes (misma pregunta de la misma regla) no se vuelve a preguntar
-    content, remembered = respuestas.apply(body.content, [dict(r) for r in rules_store.answers(project_id)])
+    content, remembered = respuestas.apply(body.content, [dict(r) for r in rules_store.answers(project_id)], _embedder(settings))
     rules_store.save_upload(project_id, content, user_id)
     return _project_rules(store, settings, project_id).model_copy(update={"messages": remembered})
 

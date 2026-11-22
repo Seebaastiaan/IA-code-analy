@@ -205,6 +205,8 @@ class FakeLLM:
         self.calls: list = []
 
     def answer(self, system, turns, schema, on_delta=None) -> Answer:
+        if set(schema["properties"]) == {"contradicciones"}:
+            return Answer({"contradicciones": []}, "Gemini 3.5 Flash Lite")
         self.calls.append((system, schema))
         return Answer(self.reply, "Gemini 3.5 Flash Lite")
 
@@ -294,6 +296,32 @@ def test_la_respuesta_recordada_no_se_aplica_a_otra_regla():
     text, messages = respuestas.apply(V2.replace("Precio de venta menor al costo", "El gerente aprueba descuentos"), memory)
     assert messages == [] and text.count("¿Cuenta el precio con impuestos?") == 1
     assert respuestas.apply(V2, [])[1] == []
+
+
+def test_la_misma_duda_con_otras_palabras_se_reconoce_por_significado():
+    import numpy as np
+
+    memory = [{"title": "Precio de venta menor al costo", "question": "¿Cuenta el precio con impuestos?", "answer": "no"}]
+    texto = V2.replace("¿Cuenta el precio con impuestos?", "¿El valor ya trae IVA incluido?")
+    # Sin embeddings, el texto no basta
+    assert respuestas.apply(texto, memory)[1] == []
+    vectores = {"¿Cuenta el precio con impuestos?": [1, 0, 0], "¿El valor ya trae IVA incluido?": [0.95, 0.31, 0], "Precio de venta menor al costo": [0, 1, 0],
+                "«alerta/bloqueo»: ¿se avisa o se rechaza?": [0, 0, 1]}
+
+    def embed(textos):
+        filas = np.array([vectores[t] for t in textos], dtype=float)
+        return filas / np.linalg.norm(filas, axis=1, keepdims=True)
+
+    out, avisos = respuestas.apply(texto, memory, embed)
+    assert avisos == ["RN-002: ya respondiste «¿El valor ya trae IVA incluido?»: No"] and "Aclaración del equipo" in out
+    # Una pregunta distinta (otro vector) no se contesta sola, y un fallo de embeddings no tumba nada
+    vectores["¿El valor ya trae IVA incluido?"] = [0.4, 0.9, 0]
+    assert respuestas.apply(texto, memory, embed)[1] == []
+
+    def roto(_textos):
+        raise RuntimeError("sin red")
+
+    assert respuestas.apply(texto, memory, roto) == (texto, [])
 
 
 def test_la_aclaracion_no_pasa_del_largo_permitido():

@@ -1,0 +1,38 @@
+# Primera corrida real: `reservas-demo` con Gemini y el sandbox
+
+Fecha: 2026-11-22. Repo: `urielbatizzzzzzzz/reservas-demo` (público). Modelo: Gemini 3.5 Flash Lite. Sandbox: WSL. Verdad contra la que se compara:
+`backend/seed_data/reservas_demo/referencia/ESPERADO.md` (4 reglas rotas a propósito: empalme de profesionales, reembolso a las 24 h exactas,
+cliente que ve la cita de otro y bloqueo tras 3 intentos).
+
+## Qué se encontró y se corrigió
+
+| Hallazgo | Medición | Corrección |
+|---|---|---|
+| La IA numeraba las reglas distinto de como quedan en la lista y marcaba el par de contradicciones equivocado (`RN-007`/`RN-015` en vez de `RN-007`/`RN-016`) | 1 de 1 corridas | Las contradicciones se resuelven por título |
+| Con una sola consulta, las contradicciones salían en 3 de 5 corridas y la comisión del 10 % (§7.2) nunca | 5 corridas | Segunda consulta solo de contradicciones sobre la lista final numerada por el programa: 4 de 4 corridas con las dos contradicciones reales |
+| Regla repetida (§3.1 y §6.1) sin unir; regla de proceso (§9.2) casi siempre omitida | 25 reglas en la 1.ª corrida; proceso en 1 de 5 | Prompt más explícito: 19 a 23 reglas y proceso en 4 de 4 |
+| La memoria de respuestas casi no reconocía la misma duda: solo 1 de 6 pares de redacciones pasaba el parecido de texto | Gemini redacta distinto cada vez | Comparación por significado (embeddings: misma duda ≥ 0,92, distinta ≤ 0,82): 3 de 3 reimportaciones reconocieron las 2 dudas |
+| «Corregir con IA» arregló `RN-007` pero quitó la excepción premium | 1 de 1 | Recibe las demás reglas y la orden de cambiar solo lo mínimo: `>` a `>=` en 3 de 3 intentos; `RN-001` bien en 3 de 3 |
+
+## Resultados que quedan como están
+
+- **Citas verificadas:** 100 % en todas las importaciones (el texto del PDF se leyó bien).
+- **Importación:** 19 a 23 reglas por corrida (esperado: 17). Hay variación entre corridas; una vez marcó una contradicción falsa
+  (recordatorio automático frente a permiso de la recepción).
+- **Pruebas escritas por la IA:** 17 de 18 reglas (una sin prueba). Del primer reparto: 2 de las 4 reglas rotas salieron «no cumple»
+  (reembolso, privacidad); 2 pasaron como «cumple» (empalme de profesionales y bloqueo): falsos negativos. Hubo 3 falsos positivos
+  (límite de 3 citas, correo de cancelación con monto inventado, permisos).
+- **La red de seguridad funcionó:** de las 5 pruebas que se aprobaron solas (prueba fuerte y lectura del código que coincide), las 5 eran
+  de reglas que sí se cumplen. El falso negativo del empalme lo marcó la lectura independiente («discrepa»); el del bloqueo quedó sin
+  aprobar porque su prueba era solo «parcial» (4 de 6 cambios detectados).
+- **Reanálisis con esas pruebas:** el resultado cambia entre corridas de las mismas pruebas (p. ej. el empalme salió «cumple» y luego
+  «no cumple»; el límite de 3 citas, al revés). Las pruebas de la IA no son deterministas ni totalmente aisladas: por eso nada se aprueba
+  sin la prueba de fuerza y la lectura del código.
+- **Panel de concordancia** (17 reglas marcadas con la verdad): acertó 12, falló 1 y 4 quedaron sin verificar.
+
+## Lo que sigue pendiente
+
+- Las pruebas generadas siguen produciendo falsos positivos y negativos: la aprobación automática es prudente, pero la mayoría de las
+  reglas termina esperando una decisión de una persona.
+- La corrida no cubrió `inventario-demo` ni el paso 7 (caja negra con docker-compose y base de datos real).
+- Solo se midió con un modelo (Gemini 3.5 Flash Lite); con otro modelo cambiarán las cifras.

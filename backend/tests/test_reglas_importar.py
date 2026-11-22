@@ -36,8 +36,17 @@ class FakeLLM:
         self.calls: list[dict] = []
         self.reply: dict = {"reglas": [RN_LIMITE, RN_DECIMAL], "dudas": ["§5 habla de 'pagos grandes' pero no da el monto"]}
         self.fail: LlmError | None = None
+        # Segunda pasada (solo contradicciones, sobre la lista final de reglas): se contesta aparte y no cuenta en `calls`
+        self.second: list[dict] = []
+        self.second_reply: dict = {"contradicciones": []}
+        self.second_fail: LlmError | None = None
 
     def answer(self, system: str, turns: list, schema: dict, on_delta=None) -> Answer:
+        if set(schema["properties"]) == {"contradicciones"}:
+            self.second.append({"turns": turns})
+            if self.second_fail:
+                raise self.second_fail
+            return Answer(self.second_reply, "Gemini 3.5 Flash Lite")
         self.calls.append({"system": system, "turns": turns, "schema": schema})
         if self.fail:
             raise self.fail
@@ -241,6 +250,40 @@ def test_contradicciones_se_marcan_y_bloquean_el_archivo(client, llm):
     # O decide que no se contradicen y borra los comentarios
     sin_marca = "\n".join(line for line in body["content"].splitlines() if not line.startswith("# CONTRADICCIÓN")) + "\n"
     assert len(reglas.parse(sin_marca).rules) == 3
+
+
+def test_la_segunda_pasada_encuentra_lo_que_la_primera_no(client, llm):
+    # La primera consulta no vio nada; la segunda recibe la lista final numerada por nosotros y marca el par 1-3
+    llm.reply = {"reglas": [RN_24H, RN_PREMIUM, RN_48H], "contradicciones": [], "dudas": []}
+    llm.second_reply = {"contradicciones": [{"reglas": [1, 3], "motivo": "24 h contra 48 h"}, {"reglas": [1, 7], "motivo": "fuera de rango"}]}
+    body = importar_archivo(client, "Requisitos.pdf", PDF).json()
+    assert body["contradictions"] == ["RN-001 (§4.2) y RN-003 (§7.1): 24 h contra 48 h"] and not body["validation"]["valid"]
+    # Recibió las reglas ya numeradas, con su sección
+    assert "1. §4.2" in llm.second[0]["turns"][0].text and "3. §7.1" in llm.second[0]["turns"][0].text
+    # Si coincide con la primera no se repite
+    llm.reply["contradicciones"] = [{"titulos": [RN_24H["titulo"], RN_48H["titulo"]], "motivo": "de la primera"}]
+    assert importar_archivo(client, "Requisitos.pdf", PDF).json()["contradictions"] == ["RN-001 (§4.2) y RN-003 (§7.1): de la primera"]
+
+
+def test_si_falla_la_segunda_pasada_la_importacion_sigue(client, llm):
+    llm.reply = {"reglas": [RN_24H, RN_48H], "contradicciones": [], "dudas": []}
+    llm.second_fail = LlmError("caído")
+    body = importar_archivo(client, "Requisitos.pdf", PDF).json()
+    assert body["count"] == 2 and body["contradictions"] == [] and body["validation"]["valid"]
+
+
+def test_contradiccion_por_titulo_aunque_el_modelo_cuente_mal(client, llm):
+    # Corrida real con Gemini: contó una regla de menos y marcó el par equivocado. Por título no importa cómo numere
+    llm.reply = {
+        "reglas": [RN_24H, RN_PREMIUM, RN_48H],
+        "contradicciones": [
+            {"titulos": [RN_24H["titulo"], RN_48H["titulo"].upper()], "motivo": "24 h contra 48 h"},
+            {"titulos": [RN_24H["titulo"], "Una regla que no existe"], "motivo": "no está"}, {"titulos": [RN_24H["titulo"]], "motivo": "una sola"},
+        ],
+        "dudas": [],
+    }
+    body = importar_archivo(client, "Requisitos.pdf", PDF).json()
+    assert body["contradictions"] == ["RN-001 (§4.2) y RN-003 (§7.1): 24 h contra 48 h"]
 
 
 def test_contradiccion_apunta_bien_aunque_se_descarte_una_regla(client, llm):

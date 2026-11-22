@@ -699,7 +699,13 @@ async def fix_code_for_rule(
         raise ApiError(422, "no_place", f"No encontré en el código dónde corregir {rule_id}: ábrelo en el editor o pregúntale a la IA en el asistente")
 
     msg = f"La regla {rule.id} «{rule.title}» no se cumple en el código: {rule.description}"
-    rec = "El documento de requisitos manda: cambia el CÓDIGO para que cumpla la regla. No cambies la regla ni sus pruebas."
+    others = "; ".join(f"{r.id} «{r.title}»" for r in ctx.rules if r.id != rule.id)[:3000]
+    rec = (
+        "El documento de requisitos manda: cambia el CÓDIGO para que cumpla la regla. No cambies la regla ni sus pruebas. "
+        "Haz el cambio MÍNIMO: si basta con corregir un operador de comparación o un valor, cambia solo eso y conserva las "
+        "variables, constantes y condiciones que ya existen (excepciones, roles, casos especiales). "
+        f"Estas otras reglas deben seguir cumpliéndose, no las rompas: {others or 'ninguna'}."
+    )
     by_file: dict[str, list[int]] = {}
     for path, line in places:
         by_file.setdefault(path, []).append(line)

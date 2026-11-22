@@ -28,6 +28,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   regla ni en su prueba) y lo muestra como diff antes de guardar.
 - Los repos de prueba (`inventario_demo` y `reservas_demo`) tienen interfaz web en `/ui` y datos de ejemplo opcionales
   (`python -m inventario.datos_demo`, `python -m reservas.datos_demo`); sus errores sembrados siguen en la API.
+- Primera corrida real con Gemini y `reservas-demo` (informe en `docs/CORRIDA_RESERVAS_DEMO.md`): las contradicciones se buscan en una
+  segunda consulta sobre la lista final y por título (antes la IA numeraba mal), la memoria de dudas reconoce la misma pregunta
+  redactada distinto con embeddings, y «Corregir con IA» recibe las demás reglas para no romperlas.
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
 - Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
   de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.
