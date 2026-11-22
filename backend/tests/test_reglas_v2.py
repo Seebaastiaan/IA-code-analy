@@ -421,6 +421,14 @@ def test_el_programa_acierta_si_coincide_con_lo_que_el_equipo_sabe():
     assert [(i.outcome, i.confidence) for i in items] == [("acerto", "alta"), (None, None)]
 
 
+def test_la_prueba_de_fuerza_ajusta_la_confianza():
+    c = concordancia.confidence
+    assert (c("pruebas", None), c("pruebas", "fuerte"), c("pruebas", "debil"), c("pruebas", "parcial")) == ("media", "alta", "baja", "media")
+    assert (c("pruebas_y_patron", "fuerte"), c("pruebas_y_patron", "debil")) == ("alta", "baja")
+    # El patrón no tiene prueba que mutar, y sin verificación no hay confianza que subir
+    assert (c("patron", "fuerte"), c("ninguno", "fuerte"), c(None, "fuerte")) == ("baja", "ninguna", None)
+
+
 def test_casos_de_control_y_panel_de_concordancia(client, rid):
     assert client.put(f"/api/projects/{rid}/reglas", json={"content": V2}).status_code == 200
     body = client.get(f"/api/projects/{rid}/reglas/concordancia").json()

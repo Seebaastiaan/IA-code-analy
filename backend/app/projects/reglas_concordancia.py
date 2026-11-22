@@ -38,10 +38,33 @@ def outcome(expected: str | None, status: str | None) -> str | None:
     return "sin_resultado"
 
 
-def build(rules: list[tuple[str, str]], expected: dict[str, str], results: dict[str, tuple[str, str]]) -> list[Item]:
-    """`rules` = (id, título) en orden; `results` = regla → (estado, nivel) del último análisis."""
+LADDER = ("ninguna", "baja", "media", "alta")
+
+
+def confidence(level: str | None, strength: str | None) -> str | None:
+    """
+    Solidez del resultado: la del nivel de verificación, ajustada por la prueba de fuerza de su prueba: «fuerte» (mató todos
+    los cambios) sube un escalón; «débil» (no notó ninguno) la deja como mucho en «baja».
+    """
+    if not level:
+        return None
+    base = CONFIDENCE.get(level)
+    if base is None or level == "patron" or strength is None or base == "ninguna":
+        return base
+    i = LADDER.index(base)
+    if strength == "fuerte":
+        return LADDER[min(i + 1, 3)]
+    if strength == "debil":
+        return LADDER[min(i, 1)]
+    return base
+
+
+def build(
+    rules: list[tuple[str, str]], expected: dict[str, str], results: dict[str, tuple[str, str]], strength: dict[str, str] | None = None,
+) -> list[Item]:
+    """`rules` = (id, título) en orden; `results` = regla → (estado, nivel) del último análisis; `strength` = regla → resultado de su prueba de fuerza."""
     items = []
     for rid, title in rules:
         status, level = results.get(rid, (None, None))
-        items.append(Item(rid, title, expected.get(rid), status, outcome(expected.get(rid), status), CONFIDENCE.get(level) if level else None))
+        items.append(Item(rid, title, expected.get(rid), status, outcome(expected.get(rid), status), confidence(level, (strength or {}).get(rid))))
     return items

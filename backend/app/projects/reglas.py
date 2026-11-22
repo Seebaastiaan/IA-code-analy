@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from app.analyses import reglas
 from app.analyses.access import Analyses, UserId, require_repo
-from app.analyses.reglas_store import RulesStore
+from app.analyses.reglas_store import RulesStore, RuleTestsStore
 from app.analyses.workspace import Workspace
 from app.analysis.router import BRANCH, REPO_URL, Config, Db
 from app.assistant.llm import LLM, LlmError
@@ -33,8 +33,10 @@ from app.assistant.router import get_llm
 from app.errors import ApiError
 from app.github.client import GithubAuthError, GithubError
 from app.github.deps import Client, Store
+from app.projects import reglas_arnes as arnes
 from app.projects import reglas_concordancia as concordancia
 from app.projects import reglas_documento as documento
+from app.projects import reglas_fuerza as fuerza
 from app.projects import reglas_importar as importar
 from app.projects import reglas_respuestas as respuestas
 from app.teams.store import team_id_of
@@ -360,7 +362,13 @@ def _concordance(store: Analyses, settings: Config, project_id: str) -> Concorda
     rules_store = RulesStore(store.conn)
     latest = store.latest_report(project_id)
     results = {r["rule_id"]: (r["status"], r["level"]) for r in rules_store.results(latest["id"])} if latest else {}
-    items = concordancia.build(rules, rules_store.expected(project_id), results)
+    strength = {}
+    for row in RuleTestsStore(store.conn).all(project_id):
+        # Solo vale la prueba de fuerza de la versión actual de la prueba
+        done = row["strength_status"] == "hecho" and row["strength_hash"] == arnes.code_hash(row["code"]) and fuerza.loads(row["strength_result"])
+        if done:
+            strength[row["rule_id"]] = done.status
+    items = concordancia.build(rules, rules_store.expected(project_id), results, strength)
     known = [i for i in items if i.expected]
     return Concordance(
         items=[ControlItem(**i.__dict__) for i in items], known=len(known), hits=sum(i.outcome == "acerto" for i in known),

@@ -115,12 +115,6 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="font-semibold">{data.uploaded ? 'Reglas cargadas en la app' : `Contenido de ${data.repo?.path ?? RULES_FILENAME}`}</h2>
-        <div className="flex flex-wrap gap-1">
-          <Button variant="ghost" onClick={() => template.mutate()} disabled={template.isPending}>
-            <Icon name="download" className="w-4 h-4" />
-            Descargar plantilla
-          </Button>
-        </div>
       </div>
       {data.can_import && !fromRepo && data.documents.length > 0 && (
         <div className="mb-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 text-sm">
@@ -172,7 +166,13 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
       {result?.valid === false && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">Las reglas tienen un error: corrígelo en «Avanzado» para poder guardarlas.</p>}
       {/* El archivo .toml es un formato interno: queda en «Avanzado», cerrado salvo que haya un error que corregir */}
       <details open={result?.valid === false ? true : undefined} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
-        <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">Avanzado: archivo {RULES_FILENAME}</summary>
+        <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">Avanzado: archivo {RULES_FILENAME}, plantilla y patrones</summary>
+        <div className="mt-3 mb-3 flex flex-wrap items-center gap-2">
+          <Button variant="ghost" onClick={() => template.mutate()} disabled={template.isPending}>
+            <Icon name="download" className="w-4 h-4" />
+            Descargar plantilla
+          </Button>
+        </div>
       <textarea
         value={text}
         onChange={(e) => update(e.target.value)}
@@ -201,6 +201,9 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
           </Button>
         )}
       </div>
+        <div className="mt-4">
+          <RegexHelp />
+        </div>
       </details>
     </Card>
   )
@@ -288,7 +291,6 @@ export function RulesSettings({ repoId }: { repoId: string }) {
           Las reglas son de este proyecto: no se comparten con otros repositorios. Si el repositorio tiene un archivo válido, gana el del repositorio; si el suyo tiene errores, se usan las corregidas aquí. Las reglas todavía no cuentan en el score.
         </p>
       </Card>
-      <RegexHelp />
       </div>
     </div>
   )
