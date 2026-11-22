@@ -31,6 +31,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 - Primera corrida real con Gemini y `reservas-demo` (informe en `docs/CORRIDA_RESERVAS_DEMO.md`): las contradicciones se buscan en una
   segunda consulta sobre la lista final y por título (antes la IA numeraba mal), la memoria de dudas reconoce la misma pregunta
   redactada distinto con embeddings, y «Corregir con IA» recibe las demás reglas para no romperlas.
+- Pruebas generadas por la IA de mayor calidad (medido con Gemini real en `reservas-demo`, 3 corridas por ronda): prompt que aísla la regla,
+  evita cifras y formatos inventados y pregunta «¿pasaría igual sin la regla?»; validadores de rechazos sin 409, cifras ajenas, asserts
+  sin comparación, nombres con letras raras y dos variables con el mismo usuario; y se insiste cuando dice «no implementada» con
+  endpoints que existen y deja el código vacío. Falsos positivos de 3 a 1 o 2 y falsos negativos de 2 a 0 en 2 de 3 corridas.
 - Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
 - Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
   de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.

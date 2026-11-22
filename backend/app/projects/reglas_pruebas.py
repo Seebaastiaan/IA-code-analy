@@ -90,6 +90,29 @@ Estructura obligatoria (regla de oro):
 - Para crear datos usa los fixtures `crear_…()` con sus valores por defecto; cambia solo los campos que la regla
   necesita y con valores VÁLIDOS según los esquemas que recibes (Literal, gt=0, longitudes…). Lee la docstring del
   fixture: dice qué argumentos acepta.
+- AÍSLA LA REGLA: el caso que debe rechazarse solo puede fallar por ESTA regla. Cambia todo lo demás para que ninguna otra
+  regla pueda causar el rechazo (otro cliente u otro usuario, otro profesional, un horario libre, datos válidos). Ejemplo
+  de error real: para «un profesional no tiene dos citas empalmadas» la prueba reservó las dos citas con el MISMO cliente;
+  el rechazo venía de la regla del cliente y la prueba pasó aunque el código no cumplía la del profesional.
+- ANTES DE CADA assert pregúntate: ¿pasaría igual si el código NO tuviera esta regla? Si sí, la prueba no prueba nada.
+  Ejemplo de error real: «la cuenta se bloquea tras 3 intentos fallidos» se probó con un cuarto intento de clave incorrecta,
+  que falla igual con o sin bloqueo. Lo que prueba el bloqueo es que la clave CORRECTA ya no entra tras 3 fallos, y que
+  justo antes del límite (2 fallos) la clave correcta SÍ entra. Lo mismo con cualquier límite: prueba N-1 (se permite) y N+1
+  (se rechaza), con una acción que sin la regla sí funcionaría.
+- NUNCA inventes cifras, folios ni ids que no estén en la regla: toma los valores de las respuestas de la API (el anticipo,
+  el id y el folio de la cita, el total…) y compáralos contra el correo, el registro o la consulta. Ejemplo de error real:
+  esperar «30» en el correo de cancelación cuando el reembolso era otro; el monto correcto es el que devolvió la API.
+- Cada `assert` compara algo (`assert x == y`, `assert a in b`); nada de `assert str(x)` ni asserts que siempre son verdaderos.
+- Un inicio de sesión con clave incorrecta responde 401 y una cuenta bloqueada 423 o 429 (no 400/409/422): para credenciales o
+  bloqueos usa `in (401, 403, 423, 429)`; el `in (400, 409, 422)` es para datos inválidos o reglas de negocio.
+- NO supongas formatos: usa los nombres EXACTOS de los campos que devuelve el código (lee cómo se arma la respuesta y el
+  texto de los correos). Ejemplos de error real: tomar el `id` como folio cuando la respuesta trae un campo `folio`
+  («R-00001»), o buscar la fecha como «2026-12-03» cuando el correo la escribe «03/12/2026». Si el formato no se ve en el
+  código, compara solo lo que sí se ve (el folio de la respuesta, la hora «10:00», el nombre del servicio).
+- Un correo se revisa por ASUNTO y CUERPO juntos (`correo["asunto"] + correo["cuerpo"]`): el folio o el monto pueden ir en
+  cualquiera de los dos.
+- Plazos con el `reloj`: ubica la hora DENTRO del plazo para el caso que sí aplica (p. ej. «un día antes» = unas horas dentro de
+  las 24 h previas, no 25 h antes) y fuera del plazo para el que no; el límite exacto, en otra prueba.
 - Comprueba SOLO lo que la regla dice. Si la regla no da una fórmula, una tasa, un redondeo o un orden de cálculo, no
   lo inventes: comprueba lo que sí dice (p. ej. «el precio base y los impuestos vienen por separado» = los campos
   existen y son números, no cuánto vale cada impuesto). Para impuestos, descuentos o redondeos sin fórmula exacta en
@@ -395,9 +418,21 @@ def generate(
         return Generated("fuera_del_codigo", "proceso", "", [], [], "", 'Regla de proceso (tipo = "proceso"): no está en el código')
     question = Turn("user", prompt(root, project_map, harness_code, rule))
     data, model = _answer(llm, [question])
+    # Error frecuente: dice «no implementada» pero sus endpoints sí existen y deja el código vacío (contra lo que pide el prompt):
+    # se le insiste una vez en que escriba la prueba, que es la evidencia
+    endpoints = [str(e) for e in data.get("endpoints") or [] if str(e).strip()]
+    if not str(data.get("codigo") or "").strip() and str(data.get("tipo") or "") != "proceso" and endpoints and not missing_endpoints(endpoints, project_map):
+        again = Turn(
+            "user",
+            "Los endpoints que mencionas SÍ existen en el mapa, así que la regla está «implementada» a efectos de la prueba. Escribe la prueba "
+            "igual: si el código no hace lo que pide la regla, la prueba fallará y esa es la evidencia. Mismo formato JSON, con \"codigo\".",
+        )
+        retried, retried_model = _answer(llm, [question, Turn("model", json.dumps(data, ensure_ascii=False)), again])
+        if str(retried.get("codigo") or "").strip():
+            data, model = {**retried, "implementada": True}, retried_model
     code = add_missing_imports(_clean_code(str(data.get("codigo") or "")))
     if code and str(data.get("tipo") or "") != "proceso":
-        check = validate(code, rule.id, project_map, arnes.fixtures_of(harness_code), allowed)
+        check = validate(code, rule.id, project_map, arnes.fixtures_of(harness_code), allowed, _rule_text(rule))
         if check.errors:
             fix = Turn("user", "La prueba tiene estos errores; devuélvela corregida (mismo formato JSON):\n- " + "\n- ".join(check.errors[:10]))
             fixed, model = _answer(llm, [question, Turn("model", json.dumps(data, ensure_ascii=False)), fix])
@@ -444,8 +479,62 @@ def _rule_marks(decorators: list[ast.expr]) -> list[str]:
     return reglas._marks(decorators)
 
 
-def validate(code: str, rule_id: str, project_map: mapa.ProjectMap, harness_fixtures: list[str], allowed: set[str] = frozenset()) -> TestCheck:
-    """La prueba generada (o editada) sin ejecutarla: marcador, fixtures del arnés e imports/llamadas permitidos."""
+REJECTION_CODES = {400, 401, 403, 404, 409, 422, 423, 429}
+# Funciones cuyo resultado solo es un valor: `assert str(x)` no compara nada
+TRIVIAL_ASSERT_CALLS = {"str", "int", "len", "float", "repr", "bool"}
+
+
+def _numbers(text: str) -> set[str]:
+    return set(re.findall(r"\d+(?:[.,]\d+)?", text))
+
+
+def quality_errors(node: ast.AST, rule_text: str) -> list[str]:
+    """
+    Fallos de calidad de una prueba que se ven sin ejecutarla y que la IA cometió en una corrida real (docs/CORRIDA_RESERVAS_DEMO.md):
+    rechazos sin el 409 (la API devolvía 409 y la prueba falló), cifras que no están en la regla y asserts que no comparan nada.
+    """
+    errors: list[str] = []
+    known = _numbers(rule_text)
+    # Un modelo pequeño a veces cuela un carácter de otro alfabeto en un nombre (`reloj.ir_ا(...)`): Python lo acepta y falla al correr
+    for n in ast.walk(node):
+        name = n.attr if isinstance(n, ast.Attribute) else n.id if isinstance(n, ast.Name) else n.arg if isinstance(n, ast.keyword) else None
+        if isinstance(name, str) and any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in name):
+            errors.append(f"línea {getattr(n, 'lineno', '?')}: el nombre `{name}` tiene un carácter raro; escríbelo solo con letras del alfabeto latino")
+    # `como(rol)` devuelve SIEMPRE el mismo usuario: dos variables con el mismo rol son la misma persona (el rechazo vendría de otra regla)
+    by_role: dict[str, set[str]] = {}
+    for n in ast.walk(node):
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call) and mapa._name(n.value.func) == "como" and n.value.args:
+            role = n.value.args[0]
+            if isinstance(role, ast.Constant) and isinstance(role.value, str):
+                by_role.setdefault(role.value, set()).update(t.id for t in n.targets if isinstance(t, ast.Name))
+    for role, names in by_role.items():
+        if len(names) > 1:
+            errors.append(
+                f"`{' y '.join(sorted(names))}` son el mismo usuario (`como(\"{role}\")` siempre devuelve el mismo): para un segundo usuario "
+                "usa el fixture del arnés que crea usuarios (p. ej. `crear_cliente()`, pídelo como argumento)"
+            )
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Assert):
+            continue
+        t = n.test
+        if isinstance(t, ast.Call) and mapa._name(t.func) in TRIVIAL_ASSERT_CALLS:
+            errors.append(f"línea {n.lineno}: `assert {mapa._name(t.func)}(…)` no compara nada: compara el valor con lo que la regla espera")
+        if isinstance(t, ast.Compare) and len(t.ops) == 1 and isinstance(t.ops[0], ast.In) and mapa._name(t.left).endswith("status_code"):
+            options = t.comparators[0]
+            codes = {e.value for e in getattr(options, "elts", []) if isinstance(e, ast.Constant) and isinstance(e.value, int)}
+            if codes and codes <= REJECTION_CODES and codes & {400, 422} and 409 not in codes:
+                errors.append(f"línea {n.lineno}: un rechazo también puede llegar como 409; usa `in (400, 409, 422)` salvo que la regla dé el código")
+        if rule_text and isinstance(t, ast.Compare) and len(t.ops) == 1 and isinstance(t.ops[0], ast.In):
+            left = t.left
+            if isinstance(left, ast.Constant) and isinstance(left.value, str) and re.fullmatch(r"\d{2,}(?:[.,]\d+)?", left.value) and left.value not in known:
+                errors.append(f"línea {n.lineno}: espera la cifra «{left.value}», que no está en la regla: toma el valor de la respuesta de la API")
+    return errors
+
+
+def validate(
+    code: str, rule_id: str, project_map: mapa.ProjectMap, harness_fixtures: list[str], allowed: set[str] = frozenset(), rule_text: str = "",
+) -> TestCheck:
+    """La prueba generada (o editada) sin ejecutarla: marcador, fixtures del arnés, imports/llamadas permitidos y calidad."""
     if len(code) > MAX_CODE:
         return TestCheck(False, [f"La prueba es demasiado larga (máx. {MAX_CODE // 1000} mil caracteres)"])
     try:
@@ -487,6 +576,7 @@ def validate(code: str, rule_id: str, project_map: mapa.ProjectMap, harness_fixt
                     f"línea {n.lineno}: espera exactamente {n.test.comparators[0].value}; un rechazo puede llegar como 400, 409 o 422 "
                     "(usa `in (400, 409, 422)` salvo que la regla dé el código)"
                 )
+        errors += quality_errors(node, rule_text)
         if not any(isinstance(n, ast.Assert) for n in ast.walk(node)) and not any(
             isinstance(n, ast.Call) and mapa._name(n.func) in ("pytest.raises", "pytest.fail") for n in ast.walk(node)
         ):

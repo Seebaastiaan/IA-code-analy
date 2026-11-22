@@ -36,3 +36,36 @@ cliente que ve la cita de otro y bloqueo tras 3 intentos).
   reglas termina esperando una decisión de una persona.
 - La corrida no cubrió `inventario-demo` ni el paso 7 (caja negra con docker-compose y base de datos real).
 - Solo se midió con un modelo (Gemini 3.5 Flash Lite); con otro modelo cambiarán las cifras.
+
+## Segunda ronda: mejorar las pruebas que escribe la IA
+
+Se midió regenerando las pruebas de las 18 reglas aprobadas desde cero, corriéndolas en el sandbox y comparando con `ESPERADO.md`
+(17 reglas con prueba; la de proceso queda fuera del código). Antes de esta ronda las pruebas de reglas del repo `tests/reglas/`
+(escritas a mano con otra numeración) se quitaron del clon local: el importador numera distinto y se enlazaban a reglas que no eran.
+Nota para el reanálisis de la primera ronda: sus cifras están contaminadas por ese cruce de números.
+
+| Medición | Aciertos | Falsos positivos | Falsos negativos | Sin prueba o rota |
+|---|---|---|---|---|
+| Antes (1 corrida) | 12 | 3 | 2 | 1 |
+| Con prompt y validadores (3 corridas) | 13 · 12 · 13 | 0 · 1 · 1 | 1 · 1 · 1 | 4 · 4 · 3 |
+| Con insistencia, nombres y usuarios (3 corridas) | 13 · 15 · 15 | 1 · 1 · 2 | 2 · 0 · 0 | 2 · 2 · 1 |
+
+Qué se cambió y por qué (cada punto sale de una prueba real que falló):
+
+- **Aislar la regla.** La prueba del empalme de profesionales usaba el mismo cliente dos veces y el rechazo venía de la regla del
+  cliente. El prompt pide aislarla y un validador rechaza dos variables con `como("mismo-rol")` (es el mismo usuario).
+- **«¿Pasaría igual sin la regla?».** La prueba del bloqueo probaba un cuarto intento con clave incorrecta, que falla con o sin bloqueo.
+  El prompt pide probar con una acción válida (clave correcta tras 3 fallos, y justo antes del límite).
+- **Cifras y formatos.** Una prueba esperaba «30» en el correo y otra suponía el folio igual al id y la fecha en ISO. Un validador rechaza
+  cifras que no están en la regla; el prompt pide usar los campos exactos de la respuesta y revisar asunto y cuerpo del correo.
+- **Códigos de rechazo.** Se rechaza `in (400, 422)` sin 409 (la API respondía 409) y se explica que credenciales y bloqueos son 401 o 423.
+- **Código vacío.** Con frecuencia Gemini decía «no implementada» con endpoints que sí existen y dejaba el código vacío (reglas sin
+  prueba en 1 a 2 de cada 3 corridas). Ahora se le insiste una vez; en las 3 últimas corridas escribió 18 de 18.
+- **Nombres corruptos.** Un nombre con una letra árabe (`reloj.ir_ا`) rompía la prueba; un validador lo detecta y se reintenta.
+
+Lo que sigue fallando:
+
+- **Recordatorio (RN-012):** falso positivo en 3 de 3 corridas. La prueba pone el reloj 25 h antes de la cita y el código avisa dentro de 24 h.
+  Es más una duda del documento («un día antes») que un error de la IA: debería salir como duda a contestar.
+- **Variación entre corridas:** falsos negativos del empalme y del bloqueo en 1 de 3 corridas cada uno; una prueba rota de vez en cuando.
+- Solo se probó con un modelo y un repo.

@@ -376,3 +376,53 @@ def test_migra_bases_anteriores(tmp_path):
     assert {"origin", "warnings", "tests_ran"} <= cols
     assert "tests" in {r["name"] for r in conn.execute("PRAGMA table_info(business_rule_results)")}
     conn.close()
+
+
+# ─── Calidad de lo que escribe la IA (docs/CORRIDA_RESERVAS_DEMO.md): errores reales de la primera corrida con Gemini ───
+
+
+def calidad(codigo: str, regla: str = "") -> list[str]:
+    import ast
+
+    from app.projects import reglas_pruebas as pruebas
+
+    return pruebas.quality_errors(ast.parse(codigo), regla)
+
+
+def test_un_rechazo_sin_409_es_un_error():
+    # RN-005 de la corrida: esperaba (400, 422) y la API respondió 409
+    assert any("409" in e for e in calidad("def test_x(r):\n    assert r.status_code in (400, 422)\n"))
+    assert calidad("def test_x(r):\n    assert r.status_code in (400, 409, 422)\n") == []
+    # Permisos y bloqueos no son un «rechazo de datos»: no se les exige el 409
+    assert calidad("def test_x(r):\n    assert r.status_code in (401, 403)\n") == []
+    assert calidad("def test_x(r):\n    assert r.status_code == 403\n") == []
+
+
+def test_una_cifra_que_no_esta_en_la_regla_es_un_error():
+    # RN-011 de la corrida: esperaba «30» en el correo y el monto era otro
+    codigo = 'def test_x(cuerpo):\n    assert "30" in cuerpo\n'
+    regla = "Cada cancelación envía un correo al cliente con el folio y el monto que se le reembolsa."
+    assert any("«30»" in e for e in calidad(codigo, regla))
+    # Si la cifra sí está en la regla, o no se conoce el texto de la regla, no se discute
+    assert calidad(codigo, "El anticipo es de 30 pesos.") == [] and calidad(codigo, "") == []
+    # Una variable (el monto que devolvió la API) es lo correcto
+    assert calidad("def test_x(cuerpo, monto):\n    assert monto in cuerpo\n", regla) == []
+
+
+def test_un_assert_que_no_compara_es_un_error():
+    assert any("no compara nada" in e for e in calidad('def test_x(c):\n    assert str(c["id"])\n'))
+    assert calidad('def test_x(c, cuerpo):\n    assert str(c["id"]) in cuerpo\n') == []
+
+
+def test_dos_variables_con_el_mismo_rol_son_el_mismo_usuario():
+    # RN-001 de la corrida: «cliente_uno» y «cliente_dos» eran el mismo usuario y el rechazo venía de otra regla
+    malo = 'def test_x(como):\n    uno = como("cliente")\n    dos = crear = como("cliente")\n'
+    assert any("el mismo usuario" in e for e in calidad(malo))
+    assert calidad('def test_x(como, crear_cliente):\n    uno = como("cliente")\n    dos = crear_cliente()\n    como("admin").get("/x")\n') == []
+    assert calidad('def test_x(como):\n    uno = como("cliente")\n    otro = como("admin")\n') == []
+
+
+def test_un_nombre_con_un_caracter_de_otro_alfabeto_es_un_error():
+    # RN-009 de la corrida: `reloj.ir_ا(...)` (con una letra árabe) fallaba al correr
+    assert any("carácter raro" in e for e in calidad("def test_x(reloj):\n    reloj.ir_ا(1)\n"))
+    assert calidad("def test_x(reloj):\n    reloj.ir_a(1)\n    número = 1\n") == []

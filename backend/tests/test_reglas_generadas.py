@@ -227,6 +227,20 @@ def test_una_ronda_de_correccion_con_los_errores(mp, harness):
     assert pruebas.validate(g.code, "RN-002", mp, arnes.fixtures_of(harness)).valid
 
 
+def test_si_dice_no_implementada_con_endpoints_que_existen_se_le_insiste(mp, harness):
+    # Corrida real con Gemini: «no implementada» con POST /citas en el mapa y el código vacío; al insistir escribió la prueba
+    vacia = reply("", endpoints=["POST /productos"], implementada=False, motivo="No encontré la validación")
+    llm = FakeLLM(vacia, reply(hand_test("RN-002")))
+    g = pruebas.generate(llm, INVENTARIO, mp, harness, RULES["RN-002"])
+    assert g.kind == "prueba" and len(llm.calls) == 2 and "SÍ existen en el mapa" in llm.calls[1][-1].text
+    # Si la acción no existe en el mapa no se insiste: es «no implementada»
+    falta = pruebas.generate(FakeLLM(reply("", endpoints=["POST /devoluciones"], implementada=False)), INVENTARIO, mp, harness, RULES["RN-002"])
+    assert falta.kind == "no_implementada"
+    # Si insiste y sigue sin código, se explica el error de siempre
+    with pytest.raises(pruebas.GenerationError):
+        pruebas.generate(FakeLLM(vacia), INVENTARIO, mp, harness, RULES["RN-002"])
+
+
 def test_fuera_del_codigo_y_no_implementada(mp, harness):
     proceso = pruebas.generate(FakeLLM(reply(tipo="proceso", endpoints=())), INVENTARIO, mp, harness, RULES["RN-002"])
     assert (proceso.kind, proceso.code) == ("fuera_del_codigo", "")
