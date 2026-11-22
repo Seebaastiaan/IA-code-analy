@@ -31,7 +31,9 @@ def scores(report: sqlite3.Row, findings: list[sqlite3.Row], cfg: ProjectConfig)
     else:
         cov = effective_coverage(report["coverage_total"], report_analyzers(report))
         cats = category_scores(((f["cat"], f["sev"]) for f in findings if f["status"] == "open"), cov, report["tests_failed"], report["code_lines"])
-    return Scores(**cats, global_=global_score(cfg.weights, cats))
+    # Reglas de negocio: se guarda al analizar (sus resultados no cambian después); los reportes anteriores no la tienen
+    neg = report["neg"]
+    return Scores(**cats, neg=neg, global_=global_score(cfg.weights, {**cats, "neg": neg}))
 
 
 def report_analyzers(report: sqlite3.Row) -> list[str]:

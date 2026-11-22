@@ -4,13 +4,13 @@ import type { Finding } from '@/features/findings'
 import { CAT } from '@/shared/constants/categories'
 import { paths } from '@/shared/constants/paths'
 import { BRAND_HEX, TONE, tone } from '@/shared/constants/tones'
-import type { Scores } from '@/shared/types/common'
+import type { Category } from '@/shared/types/common'
 import { Card, CategoryChip, DeltaBadge, EmptyState, ErrorState, Icon, Label, PageHeader, PageLoader, Select, SeverityBadge, Skeleton } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { f1 } from '@/shared/utils/score'
 import { useAnalyses, useDiff } from '../api/compare.api'
 
-const METRICS: { key: keyof Scores; label: string; color: string }[] = [
+const METRICS: { key: 'global' | Category; label: string; color: string }[] = [
   { key: 'global', label: 'Global', color: BRAND_HEX },
   { key: 'seg', label: CAT.seg.label, color: CAT.seg.hex },
   { key: 'test', label: CAT.test.label, color: CAT.test.hex },

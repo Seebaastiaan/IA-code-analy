@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from app.analyses import reglas
+from app.analyses.scoring import business_score
 from app.projects import reglas_importar as importar
 
 SEED = Path(__file__).resolve().parent.parent / "seed_data"
@@ -28,6 +29,8 @@ class Demo:
     rotas: frozenset[str]
     # Paquetes que el demo necesita y el backend no trae
     necesita: tuple[str, ...]
+    # Nota de reglas de negocio (fase 6) a mano: peso de lo que cumple / peso de lo medido (alta 3, media 2, baja 1)
+    neg: float = 0.0
 
     @property
     def root(self) -> Path:
@@ -44,8 +47,8 @@ class Demo:
 
 
 DEMOS = [
-    Demo("inventario_demo", "docs/Requerimientos.docx", 18, frozenset({"RN-001", "RN-006", "RN-015", "RN-017", "RN-018"}), ("sqlalchemy",)),
-    Demo("reservas_demo", "docs/Requisitos.pdf", 15, frozenset({"RN-001", "RN-007", "RN-013", "RN-014"}), ("sqlalchemy", "flask")),
+    Demo("inventario_demo", "docs/Requerimientos.docx", 18, frozenset({"RN-001", "RN-006", "RN-015", "RN-017", "RN-018"}), ("sqlalchemy",), 68.1),  # 32 de 47
+    Demo("reservas_demo", "docs/Requisitos.pdf", 15, frozenset({"RN-001", "RN-007", "RN-013", "RN-014"}), ("sqlalchemy", "flask"), 65.7),  # 23 de 35
 ]
 pytestmark = pytest.mark.parametrize("demo", DEMOS, ids=[d.carpeta for d in DEMOS])
 
@@ -96,4 +99,7 @@ def test_veredictos_con_pytest(demo, tmp_path):
     # Ninguna prueba falla al preparar (sería el arnés, no el código)
     assert [t["nodeid"] for t in data["tests"] if t["outcome"] == "error"] == []
     check = reglas.with_tests(_check(demo), data, None)
-    assert {r.rule.id: r.status for r in check.results} == demo.esperado
+    assert {r.rule.id: r.status for r in check.results} == demo.esperado
+
+    # Fase 6: la compuerta para activar `neg` en el score
+    assert business_score((r.status, r.rule.severity) for r in check.results) == demo.neg

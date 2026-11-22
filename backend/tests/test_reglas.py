@@ -320,6 +320,26 @@ def test_paso_de_reglas_en_el_analisis_y_api(client):
     assert all(f["tool"] != "Reglas" for f in report["findings"])
 
 
+def test_neg_se_guarda_y_solo_mueve_el_global_con_peso(client):
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    rid, repo_id = job["report_id"], job["repo_id"]
+    before = client.get(f"/api/report/{rid}").json()
+    # De las 4 reglas solo RN-001 se pudo medir (no cumple, alta): neg = 0; las otras 3 siguen sin verificar
+    assert before["scores"]["neg"] == 0.0 and before["weights"]["neg"] == 0
+    s = before["scores"]
+    # Con peso 0 el global es el de siempre
+    assert s["global"] == round((50 * s["seg"] + 30 * s["test"] + 20 * s["prac"]) / 100, 1)
+
+    cfg = client.get(f"/api/projects/{repo_id}/config").json()
+    cfg["weights"] = {"seg": 40, "test": 20, "prac": 20, "neg": 20}
+    assert client.put(f"/api/projects/{repo_id}/config", json=cfg).status_code == 200
+    after = client.get(f"/api/report/{rid}").json()
+    assert after["scores"]["neg"] == 0.0
+    assert after["scores"]["global"] == round((40 * s["seg"] + 20 * s["test"] + 20 * s["prac"]) / 100, 1)
+    # El .ia_voy.toml lleva el peso
+    assert after["weights"]["neg"] == 20
+
+
 def test_archivo_invalido_no_detiene_el_analisis(client, cloner):
     cloner.contenido = regla(severidad='"urgente"')
     job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])

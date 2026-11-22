@@ -11,6 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 
 from app.analyses.reglas import RulesCheck
+from app.analyses.scoring import business_score
 
 
 class RulesStore:
@@ -42,6 +43,8 @@ class RulesStore:
                 for pos, r in enumerate(check.results)
             ],
         )
+        # Nota de las reglas de negocio del reporte (None = ninguna medible); el score la lee de aquí
+        self.conn.execute("UPDATE reports SET neg = ? WHERE id = ?", (business_score((r.status, r.rule.severity) for r in check.results), report_id))
         if commit:
             self.conn.commit()
 

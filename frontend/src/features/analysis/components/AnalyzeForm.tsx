@@ -10,7 +10,7 @@ import { paths } from '@/shared/constants/paths'
 import { toast } from '@/shared/hooks/useToast'
 import { CATEGORIES } from '@/shared/types/common'
 import { Button, Card, Icon, Input, Label, Select, Spinner, buttonClass } from '@/shared/ui'
-import { DEFAULT_WEIGHTS } from '@/shared/utils/score'
+import { DEFAULT_WEIGHTS, weightSum } from '@/shared/utils/score'
 import { analysisApi } from '../api/analysis.api'
 import { ANALYZERS, WHAT_HAPPENS } from '../constants/jobSteps'
 import { useJobStore } from '../store/job.store'
@@ -79,7 +79,7 @@ export function AnalyzeForm() {
     start.mutate({ url: url.trim(), branch: branch.trim() || 'main', analyzers, sandbox, index, ...(rules && { rules: rules.text }) })
   }
 
-  const sum = weights.seg + weights.test + weights.prac || 1
+  const sum = weightSum(weights) || 1
 
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -184,7 +184,7 @@ export function AnalyzeForm() {
         <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-5 text-sm">
           <p className="font-medium mb-1">Fórmula actual</p>
           <code className="font-mono text-xs text-slate-500">
-            Score = {(weights.seg / sum).toFixed(2)}·Seg + {(weights.test / sum).toFixed(2)}·Test + {(weights.prac / sum).toFixed(2)}·Prác
+            Score = {(weights.seg / sum).toFixed(2)}·Seg + {(weights.test / sum).toFixed(2)}·Test + {(weights.prac / sum).toFixed(2)}·Prác{(weights.neg ?? 0) > 0 && ` + ${((weights.neg ?? 0) / sum).toFixed(2)}·Reglas`}
           </code>
           {repoId && (
             <Link to={paths.settings(repoId)} className="block mt-2 text-xs font-medium text-brand-600 dark:text-brand-300 hover:underline">

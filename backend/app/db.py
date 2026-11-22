@@ -326,6 +326,8 @@ MIGRATIONS = {
         "languages": "TEXT NOT NULL DEFAULT '[]'",
         # Líneas de Python analizadas (escala del score); 0 = reportes anteriores, sin escalar
         "code_lines": "INTEGER NOT NULL DEFAULT 0",
+        # Fase 6: nota de las reglas de negocio (NULL = sin reglas medibles, o análisis anterior)
+        "neg": "REAL",
     },
     # Sprint 8: nivel pruebas y reglas cargadas en la app
     "business_rule_checks": {

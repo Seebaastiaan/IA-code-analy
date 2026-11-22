@@ -21,7 +21,7 @@ from app.analyses.analyzers import complexity, is_test_path, static_findings_dir
 from app.analyses.config_file import FILENAME, ConfigError, from_toml
 from app.analyses.models import ComplexityInput, CoverageInput, FindingInput, ReportInput
 from app.analyses.reglas_store import RulesStore
-from app.analyses.scoring import category_scores, effective_coverage, global_score
+from app.analyses.scoring import business_score, category_scores, effective_coverage, global_score
 from app.analyses.store import AnalysisStore, ProjectConfig
 from app.analyses.workspace import Workspace, is_excluded
 from app.analysis.sandbox import PhaseResult, SandboxOutput, parse_audit, parse_coverage, parse_junit
@@ -315,7 +315,8 @@ def build(
     )
     ignored = set(cfg.ignored)
     cats = category_scores(((f.cat, f.sev) for f in findings if f.rule not in ignored), effective_coverage(cov_total, analyzers), failed, static.code_lines)
-    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, cats), simulated=simulated, vulnerable=len(vulns), rules=rules)
+    neg = business_score((r.status, r.rule.severity) for r in rules.results) if rules is not None else None
+    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, {**cats, "neg": neg}), simulated=simulated, vulnerable=len(vulns), rules=rules)
 
 
 def run(settings: Settings, repo_id: str, branch: str, commit: str | None, seed: int, cat: dict) -> PipelineResult:

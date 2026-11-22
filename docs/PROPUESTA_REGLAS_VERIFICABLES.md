@@ -460,9 +460,12 @@ código falló), porque llega como una respuesta y se revisa con `assert`. Para 
 propagar las excepciones del servidor (`TestClient(app, raise_server_exceptions=False)` en FastAPI,
 `PROPAGATE_EXCEPTIONS = False` en Flask, `raise_request_exception=False` en Django).
 
-**Score:** la categoría `neg` (pendiente desde ADR-003) se calcula solo con reglas aprobadas **que tienen una
-prueba aprobada o un patrón**, ponderadas por severidad. Hasta que el repo demo cumpla los criterios de §2, el
-estado se muestra pero no entra al score global.
+**Score (fase 6, hecho):** la categoría `neg` se calcula solo con reglas aprobadas **que tienen una prueba aprobada
+o un patrón**, ponderadas por severidad (alta 3, media 2, baja 1): `100 × peso de las que cumplen / peso de las que
+se midieron` (cumple, no cumple, no implementada). Prueba rota, sin verificar y fuera del código no entran. Pesa
+**0 % por defecto**: se muestra en el reporte y solo mueve el global cuando el proyecto le da un peso
+(`[pesos] negocio`). Si el análisis no tiene reglas medibles, `neg` no existe y su peso no cuenta. Detalle y fórmula
+en [CRITERIOS_DE_ANALISIS.md](CRITERIOS_DE_ANALISIS.md) §2.
 
 ## 10. Alcance: en qué repositorios funciona
 
@@ -600,7 +603,7 @@ resultado se guarda por hash de la regla y commit; el análisis **nunca** llama 
 | **3 · Mapa y arnés** (**hecho**, falta la parte de repos públicos) | `mapa.py`, generación y prueba de humo del arnés para FastAPI, Flask y Django | El arnés del demo pasa la prueba de humo sin editarlo, o con una edición; los 3 frameworks probados con un repo público cada uno. **Resultado** (§7.5): con Gemini real, el arnés de los dos demos pasa la prueba de humo en el sandbox WSL sin editarlo (7 y 10 comprobaciones). El mapa se probó con 3 repos públicos (FastAPI, Flask, Django); el arnés y la prueba de humo en esos repos quedan pendientes (código ajeno: correrlo en Docker) |
 | **4 · Pruebas generadas** (**hecho**, §6.6) | Generación por tipo, validación con `ast`, primera corrida, aprobación, estados nuevos y exportación | Las metas de §2 sobre `inventario_demo`. **Resultado** con Gemini 3.5 Flash Lite: 17 de 18 sin editar, 5 de 5 rotas detectadas, 0 falsos positivos tras aprobar y 1 prueba rota (6 %). En `reservas_demo`: 15 de 15 y 4 de 4 rotas detectadas |
 | **5 · Servicios con clientes y calidad** (**hecho**, §14.1) | `reloj`, `buzon`, `respx`, matriz de permisos, evidencia de apoyo, prueba de fuerza con mutación dirigida | `reservas_demo` completo; la prueba de fuerza detecta al menos 1 prueba débil sembrada. **Resultado** (Gemini real y sandbox WSL): la prueba débil sembrada sale «débil» (0 de 3 cambios) y la buena «fuerte» (3 de 3); la matriz del equipo da «cumple» en RN-015 y detecta un permiso de más; la evidencia señala 7 de 9 errores sembrados; de las pruebas buenas, 16 salen fuertes, 6 parciales (huecos reales) y 1 débil (falsa alarma) |
-| **6 · Score** | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |
+| **6 · Score** (**hecho**, §9) | Categoría `neg` en el score | Activada solo cuando las fases 1–4 cumplen sus criterios en los dos demos |
 | Después | Pruebas HTTP de caja negra con docker-compose (otros lenguajes); PostgreSQL efímero | — |
 
 La fase 2 va antes que la 3 a propósito: sin un repo con resultados conocidos no hay forma de saber si las pruebas

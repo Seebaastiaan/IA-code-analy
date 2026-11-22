@@ -132,7 +132,7 @@ const repos: RepoRecord[] = [
 ]
 
 const configs: Record<string, ProjectConfig> = Object.fromEntries(
-  repos.map((r) => [r.id, { weights: { seg: 50, test: 30, prac: 20 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }]),
+  repos.map((r) => [r.id, { weights: { seg: 50, test: 30, prac: 20, neg: 0 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }]),
 )
 
 const jobs = new Map<string, JobRecord>()

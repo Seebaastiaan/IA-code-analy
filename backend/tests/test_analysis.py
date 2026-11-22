@@ -31,7 +31,7 @@ def test_analisis_guarda_reporte_y_aparece_en_repos(client):
     assert repo["status"] == "listo"
     assert repo["branch"] == "develop"
     assert repo["last_report_id"] == job["report_id"]
-    assert set(repo["scores"]) == {"seg", "test", "prac", "global"}
+    assert set(repo["scores"]) == {"seg", "test", "prac", "neg", "global"}
 
     report = client.get(f"/api/report/{job['report_id']}").json()
     assert report["num"] == 1 and report["prev"] is None

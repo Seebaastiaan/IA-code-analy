@@ -11,7 +11,7 @@ from app.seed import seed
 from tests.conftest import login
 from tests.test_analysis import URL, wait_done
 
-CONFIG = {"weights": {"seg": 40, "test": 40, "prac": 20}, "thresholds": {"score": 80, "cov": 70}, "ignored": ["B101", "E722"], "excluded": ["migrations/"]}
+CONFIG = {"weights": {"seg": 40, "test": 40, "prac": 20, "neg": 0}, "thresholds": {"score": 80, "cov": 70}, "ignored": ["B101", "E722"], "excluded": ["migrations/"]}
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def report(client, repo_id: str) -> dict:
 
 def test_valores_por_defecto(client, repo_id):
     assert client.get(url(repo_id)).json() == {
-        "weights": {"seg": 50, "test": 30, "prac": 20},
+        "weights": {"seg": 50, "test": 30, "prac": 20, "neg": 0},
         "thresholds": {"score": 70, "cov": 60},
         "ignored": ["B101"],
         "excluded": ["migrations/", "tests/fixtures/"],
@@ -102,7 +102,7 @@ def test_rutas_excluidas_salen_del_reporte_y_del_arbol(client, repo_id):
 def test_escribe_ia_voy_toml_en_el_clon(client, repo_id, settings):
     client.put(url(repo_id), json=CONFIG)
     data = tomllib.loads((Workspace(settings, repo_id).root / ".ia_voy.toml").read_text(encoding="utf-8"))
-    assert data["pesos"] == {"seguridad": 0.4, "pruebas": 0.4, "practicas": 0.2}
+    assert data["pesos"] == {"seguridad": 0.4, "pruebas": 0.4, "practicas": 0.2, "negocio": 0.0}
     assert data["umbrales"] == {"score_minimo": 80, "cobertura_minima": 70}
     assert data["reglas"]["ignorar"] == ["B101", "E722"] and data["rutas"]["excluir"] == ["migrations/"]
 
@@ -153,7 +153,7 @@ def test_primer_analisis_adopta_el_toml_del_repo(client, cloner, monkeypatch):
     monkeypatch.setattr(cloner, "clone", clone_with_config)
     job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
     cfg = client.get(url(job["repo_id"])).json()
-    assert cfg["weights"] == {"seg": 60, "test": 20, "prac": 20} and cfg["ignored"] == ["E501"]
+    assert cfg["weights"] == {"seg": 60, "test": 20, "prac": 20, "neg": 0} and cfg["ignored"] == ["E501"]
     # Después manda lo guardado desde la pantalla, aunque el repo traiga su archivo
     client.put(url(job["repo_id"]), json=CONFIG)
     wait_done(client, client.post(f"/api/repos/{job['repo_id']}/analyze").json()["job_id"])

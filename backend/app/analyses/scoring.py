@@ -8,7 +8,11 @@ de inmediato sin re-analizar.
   En proyectos de más de 1000 líneas de Python la penalización se escala por cada 1000 líneas: 60 avisos
   pesan igual que 6 en un proyecto de 1000 líneas (si no, cualquier proyecto grande quedaba en 0).
 - test = cobertura total − 5 por cada prueba que falla (sin coverage elegido, la cobertura cuenta como 100)
-- global = promedio ponderado con los pesos del proyecto
+- neg  = reglas de negocio (docs/PROPUESTA_REGLAS_VERIFICABLES.md §9): 100 × peso de las que cumplen / peso de las que
+  se pudieron verificar (cumple, no cumple, no implementada), con la severidad como peso. Las que no entran: prueba
+  rota (no se culpa al código), sin verificar y fuera del código. `None` = no hay ninguna que medir.
+- global = promedio ponderado con los pesos del proyecto. `neg` pesa 0 por defecto: solo mueve el global cuando el
+  proyecto le da un peso, y solo en los análisis que tienen reglas medibles (si no, su peso no cuenta).
 """
 
 from collections.abc import Iterable
@@ -20,7 +24,11 @@ PENALTY = {
 FAILED_TEST_PENALTY = 5
 # Tamaño de proyecto a partir del cual la penalización se escala (líneas de Python)
 LINES_PER_UNIT = 1000
-DEFAULT_WEIGHTS = {"seg": 50, "test": 30, "prac": 20}
+DEFAULT_WEIGHTS = {"seg": 50, "test": 30, "prac": 20, "neg": 0}
+# Cuánto pesa cada regla de negocio según su severidad
+RULE_WEIGHT = {"alta": 3, "media": 2, "baja": 1}
+# Estados que entran al score de reglas de negocio: True = a favor, False = en contra
+SCORED_RULE_STATUS = {"cumple": True, "no_cumple": False, "no_implementada": False}
 DEFAULT_THRESHOLDS = {"score": 70, "cov": 60}
 
 
@@ -45,14 +53,30 @@ def category_scores(open_findings: Iterable[tuple[str, str]], coverage_total: fl
     }
 
 
+def business_score(results: Iterable[tuple[str, str]]) -> float | None:
+    """
+    `results` = pares (estado, severidad) de las reglas de negocio aprobadas del análisis. None = ninguna se pudo medir
+    (sin reglas, o todas con prueba rota, sin verificar o fuera del código): `neg` no existe y no entra al global.
+    """
+    good = total = 0
+    for status, sev in results:
+        if status in SCORED_RULE_STATUS:
+            weight = RULE_WEIGHT.get(sev, 1)
+            total += weight
+            good += weight if SCORED_RULE_STATUS[status] else 0
+    return _clamp(100 * good / total) if total else None
+
+
 def effective_coverage(coverage_total: float, analyzers: list[str] | tuple[str, ...]) -> float:
     """Cobertura que entra al score: si no se eligió coverage no se midió y no se descuenta nada por ella."""
     return coverage_total if not analyzers or "coverage" in analyzers else 100.0
 
 
-def global_score(weights: dict[str, float], cats: dict[str, float]) -> float:
-    total = sum(weights.values()) or 1
-    return round(sum(weights[c] * cats[c] for c in ("seg", "test", "prac")) / total, 1)
+def global_score(weights: dict[str, float], cats: dict[str, float | None]) -> float:
+    """Promedio ponderado. Una categoría sin nota (`neg` = None) no entra, ni su peso al total."""
+    used = [c for c in ("seg", "test", "prac", "neg") if cats.get(c) is not None and weights.get(c, 0) > 0]
+    total = sum(weights[c] for c in used) or 1
+    return round(sum(weights[c] * cats[c] for c in used) / total, 1)
 
 
 def grade(cc: int) -> str:
