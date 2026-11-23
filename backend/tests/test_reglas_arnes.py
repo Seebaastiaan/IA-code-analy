@@ -289,7 +289,7 @@ def test_prueba_de_humo_que_no_llega_a_correr():
 # ───────────────────────── Con los repos demo ─────────────────────────
 
 
-@pytest.mark.parametrize(("root", "needs", "checks"), [(INVENTARIO, ("sqlalchemy",), 6), (RESERVAS, ("sqlalchemy", "flask"), 8)], ids=["inventario", "reservas"])
+@pytest.mark.parametrize(("root", "needs", "checks"), [(INVENTARIO, ("sqlalchemy",), 7), (RESERVAS, ("sqlalchemy", "flask"), 9)], ids=["inventario", "reservas"])
 def test_arnes_del_demo_pasa_la_prueba_de_humo(tmp_path, root, needs, checks):
     for package in needs:
         pytest.importorskip(package)
@@ -498,7 +498,7 @@ def test_proponer_probar_y_aprobar(client, settings, local_sandbox):
 
     assert client.post(f"/api/projects/{rid}/reglas/arnes/humo").json()["harness"]["smoke"] in ("corriendo", "paso")
     view = wait_smoke(client, rid)
-    assert (view["harness"]["smoke"], view["harness"]["smoke_message"]) == ("paso", "6 comprobaciones pasaron"), view["harness"]["smoke_tests"]
+    assert (view["harness"]["smoke"], view["harness"]["smoke_message"]) == ("paso", "7 comprobaciones pasaron"), view["harness"]["smoke_tests"]
     assert local_sandbox == [rid]
 
     view = client.post(f"/api/projects/{rid}/reglas/arnes/aprobar").json()

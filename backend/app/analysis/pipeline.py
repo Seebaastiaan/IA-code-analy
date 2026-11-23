@@ -205,7 +205,8 @@ def audit_findings(ws: Workspace, files: list[str], out: SandboxOutput) -> list[
         findings.append(FindingInput(
             sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=line, fix=kind is not None, fix_kind=kind,
             msg=f"{v.package} {v.version} tiene {len(v.ids)} vulnerabilidad(es) conocida(s): {', '.join(v.ids[:5])}",
-            why=v.description[:400] or "La versión instalada tiene avisos de seguridad publicados.",
+            # La descripción del aviso viene en inglés: se explica en español y el aviso se identifica por su id
+            why="Esta versión del paquete tiene fallas de seguridad publicadas: alguien que las conozca puede aprovecharlas contra la app.",
             rec=f"{fix} y volver a correr las pruebas.",
         ))
     return findings

@@ -135,14 +135,22 @@ Los demos ya no traen la clave (pruebas a mano, `conftest.py` listo, reglas resu
 | 3 · 4 (arnés corregido con el error de la prueba de humo) | bien | 4 · 6 (8 pruebas rotas: no daba el id del usuario) | 1 · 4 | 0 · 0 | 0 · 0 de 4 |
 | 5 · 6 (`como(rol).id` exigido) | bien · rechazado por una comprobación demasiado estricta | 5 (4 falsos positivos, ninguno aprobado) · — | 2 · — | 0 | 1 · — de 4 |
 
+| 7 · 8 · 9 | bien · bien con la corrección · `'dict' object is not callable` | 4 · 9 · — | 2 · 5 · — | 0 | 0 · 1 · — de 4 |
+| 10 · 11 · 12 (roles separados exigidos) | token repetido entre pruebas · igual · bien con la corrección | — · — · 7 | — · — · 6 | 0 | — · — · 1 de 4 |
+
+En las corridas 7 a 12 el modelo principal (Gemini 3.5 Flash Lite) estuvo saturado toda la tarde: el arnés y las pruebas los escribió el
+modelo de respaldo (Gemini 3.1 Flash Lite), más débil. Con él, la mitad de las veces el arnés no pasa la prueba de humo ni con una
+corrección.
+
 Correcciones que salieron de aquí: el arnés de la IA se reescribe una vez con el error de su prueba de humo; la prueba de humo acepta un
 cliente nuevo del mismo usuario (mismo estado, aunque su clase se defina dentro de `como`) y exige `como(rol).id` al arnés de la IA; las
-pruebas usan `como(rol).id` cuando una ruta pide el usuario.
+pruebas usan `como(rol).id` cuando una ruta pide el usuario; la prueba de humo exige que dos roles den clientes distintos (en la corrida 7
+`como` devolvía el mismo cliente para todos los roles y, al crear un servicio como admin, la prueba del cliente quedaba autenticada como admin).
 
 **Lectura honesta:** en las 11 corridas medidas (`inventario-demo` y `reservas-demo`) el programa nunca aprobó solo una regla con el
 veredicto equivocado. Pero con un repo sin arnés el resultado depende mucho del primer arnés que escribe la IA, y cuando Gemini está saturado
 y responde el modelo de respaldo, baja bastante. Con `reservas-demo` limpio, la mayoría de las reglas todavía terminan esperando a una
-persona. Falta repetir la medición con la última corrección del arnés.
+persona. Falta medir con el modelo principal disponible (o con otro modelo más fuerte) para saber cuánto se debe al modelo de respaldo.
 
 ## 6. Pendientes y riesgos
 

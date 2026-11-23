@@ -10,7 +10,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   también se muestran traducidos.
 - Nuevo análisis ya no abre el TOML ni la importación en bruto: avisa que las reglas se sacan del documento después de analizar,
   en Configuración → Reglas. El reporte de reglas, con todo en borrador, dice qué hacer en lugar de «0 cumplen · no declara reglas».
-- El arnés que escribe la IA se corrige una vez con el error de su prueba de humo y expone el id del usuario (`como(rol).id`).
+- El arnés que escribe la IA se corrige una vez con el error de su prueba de humo, expone el id del usuario (`como(rol).id`) y da un
+  cliente distinto a cada rol (la prueba de humo lo comprueba).
+- Los avisos de dependencias vulnerables (pip-audit) se explican en español y un repo sin pruebas dice «Sin pruebas» en lugar de
+  «Cobertura 0 % · 0 prueba(s) fallan».
 - «Preparar todo» corre en el servidor (`/api/projects/{id}/reglas/preparar`): sigue aunque se cierre la pestaña, se ve
   su avance al volver y se detiene al terminar el paso en curso. Si una prueba no coincide con la lectura independiente del
   código, la escribe una vez más y la vuelve a correr y medir antes de decidir.

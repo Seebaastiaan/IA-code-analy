@@ -32,7 +32,9 @@ export function ReportHeader({ report: r, cat, onCat, onShare }: ReportHeaderPro
     k === 'seg'
       ? `${open.filter((f) => f.cat === 'seg').length} hallazgos abiertos`
       : k === 'test'
-        ? `${r.summary.coverage_total === null ? 'Cobertura no medida' : `Cobertura ${r.summary.coverage_total} %`} · ${r.analyzers.includes('pytest') ? `${r.summary.tests_failed} prueba(s) fallan` : 'pytest no se corrió'}`
+        ? r.summary.coverage_total === 0 && r.summary.tests_failed === 0 && r.analyzers.includes('pytest')
+          ? 'Sin pruebas: ninguna línea del código se prueba'
+          : `${r.summary.coverage_total === null ? 'Cobertura no medida' : `Cobertura ${r.summary.coverage_total} %`} · ${r.analyzers.includes('pytest') ? `${r.summary.tests_failed} prueba(s) fallan` : 'pytest no se corrió'}`
         : `Complejidad media ${r.summary.avg_complexity}`
 
   return (

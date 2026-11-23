@@ -59,9 +59,13 @@ def como(sesiones):
     def cliente(rol: str) -> TestClient:
         if rol not in clientes:
             with sesiones() as db:
-                db.add(Usuario(nombre=f"Usuario {rol}", rol=rol, token=f"prueba-{rol}"))
+                usuario = Usuario(nombre=f"Usuario {rol}", rol=rol, token=f"prueba-{rol}")
+                db.add(usuario)
                 db.commit()
-            clientes[rol] = TestClient(app, headers={"Authorization": f"Bearer prueba-{rol}"}, raise_server_exceptions=False)
+                nuevo = TestClient(app, headers={"Authorization": f"Bearer prueba-{rol}"}, raise_server_exceptions=False)
+                # El id de su usuario, para las rutas que lo piden en el cuerpo
+                nuevo.id = usuario.id
+            clientes[rol] = nuevo
         return clientes[rol]
 
     return cliente

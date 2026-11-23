@@ -528,6 +528,20 @@ def test_humo_como(como, rol):
     assert r.status_code < 500, f"como({{rol!r}}): GET {{LISTA}} respondió {{r.status_code}}"
 
 
+def test_humo_roles_separados(como):
+    # Corrida real (reservas-demo sin arnés): `como` devolvía el mismo cliente para todos los roles y le cambiaba la
+    # cabecera; al crear un servicio como admin, el «cliente» de la prueba quedaba autenticado como admin
+    if len(ROLES) < 2:
+        pytest.skip("hace falta más de un rol")
+    primero = como(ROLES[0])
+    segundo = como(ROLES[1])
+    assert primero is not segundo, f"como({{ROLES[0]!r}}) y como({{ROLES[1]!r}}) devuelven el mismo cliente: cada rol necesita su propio cliente"
+    if CON_ID:
+        assert primero.id != segundo.id, f"como({{ROLES[0]!r}}) y como({{ROLES[1]!r}}) son el mismo usuario"
+    if LISTA is not None:
+        assert como(ROLES[0]).get(LISTA).status_code != 401, f"como({{ROLES[0]!r}}) dejó de estar autenticado al pedir otro rol"
+
+
 @pytest.mark.parametrize("fixture", _o_saltar(CREAR, "el arnés no tiene fixtures crear_*"))
 def test_humo_crear(request, fixture):
     crear = request.getfixturevalue(fixture)
