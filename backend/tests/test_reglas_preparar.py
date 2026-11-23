@@ -150,7 +150,7 @@ def test_aprueba_solas_solo_las_pruebas_fuertes_que_coinciden_con_la_lectura(mon
     nota = {s.id: s.note for s in job.steps}
     assert nota["correr"] == "3 cumplen · 1 no cumplen · 0 con prueba rota"
     assert nota["fuerza"] == "1 pruebas flojas para revisar"
-    assert nota["revision"].startswith("2 pruebas aprobadas por el programa · 1 escritas de nuevo por no coincidir (0 ya están bien) · 1 no coinciden")
+    assert nota["revision"] == "2 aprobadas solas · 2 esperan tu revisión (pruebas que no pasaron todos los controles)"
 
 
 def test_una_prueba_que_no_coincide_se_escribe_de_nuevo_y_si_ahora_coincide_se_aprueba(monkeypatch):
@@ -161,7 +161,7 @@ def test_una_prueba_que_no_coincide_se_escribe_de_nuevo_y_si_ahora_coincide_se_a
     job = preparar.Job(user_id="u1")
     asyncio.run(preparar._work(preparar.Flow(NS(database_path=""), "r1", job, llm=object())))
     assert fake.approved_tests == ["RN-001", "RN-002", "RN-004"]
-    assert "1 escritas de nuevo por no coincidir (1 ya están bien)" in {s.id: s.note for s in job.steps}["revision"]
+    assert {s.id: s.note for s in job.steps}["revision"] == "3 aprobadas solas · 1 esperan tu revisión (pruebas que no pasaron todos los controles)"
 
 
 def test_detener_deja_el_paso_en_curso_pendiente(monkeypatch):
@@ -207,7 +207,7 @@ def test_una_prueba_rota_se_escribe_de_nuevo_y_una_que_falla_y_coincide_se_aprue
     # Rota no tenía lectura del código: se lee después de escribirla de nuevo
     assert fake.explained == ["RN-001", "RN-002", "RN-003", "RN-004", "RN-005"]
     assert fake.approved_tests == ["RN-001", "RN-002", "RN-005"]
-    assert "2 escritas de nuevo rotas o que no coincidían (1 ya están bien)" in {s.id: s.note for s in job.steps}["revision"]
+    assert {s.id: s.note for s in job.steps}["revision"].startswith("3 aprobadas solas · 2 esperan tu revisión")
 
 
 def test_quien_se_aprueba_solo():
@@ -237,3 +237,42 @@ def test_si_el_arnes_de_la_ia_no_arranca_se_corrige_y_se_prueba_otra_vez(monkeyp
     nota = {s.id: (s.status, s.note) for s in job.steps}
     assert state["proposed"] == 1 and nota["humo"] == ("hecho", "El entorno arranca y se aprobó (la IA corrigió el entorno tras un primer intento que no arrancó)")
     assert job.summary == preparar.DONE
+
+
+def test_si_la_ia_no_responde_una_lectura_se_siguen_las_demas(monkeypatch):
+    # Prueba real en Chrome: un «ReadTimeout» de Gemini en la segunda opinión detenía el paso y no se aprobaba nada
+    fake = Rutas()
+
+    async def explain(repo_id, rule_id, *a):
+        if rule_id == "RN-003":
+            raise preparar.ApiError(503, "llm_unavailable", "Gemini tardó demasiado en responder")
+        fake.explained.append(rule_id)
+        next(r for r in fake.rows if r.id == rule_id).evidence = NS(stale=False)
+
+    fake.explain_rule = explain
+    for name in ("rule_routes", "harness_routes", "test_routes"):
+        monkeypatch.setattr(preparar, name, fake)
+    monkeypatch.setattr(preparar.db, "session", lambda path: _NoConn())
+    job = preparar.Job(user_id="u1")
+    asyncio.run(preparar._work(preparar.Flow(NS(database_path=""), "r1", job, llm=object())))
+    assert job.summary == preparar.DONE and fake.approved_tests == ["RN-001", "RN-002"]
+    assert "1 sin leer porque la IA no respondió" in {s.id: s.note for s in job.steps}["revision"]
+
+
+def test_el_resultado_se_ve_despues_de_reiniciar_el_servidor(client, rid):
+    # Prueba real en Chrome: al reiniciarse el backend, la tarjeta volvía a estar vacía como si no se hubiera hecho nada
+    client.post(f"/api/projects/{rid}/reglas/preparar")
+    antes = esperar(client, rid)
+    preparar._jobs.clear()  # lo que pierde un reinicio
+    despues = client.get(f"/api/projects/{rid}/reglas/preparar").json()
+    assert despues["steps"] == antes["steps"] and despues["finished_at"] == antes["finished_at"]
+
+
+def test_si_el_servidor_se_reinicio_a_mitad_se_dice_y_se_puede_reintentar(tmp_path):
+    settings = NS(database_path=str(tmp_path / "ia.db"))
+    job = preparar.Job(user_id="u1", path=preparar._path(settings, "r1"))
+    job.patch("reglas", "hecho", "13 aprobadas")
+    job.patch("arnes", "haciendo")
+    loaded = preparar._saved(settings, "r1")
+    pasos = {s.id: (s.status, s.note) for s in loaded.steps}
+    assert loaded.running is False and pasos["reglas"] == ("hecho", "13 aprobadas") and pasos["arnes"] == ("fallo", preparar.INTERRUPTED)

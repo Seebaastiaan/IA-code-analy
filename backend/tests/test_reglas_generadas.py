@@ -508,3 +508,10 @@ def test_una_prueba_sin_aprobar_dice_lo_que_se_sabe_en_el_reporte():
     # Sin correr con su código actual no se sabe nada
     assert pruebas.unapproved_note(row("cumple", run_hash="otro")) is None
     assert pruebas.unapproved_note(row("cumple", kind="no_implementada")) is None
+
+
+def test_una_prueba_rota_sin_aprobar_dice_que_se_escribe_de_nuevo():
+    code = "def test_rn001_x():\n    pass\n"
+    h = arnes.code_hash(code)
+    row = {"kind": "prueba", "code": code, "run_hash": h, "run_result": json.dumps({"verdict": "prueba_rota"}), "strength_hash": None, "strength_result": None}
+    assert "Preparar todo" in pruebas.unapproved_note(row) and "apruébala" not in pruebas.unapproved_note(row)

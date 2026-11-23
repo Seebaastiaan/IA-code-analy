@@ -77,9 +77,12 @@ export function plain(r: BusinessRuleResult): { light: Light; text: string } {
     case 'no_implementada':
       return { light: 'rojo', text: 'No encontré en el código nada que la implemente.' }
     case 'prueba_rota':
-      return { light: 'amarillo', text: 'La prueba de esta regla no pudo correr: hay que revisarla o regenerarla.' }
+      // «La prueba usa POST /x, que ya no está en el código…» (el código cambió): lo dice el análisis
+      return { light: 'amarillo', text: r.detail.startsWith('La prueba usa') ? `${r.detail}.` : 'La prueba de esta regla no pudo correr: hay que revisarla o regenerarla.' }
     case 'sin_verificar':
-      return { light: 'amarillo', text: 'Todavía no hay forma de comprobarla: falta aprobarla, una prueba o resolver sus dudas.' }
+      // El análisis sabe más cuando la regla ya tiene prueba sin aprobar («Su prueba pasa…, pero todavía no cuenta»)
+      if (r.detail.startsWith('Su prueba')) return { light: 'amarillo', text: `${r.detail}.` }
+      return { light: 'amarillo', text: 'Todavía no hay forma de comprobarla: pulsa «Preparar todo» en Configuración → Reglas.' }
     default:
       return { light: 'gris', text: 'La hace una persona, no el sistema: no se comprueba con código.' }
   }

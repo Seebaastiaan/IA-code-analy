@@ -486,7 +486,7 @@ test('reglas de negocio: «Preparar todo» hace solo el arnés, las pruebas y la
   await expect(page.getByRole('list', { name: 'Avance de la preparación' })).toBeVisible()
   // Termina con el resumen y sin pasos fallidos
   await expect(page.getByText('Listo. El siguiente análisis usará estas reglas y pruebas.')).toBeVisible({ timeout: 90_000 })
-  await expect(steps.getByText(/pruebas aprobadas por el programa/)).toBeVisible()
+  await expect(steps.getByText(/aprobadas solas/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Volver a preparar' })).toBeVisible()
 })
 
@@ -594,6 +594,8 @@ test('reglas de negocio: «Preguntas para ti» junta las dudas de todas las regl
   await card.getByRole('button', { name: 'Guardar mi respuesta' }).click()
   await expect(card.getByText('Pregunta 1 de 1')).toBeVisible()
   await card.getByRole('button', { name: /^Responder sí:/ }).click()
-  await expect(card.getByText('No tienes preguntas pendientes.')).toBeVisible()
-  await expect(page.getByRole('status').filter({ hasText: 'Siguiente:' })).toContainText('en borrador por aprobar')
+  // Sin preguntas pendientes el asistente pasa solo a «Preparar todo»
+  await expect(page.getByRole('button', { name: /^Paso 3:/ })).toHaveAttribute('aria-current', 'step')
+  // Sin preguntas, lo siguiente es «Preparar todo» (aprueba solo los borradores sin dudas)
+  await expect(page.getByRole('status').filter({ hasText: 'Siguiente:' })).toContainText('Pulsa «Preparar todo»: aprueba')
 })

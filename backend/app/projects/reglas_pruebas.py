@@ -364,7 +364,10 @@ def unapproved_note(row) -> str | None:
     if row["kind"] != "prueba" or not row["run_result"] or row["run_hash"] != arnes.code_hash(row["code"]):
         return None
     verdict = json.loads(row["run_result"]).get("verdict")
-    said = {"cumple": "pasa", "no_cumple": "falla", "prueba_rota": "está rota"}.get(verdict)
+    if verdict == "prueba_rota":
+        # Una prueba rota no se aprueba: se escribe de nuevo
+        return "Su prueba no pudo preparar el caso (no es culpa del código). Pulsa «Preparar todo» para que la IA la escriba de nuevo"
+    said = {"cumple": "pasa", "no_cumple": "falla"}.get(verdict)
     if said is None:
         return None
     why = ""

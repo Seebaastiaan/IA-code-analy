@@ -13,10 +13,12 @@ Corre como tarea del servidor: sigue aunque se cierre la pestaña y cualquiera d
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
@@ -74,11 +76,69 @@ class Job:
     finished_at: str | None = None
     cancelled: bool = False
     task: asyncio.Task | None = field(default=None, repr=False)
+    # Dónde se guarda (para verlo después de reiniciar el servidor); None = solo en memoria
+    path: Path | None = field(default=None, repr=False)
 
     def patch(self, step: StepId, status: Status, note: str | None = None) -> None:
         for s in self.steps:
             if s.id == step:
                 s.status, s.note = status, note
+        self.save()
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        data = {
+            "user_id": self.user_id, "steps": [vars(s) for s in self.steps], "running": self.running, "summary": self.summary,
+            "started_at": self.started_at, "finished_at": self.finished_at,
+        }
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            log.warning("No se pudo guardar el avance de «Preparar todo» en %s", self.path, exc_info=True)
+
+
+INTERRUPTED = "Se interrumpió porque el servidor se reinició: pulsa «Reintentar» (lo ya hecho se conserva)"
+
+
+def _path(settings: Settings, repo_id: str) -> Path:
+    return Path(settings.database_path).resolve().parent / "preparar" / f"{repo_id}.json"
+
+
+def _saved(settings: Settings, repo_id: str) -> Job | None:
+    """
+    El último «Preparar todo» guardado. Si el servidor se reinició a mitad, la tarea ya no existe: el paso en curso queda
+    como interrumpido (antes la tarjeta volvía a estar vacía, como si no se hubiera hecho nada).
+    """
+    path = _path(settings, repo_id)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        job = Job(
+            user_id=data["user_id"], steps=[Step(**st) for st in data["steps"]], running=False, summary=data.get("summary"),
+            started_at=data["started_at"], finished_at=data.get("finished_at"), path=path,
+        )
+    except (KeyError, TypeError):
+        return None
+    if data.get("running"):
+        for st in job.steps:
+            if st.status == "haciendo":
+                st.status, st.note = "fallo", INTERRUPTED
+        job.finished_at = job.finished_at or datetime.now(UTC).isoformat(timespec="seconds")
+        job.save()
+    return job
+
+
+def _current(settings: Settings, repo_id: str) -> Job | None:
+    job = _jobs.get(repo_id)
+    if job is None:
+        job = _saved(settings, repo_id)
+        if job is not None:
+            _jobs[repo_id] = job
+    return job
 
 
 # El último «Preparar todo» de cada repo (el que corre o el que terminó): se ve al volver a la pantalla
@@ -123,6 +183,23 @@ class Flow:
 
     def __init__(self, settings: Settings, repo_id: str, job: Job, llm: LLM | None):
         self.settings, self.repo_id, self.job, self.llm = settings, repo_id, job, llm
+        # Reglas cuya lectura del código falló (la IA no respondió): se siguen las demás
+        self.unread: list[str] = []
+
+    async def explain(self, rule_id: str) -> int:
+        """
+        La segunda opinión de una regla. Si la IA no responde (tiempo agotado, saturada), se anota y se sigue con las
+        demás: antes un solo «ReadTimeout» detenía el paso y no se aprobaba nada. 1 si se leyó, 0 si no.
+        """
+        uid, rid, cfg, llm = self.job.user_id, self.repo_id, self.settings, self.llm
+        try:
+            await self.call(lambda s: test_routes.explain_rule(rid, rule_id, s, uid, cfg, llm))
+        except ApiError as exc:
+            if exc.status != 503:
+                raise
+            self.unread.append(rule_id)
+            return 0
+        return 1
 
     def check(self) -> None:
         if self.job.cancelled:
@@ -269,13 +346,11 @@ class Flow:
         self.job.patch("revision", "haciendo")
         read = 0
         if t.can_explain and self.llm is not None:
-            llm = self.llm
             for row in t.rules:
                 self.check()
                 verdict = row.test.run.verdict if row.test and row.test.run else None
                 if verdict in ("cumple", "no_cumple") and (row.evidence is None or row.evidence.stale):
-                    await self.call(lambda s, rule_id=row.id: test_routes.explain_rule(rid, rule_id, s, uid, cfg, llm))
-                    read += 1
+                    read += await self.explain(row.id)
             t = await self.tests()
         # Si la prueba y la lectura no coinciden, una de las dos se equivocó. La IA no escribe igual cada vez, así que la
         # prueba se escribe una vez más (solo las de la IA que nadie aprobó), se corre y se mide; la lectura se conserva
@@ -288,31 +363,25 @@ class Flow:
         if retry and t.can_generate and self.llm is not None:
             t = await self.second_try(retry)
             # Una prueba que estaba rota no tenía lectura del código: ahora que da un resultado, se lee
-            llm = self.llm
             pending = [
                 r.id for r in t.rules
                 if r.id in retry and r.test and r.test.run and r.test.run.verdict in ("cumple", "no_cumple") and (r.evidence is None or r.evidence.stale)
             ]
             for rule_id in pending:
                 self.check()
-                await self.call(lambda s, rule_id=rule_id: test_routes.explain_rule(rid, rule_id, s, uid, cfg, llm))
-                read += 1
+                read += await self.explain(rule_id)
             if pending:
                 t = await self.tests()
-        different = sum(1 for r in t.rules if r.crosscheck.status == "discrepa")
         trusted = [r.id for r in t.rules if trusted_by_program(r)]
         if trusted:
             await self.call(lambda s: test_routes.approve_tests(rid, test_routes.Ids(ids=trusted), s, uid, cfg))
-        note = f"{len(trusted)} pruebas aprobadas por el programa"
-        if retry and t.can_generate and self.llm is not None:
-            still = {r.id for r in t.rules if r.crosscheck.status == "discrepa" or (r.test and r.test.run and r.test.run.verdict == "prueba_rota")}
-            fixed = sum(1 for i in retry if i not in still)
-            what = "rotas o que no coincidían" if broken & set(retry) else "por no coincidir"
-            note += f" · {len(retry)} escritas de nuevo {what} ({fixed} ya están bien)"
-        if different:
-            note += f" · {different} no coinciden con la lectura del código: revísalas"
-        if not read:
-            note += " · sin lecturas nuevas"
+        # En palabras: cuántas aprobó solo y cuántas esperan a una persona (el detalle técnico queda en la tabla de pruebas)
+        waiting = sum(1 for r in t.rules if r.test and r.test.kind == "prueba" and not r.test.approved and r.id not in trusted)
+        note = f"{len(trusted)} aprobadas solas"
+        if waiting:
+            note += f" · {waiting} esperan tu revisión (pruebas que no pasaron todos los controles)"
+        if self.unread:
+            note += f" · {len(self.unread)} sin leer porque la IA no respondió: reintenta en un rato"
         if not t.can_explain or self.llm is None:
             note += " · sin IA para leer el código: nada se aprueba solo"
         self.job.patch("revision", "hecho", note)
@@ -383,6 +452,7 @@ async def _work(flow: Flow) -> None:
     finally:
         job.running = False
         job.finished_at = datetime.now(UTC).isoformat(timespec="seconds")
+        job.save()
 
 
 # ───────────────────────── Rutas ─────────────────────────
@@ -394,9 +464,9 @@ def get_optional_llm(settings: Config) -> LLM | None:
 
 
 @router.get("/api/projects/{project_id}/reglas/preparar", response_model=PrepareView)
-def get_prepare(project_id: str, store: Analyses, user_id: UserId) -> PrepareView:
+def get_prepare(project_id: str, store: Analyses, user_id: UserId, settings: Config) -> PrepareView:
     require_repo(store, user_id, project_id)
-    return _out(_jobs.get(project_id))
+    return _out(_current(settings, project_id))
 
 
 @router.post("/api/projects/{project_id}/reglas/preparar", response_model=PrepareView)
@@ -405,20 +475,21 @@ async def start_prepare(
 ) -> PrepareView:
     """Lanza «Preparar todo» en segundo plano. Sin clave de IA corre igual y se detiene donde la necesite."""
     require_repo(store, user_id, project_id)
-    current = _jobs.get(project_id)
+    current = _current(settings, project_id)
     if current is not None and current.running:
         raise ApiError(409, "prepare_running", "«Preparar todo» ya está corriendo en este proyecto")
-    job = Job(user_id=user_id)
+    job = Job(user_id=user_id, path=_path(settings, project_id))
+    job.save()
     _jobs[project_id] = job
     job.task = asyncio.create_task(_work(Flow(settings, project_id, job, llm)))
     return _out(job)
 
 
 @router.delete("/api/projects/{project_id}/reglas/preparar", response_model=PrepareView)
-def stop_prepare(project_id: str, store: Analyses, user_id: UserId) -> PrepareView:
+def stop_prepare(project_id: str, store: Analyses, user_id: UserId, settings: Config) -> PrepareView:
     """Detiene «Preparar todo» al terminar el paso en curso (lo que ya corre en el sandbox termina por su cuenta)."""
     require_repo(store, user_id, project_id)
-    job = _jobs.get(project_id)
+    job = _current(settings, project_id)
     if job is not None and job.running:
         job.cancelled = True
     return _out(job)

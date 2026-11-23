@@ -134,15 +134,16 @@ async function flow(repoId: string, job: Job) {
     }
     t = await tests()
   }
-  const different = t.rules.filter((r) => r.crosscheck.status === 'discrepa').length
   // Como app.projects.preparar.trusted_by_program: pasa y es fuerte, o falla; y en los dos casos coincide con la lectura del código
   const trusted = t.rules
     .filter((r) => r.test && !r.test.approved && !r.test.blocked && r.crosscheck.status === 'coincide')
     .filter((r) => (r.test?.run?.verdict === 'cumple' && r.test.strength?.status === 'fuerte') || r.test?.run?.verdict === 'no_cumple')
     .map((r) => r.id)
   if (trusted.length) await rulesApi.approveTests(repoId, trusted)
+  const pendingReview = t.rules.filter((r) => r.test?.kind === 'prueba' && !r.test.approved && !trusted.includes(r.id)).length
   const unread = !t.can_explain ? ' · sin IA para leer el código: nada se aprueba solo' : ''
-  patch('revision', 'hecho', `${trusted.length} pruebas aprobadas por el programa${different ? ` · ${different} no coinciden con la lectura del código: revísalas` : ''}${read ? '' : ' · sin lecturas nuevas'}${unread}`)
+  patch('revision', 'hecho', `${trusted.length} aprobadas solas${pendingReview ? ` · ${pendingReview} esperan tu revisión (pruebas que no pasaron todos los controles)` : ''}${unread}`)
+  void read
   job.summary = 'Listo. El siguiente análisis usará estas reglas y pruebas.'
 }
 

@@ -253,8 +253,10 @@ class LLM:
                             continue
                         text += "".join(p.get("text", "") for p in candidates[0].get("content", {}).get("parts", []) if not p.get("thought"))
                         emit(partial_answer(text))
+            except httpx.TimeoutException as exc:
+                raise LlmError("Gemini tardó demasiado en responder") from exc
             except httpx.HTTPError as exc:
-                raise LlmError(f"No se pudo contactar a Gemini: {type(exc).__name__}") from exc
+                raise LlmError("No se pudo contactar a Gemini (falla de red)") from exc
             if not text:
                 raise LlmError(f"Gemini no respondió ({blocked or 'sin respuesta'})")
             return _parse(text, "Gemini")

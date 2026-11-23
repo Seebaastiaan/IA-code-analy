@@ -5,6 +5,11 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 ## [Sin publicar] — Reglas de negocio verificables (docs/PROPUESTA_REGLAS_VERIFICABLES.md)
 
 ### Agregado
+- Revisión en Chrome del flujo completo con reservas-demo: «Preparar todo» guarda su avance (se ve tras reiniciar el servidor
+  y, si se cortó, ofrece «Reintentar»); una lectura del código que agota el tiempo de Gemini ya no detiene el paso; la franja
+  «Siguiente» dice qué hacer durante y después de «Preparar todo»; «Analizar de nuevo» analiza el mismo repo; el reporte explica
+  cada regla sin verificar (prueba que pasa o falla sin aprobar, prueba rota) y un repo sin pruebas da un solo hallazgo en lugar
+  de uno por archivo.
 - Hallazgos siempre en español: las reglas de Ruff que activa la configuración del propio repo (I001, E501, UP…) se explican por
   familia en lugar del mensaje en inglés y del ejemplo genérico de la documentación de Ruff; los hallazgos de análisis anteriores
   también se muestran traducidos.

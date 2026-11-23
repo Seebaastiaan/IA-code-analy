@@ -198,3 +198,25 @@ def test_archivo_de_dependencias_en_la_subcarpeta():
     assert _deps_file(["backend/pyproject.toml"], "backend") == "backend/pyproject.toml"
     assert _deps_file(["README.md"], "backend") == "backend/requirements.txt"
     assert _deps_file(["requirements.txt"]) == "requirements.txt"
+
+
+def test_sin_pruebas_un_solo_hallazgo_y_no_uno_por_archivo():
+    # Prueba real en Chrome (reservas-demo sin pruebas): salían 9 hallazgos iguales «Cobertura de 0 %», uno por archivo
+    from app.analyses.store import default_config
+    from app.analysis import pipeline
+    from app.analysis.sandbox import PhaseResult, SandboxOutput
+
+    files = ["app/a.py", "app/b.py", "app/c.py"]
+    static = pipeline.StaticResult(files=files, py=files, findings=[], complexity=[], cfg=default_config())
+    sin_pruebas = SandboxOutput(phases={"install": PhaseResult("install", 0), "tests": PhaseResult("tests", 5)}, coverage={"files": {}})
+    coverage, total, failed, passed, findings = pipeline.real_tests(static, sin_pruebas, 60)
+    assert [f.msg for f in findings] == ["El repositorio no tiene pruebas: ninguno de sus 3 archivos se prueba"]
+    assert len(coverage) == 3 and (total, failed, passed) == (0.0, 0, 0)
+    # Como sale de verdad: coverage lista los archivos con 0 líneas cubiertas
+    cero = {"files": {f: {"summary": {"covered_lines": 0, "num_statements": 10}} for f in files}}
+    real = SandboxOutput(phases={"install": PhaseResult("install", 0), "tests": PhaseResult("tests", 5)}, coverage=cero)
+    assert [f.msg for f in pipeline.real_tests(static, real, 60)[4]] == ["El repositorio no tiene pruebas: ninguno de sus 3 archivos se prueba"]
+    # Si las dependencias no se instalaron, no se dice que no hay pruebas
+    sin_deps = SandboxOutput(phases={"install": PhaseResult("install", 1, "ERROR"), "tests": PhaseResult("tests", None)}, coverage=None)
+    msgs = [f.msg for f in pipeline.real_tests(static, sin_deps, 60)[4]]
+    assert "No se pudieron instalar las dependencias del proyecto" in msgs and not any("no tiene pruebas" in m for m in msgs)

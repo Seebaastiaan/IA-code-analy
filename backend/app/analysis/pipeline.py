@@ -261,6 +261,17 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
         coverage.append(CoverageInput(file=f, percent=_clamp(100 * done / total) if total else 100.0))
     coverage.sort(key=lambda c: c.percent)
     cov_total = round(100 * covered / statements, 1) if statements else 0.0
+    # pytest sale con 5 cuando no encontró ninguna prueba (no confundir con dependencias que no se instalaron)
+    # (coverage lista los archivos aunque nadie los haya ejecutado: lo que cuenta es que no se cubrió ninguna línea)
+    if coverage and covered == 0 and tests is not None and tests.code == 5 and not run.passed and not run.failed:
+        # Sin ninguna prueba: un solo hallazgo, no uno igual por archivo («Cobertura de 0 %» ×9 abrumaba)
+        findings.append(FindingInput(
+            sev="media", cat="test", tool="coverage", rule="COV", file=coverage[0].file, line=1, code="",
+            msg=f"El repositorio no tiene pruebas: ninguno de sus {len(coverage)} archivos se prueba",
+            why="Sin pruebas, cualquier cambio puede romper algo sin que nadie lo note hasta que falle en uso.",
+            rec="Agrega una carpeta `tests/` con pruebas de pytest para las funciones principales. Para las reglas de negocio, «Preparar todo» en Configuración → Reglas escribe sus pruebas.",
+        ))
+        return coverage, cov_total, run.failed, run.passed, findings
     findings += [
         FindingInput(
             sev="media" if c.percent < min_cov - 15 else "baja", cat="test", tool="coverage", rule="COV", file=c.file, line=1, code="",

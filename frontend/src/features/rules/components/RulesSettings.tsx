@@ -273,7 +273,7 @@ function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
 
   return (
     <div className="space-y-4">
-      <RulesStepper rules={rules} step={step} onStep={setStep} />
+      <RulesStepper repoId={repoId} rules={rules} step={step} onStep={setStep} />
       <div className={cn('space-y-4', show(0))}>
         <Card className="p-5">
           <h2 className="font-semibold mb-3">De dónde vienen las reglas</h2>
