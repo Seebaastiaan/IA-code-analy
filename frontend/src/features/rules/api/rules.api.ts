@@ -14,6 +14,8 @@ export const rulesApi = {
   setStates: (repoId: string, ids: string[], status: RuleApproval, by: 'equipo' | 'programa' = 'equipo') => http.post<ProjectRules>(EP.rules.states(repoId), { ids, status, by }),
   setDoubts: (repoId: string, ruleId: string, doubts: string[]) => http.put<ProjectRules>(EP.rules.doubts(repoId, ruleId), { doubts }),
   /** Contesta una duda con sí o no: la duda se cierra, la respuesta queda en la regla y el proyecto la recuerda */
+  /** De un par que el documento contradice, la regla que vale (su id) o «ambas» si no se contradicen */
+  resolveContradiction: (repoId: string, a: string, b: string, keep: string) => http.post<ProjectRules>(EP.rules.contradiction(repoId), { a, b, keep }),
   answerDoubt: (repoId: string, ruleId: string, doubt: string, answer: DoubtAnswer | string) => http.post<ProjectRules>(EP.rules.answer(repoId, ruleId), { doubt, answer }),
   /** «Escribe una regla con tus palabras»: la IA la redacta y se agrega en borrador */
   writeRule: (repoId: string, text: string) => http.post<ProjectRules>(EP.rules.write(repoId), { text }),

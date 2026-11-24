@@ -231,11 +231,20 @@ def test_503_reintenta_el_mismo_modelo(settings, monkeypatch):
     assert seen == ["m1", "m1"] and result.model == "M1"
 
 
+def test_503_espera_dos_veces_antes_de_pasar_al_respaldo(settings, monkeypatch):
+    # El principal saturado a ratos: con un solo reintento casi todo lo contestaba el respaldo (más débil)
+    waits: list[float] = []
+    monkeypatch.setattr(llm_mod.time, "sleep", waits.append)
+    seen: list[str] = []
+    result = make_llm(settings, {"m1": [503, 503]}, seen).answer("s", [], {})
+    assert seen == ["m1", "m1", "m1"] and result.model == "M1" and waits == [1.5, 6.0]
+
+
 def test_respaldo_entre_modelos_y_groq(settings, monkeypatch):
     monkeypatch.setattr(llm_mod, "BUSY_RETRY_WAIT_S", 0)
     seen: list[str] = []
-    result = make_llm(settings, {"m1": [429], "m2": [503, 503]}, seen, groq="g").answer("s", [], {})
-    assert seen == ["m1", "m2", "m2", "groq"] and result.model == "Groq · Llama 3.3" and result.data["answer"] == "de groq"
+    result = make_llm(settings, {"m1": [429], "m2": [503, 503, 503]}, seen, groq="g").answer("s", [], {})
+    assert seen == ["m1", "m2", "m2", "m2", "groq"] and result.model == "Groq · Llama 3.3" and result.data["answer"] == "de groq"
 
 
 def test_error_no_recuperable_no_usa_respaldo(settings):

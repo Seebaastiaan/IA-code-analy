@@ -403,6 +403,88 @@ def contradiction_comment(a: str, b: str, reason: str) -> str:
     return f"# CONTRADICCIÓN {a} {b}: {reason}"
 
 
+@dataclass(frozen=True)
+class Contradiction:
+    """Dos reglas que el documento dice de dos formas incompatibles; el equipo decide cuál vale."""
+
+    a: str
+    b: str
+    reason: str
+
+
+def _rule_blocks(lines: list[str]) -> list[tuple[int, int, str | None]]:
+    """(inicio, fin exclusivo, id) de cada `[[regla]]`. El inicio incluye los comentarios pegados justo antes del encabezado."""
+    heads = [n for n, line in enumerate(lines) if re.match(r"\s*\[\[\s*regla\s*\]\]", line)]
+    blocks = []
+    for k, head in enumerate(heads):
+        start = head
+        while start > 0 and lines[start - 1].lstrip().startswith("#") and (k == 0 or start - 1 > heads[k - 1]):
+            start -= 1
+        end = len(lines)
+        if k + 1 < len(heads):
+            end = heads[k + 1]
+            while end - 1 > head and lines[end - 1].lstrip().startswith("#"):
+                end -= 1
+        rid = None
+        for line in lines[head:end]:
+            m = re.match(r"\s*id\s*=\s*[\"']([^\"']+)[\"']", line)
+            if m:
+                rid = m.group(1).strip().upper()
+                break
+        blocks.append((start, end, rid))
+    return blocks
+
+
+def marked_contradictions(text: str) -> list[Contradiction]:
+    """Los pares marcados con `# CONTRADICCIÓN` cuyas dos reglas siguen en el archivo (sin repetir el par)."""
+    ids = {rid for _, _, rid in _rule_blocks(text.splitlines()) if rid}
+    out: dict[frozenset[str], Contradiction] = {}
+    for line in text.splitlines():
+        m = MARKED_CONTRADICTION.match(line)
+        if not m:
+            continue
+        a, b = m.group(1).upper(), m.group(2).upper()
+        if a != b and a in ids and b in ids:
+            out.setdefault(frozenset((a, b)), Contradiction(a, b, m.group(3).strip()))
+    return list(out.values())
+
+
+def without_marked_contradictions(text: str) -> str:
+    """El texto sin los comentarios `# CONTRADICCIÓN` (para saber si lo demás es válido)."""
+    return "\n".join(line for line in text.splitlines() if not MARKED_CONTRADICTION.match(line)) + "\n"
+
+
+def resolve_contradiction(text: str, a: str, b: str, keep: str) -> str:
+    """
+    El equipo decide un par: `keep` = a o b (la otra regla se quita del archivo) o "ambas" (no se contradicen: solo se
+    quita la marca). RulesError si el par no está marcado.
+    """
+    a, b, keep = a.upper(), b.upper(), keep.upper()
+    if not any({c.a, c.b} == {a, b} for c in marked_contradictions(text)):
+        raise RulesError(f"{a} y {b} no están marcadas como contradicción")
+    if keep not in (a, b, "AMBAS"):
+        raise RulesError("Elige una de las dos reglas o «ambas»")
+    lines = text.splitlines()
+    drop: set[int] = set()
+    if keep != "AMBAS":
+        gone = b if keep == a else a
+        for start, end, rid in _rule_blocks(lines):
+            if rid == gone:
+                drop.update(range(start, end))
+    else:
+        gone = None
+    kept_lines = []
+    for n, line in enumerate(lines):
+        if n in drop:
+            continue
+        m = MARKED_CONTRADICTION.match(line)
+        # La marca del par decidido sobra; las de la regla quitada con otras reglas también (esa regla ya no está)
+        if m and ({m.group(1).upper(), m.group(2).upper()} == {a, b} or (gone and gone in {m.group(1).upper(), m.group(2).upper()})):
+            continue
+        kept_lines.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept_lines)).rstrip("\n") + "\n"
+
+
 def _check_marked_contradictions(text: str, ids: set[str]) -> None:
     """
     El importador marca con `# CONTRADICCIÓN RN-004 RN-009: …` las reglas que el documento dice de dos formas

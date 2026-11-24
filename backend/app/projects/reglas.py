@@ -17,6 +17,7 @@ import asyncio
 import base64
 import binascii
 import json
+import tomllib
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal
 
@@ -122,6 +123,31 @@ class ProjectRules(BaseModel):
     can_import: bool = False
     # Avisos de la última acción (reglas que no se pudieron aprobar y por qué)
     messages: list[str] = Field(default_factory=list)
+    # Pares de reglas cargadas en la app que el documento contradice: el equipo elige cuál vale con un botón
+    contradictions: list["ContradictionView"] = Field(default_factory=list)
+
+
+class ContradictionSide(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    source: str | None = None
+
+
+class ContradictionView(BaseModel):
+    a: ContradictionSide
+    b: ContradictionSide
+    reason: str
+
+
+class ContradictionChoice(BaseModel):
+    a: str = Field(max_length=20)
+    b: str = Field(max_length=20)
+    # La regla que vale (a o b) o «ambas» si no se contradicen
+    keep: str = Field(max_length=20)
+
+
+ProjectRules.model_rebuild()
 
 
 class RuleStates(BaseModel):
@@ -173,6 +199,26 @@ def _documents(ws: Workspace) -> list[str]:
     return importar.find_documents(ws.sizes_by_extension(importar.EXTENSIONS))
 
 
+def contradictions_of(text: str | None) -> list[ContradictionView]:
+    """Las contradicciones marcadas que siguen sin decidir, con el título y la fuente de cada regla."""
+    if not text:
+        return []
+    pairs = reglas.marked_contradictions(text)
+    if not pairs:
+        return []
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    by_id = {str(r.get("id", "")).upper(): r for r in data.get("regla", []) if isinstance(r, dict)}
+
+    def side(rid: str) -> ContradictionSide:
+        r = by_id.get(rid, {})
+        return ContradictionSide(id=rid, title=str(r.get("titulo") or rid), description=str(r.get("descripcion") or ""), source=r.get("fuente"))
+
+    return [ContradictionView(a=side(c.a), b=side(c.b), reason=c.reason) for c in pairs]
+
+
 def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRules:
     ws = Workspace(settings, repo_id)
     files = _files(ws)
@@ -194,6 +240,7 @@ def _project_rules(store: Analyses, settings: Config, repo_id: str) -> ProjectRu
         active=_active(repo_file, uploaded),
         repo=repo_file, uploaded=uploaded, cloned=ws.exists(), commit=latest["commit_sha"] if latest else None,
         documents=_documents(ws), can_import=bool(settings.gemini_api_key),
+        contradictions=contradictions_of(row["content"]) if row and uploaded and not uploaded.valid else [],
     )
 
 
@@ -217,12 +264,36 @@ def upload_rules(project_id: str, body: RulesContent, store: Analyses, user_id: 
     require_repo(store, user_id, project_id)
     result = validate(body.content)
     if not result.valid:
-        raise ApiError(422, "invalid_rules", result.error or "Reglas no válidas")
+        # Si lo único que falla son las contradicciones del documento, se guarda: el equipo las decide con un botón
+        if not reglas.marked_contradictions(body.content) or not validate(reglas.without_marked_contradictions(body.content)).valid:
+            raise ApiError(422, "invalid_rules", result.error or "Reglas no válidas")
+        RulesStore(store.conn).save_upload(project_id, body.content, user_id)
+        return _project_rules(store, settings, project_id)
     rules_store = RulesStore(store.conn)
     # Lo que el equipo ya contestó antes (misma pregunta de la misma regla) no se vuelve a preguntar
     content, remembered = respuestas.apply(body.content, [dict(r) for r in rules_store.answers(project_id)], _embedder(settings))
     rules_store.save_upload(project_id, content, user_id)
     return _project_rules(store, settings, project_id).model_copy(update={"messages": remembered})
+
+
+@router.post("/api/projects/{project_id}/reglas/contradiccion", response_model=ProjectRules)
+def resolve_contradiction(project_id: str, body: ContradictionChoice, store: Analyses, user_id: UserId, settings: Config) -> ProjectRules:
+    """El equipo decide qué regla vale de un par que el documento contradice (o que no se contradicen)."""
+    require_repo(store, user_id, project_id)
+    rules_store = RulesStore(store.conn)
+    text = rules_store.uploaded_text(project_id)
+    if not text:
+        raise ApiError(409, "no_rules", "El proyecto no tiene reglas cargadas en la app")
+    try:
+        content = reglas.resolve_contradiction(text, body.a, body.b, body.keep)
+    except reglas.RulesError as exc:
+        raise ApiError(422, "invalid_choice", str(exc)) from exc
+    messages: list[str] = []
+    if validate(content).valid:
+        # Ya no quedan contradicciones: lo que el equipo contestó antes se aplica como en cualquier importación
+        content, messages = respuestas.apply(content, [dict(r) for r in rules_store.answers(project_id)], _embedder(settings))
+    rules_store.save_upload(project_id, content, user_id)
+    return _project_rules(store, settings, project_id).model_copy(update={"messages": messages})
 
 
 @router.delete("/api/projects/{project_id}/reglas", response_model=ProjectRules)

@@ -395,6 +395,21 @@ class JobManager:
                 runner.close()
         return True
 
+    async def _auto_rules(self, settings: Settings, job: Job) -> asyncio.Task | None:
+        """Si el repo no trae reglas y el proyecto no tiene, empieza a sacarlas de su documento de requisitos (app.projects.reglas_auto)."""
+        from app.projects import reglas_auto
+
+        try:
+            document = await asyncio.to_thread(reglas_auto.pending_document, settings, job.repo_id)
+        except Exception:
+            log.exception("No se pudo revisar si %s necesita reglas", job.repo_id)
+            return None
+        if not document:
+            return None
+        self._emit(job, {"type": "log", "line": f"  reglas: el repo no trae reglas; las saco de {document} con IA mientras se analiza"})
+        # El nombre de la tarea es el documento: el paso 10 lo menciona
+        return asyncio.create_task(asyncio.to_thread(reglas_auto.run, settings, job.repo_id, job.name, job.user_id, document), name=document)
+
     async def _run(self, settings: Settings, job: Job) -> None:
         try:
             # Un reintento retoma el paso donde falló; si fue el clonado, se vuelve a clonar
@@ -402,7 +417,11 @@ class JobManager:
                 self._start_step(job)
                 if not await self._clone(settings, job):
                     return
+            # Reglas de negocio desde el documento de requisitos del repo, mientras corren los analizadores
+            rules_task = await self._auto_rules(settings, job)
             if job.result is None and not await self._analyze(settings, job):
+                if rules_task:
+                    rules_task.cancel()
                 return
             while job.step < job.total:
                 self._start_step(job)
@@ -415,7 +434,17 @@ class JobManager:
                 else:
                     await asyncio.sleep(settings.job_step_seconds)
                     summary = pipeline.step_summary(job.step, job.result)
+                    if job.step == pipeline.RULES_STEP and rules_task and (job.result.rules is None or job.result.rules.source is None):
+                        # Sin esto decía «sin reglas declaradas» justo cuando el programa las está sacando del documento
+                        summary = (
+                            f"  reglas sacadas de {rules_task.get_name()}: entran en borrador y se comprueban desde el próximo análisis, "
+                            "cuando las apruebes («Preparar todo» en Configuración → Reglas)"
+                        )
                 self._finish_step(job, summary)
+            if rules_task:
+                if not rules_task.done():
+                    self._emit(job, {"type": "log", "line": "  reglas: terminando de leer el documento de requisitos…"})
+                self._emit(job, {"type": "log", "line": (await rules_task).line})
             num, score = _save_report(settings, job)
             job.status = "done"
             job.done = {"num": num, "score": score}

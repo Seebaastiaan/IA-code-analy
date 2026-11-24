@@ -13,7 +13,14 @@ import { currentStep, FLOW_STEPS, nextAction } from '../utils/steps'
  * Los 4 pasos del módulo y la siguiente acción. Se puede saltar a cualquier paso; el paso en curso lo marca el programa.
  * Ningún paso se desmonta (lo escrito en el editor no se pierde): solo se ocultan.
  */
-export function RulesStepper({ repoId, rules, step, onStep }: { repoId: string; rules: RulePreview[]; step: number; onStep: (n: number) => void }) {
+export function RulesStepper({ repoId, rules, step, onStep, contradictions = 0 }: {
+  repoId: string
+  rules: RulePreview[]
+  step: number
+  onStep: (n: number) => void
+  /** Pares que el documento contradice y falta decidir */
+  contradictions?: number
+}) {
   const done = currentStep(rules)
   // Mientras «Preparar todo» corre (en el servidor), lo siguiente es esperar, no pulsarlo otra vez
   const prepared = useQuery({ ...prepareQuery(repoId), enabled: false }).data
@@ -22,7 +29,7 @@ export function RulesStepper({ repoId, rules, step, onStep }: { repoId: string; 
     ? { text: '«Preparar todo» está trabajando: puedes cerrar esta pestaña y volver después.', step: 2, label: 'Ver el avance' }
     : done2
       ? { text: 'Listo: analiza el repositorio de nuevo para ver qué reglas se cumplen.', step: 3, label: 'Ver el resultado' }
-      : nextAction(rules)
+      : nextAction(rules, contradictions)
   return (
     <Card className="p-5">
       <ol className="grid grid-cols-2 lg:grid-cols-4 gap-2" aria-label="Pasos">

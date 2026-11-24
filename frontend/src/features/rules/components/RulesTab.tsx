@@ -32,15 +32,6 @@ function Notices({ data, repoId }: { data: BusinessRules; repoId: string }) {
           <p className="mt-1 font-mono text-xs">{data.repo_error}</p>
         </div>
       )}
-      {data.origin === 'app' && !data.repo_error && (
-        <p className="px-5 py-2.5 text-sm bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200 border-b border-amber-200/60 dark:border-amber-500/20">
-          Reglas cargadas en la app: no están en el repositorio y no cuentan como entregable.{' '}
-          <Link to={paths.settings(repoId, 'reglas')} className="font-medium underline">
-            Descárgalas para subirlas al repo
-          </Link>
-          .
-        </p>
-      )}
       {withTests && !data.tests_ran && (
         <p className="px-5 py-2.5 text-sm text-slate-500 bg-slate-50/60 dark:bg-slate-950/40 border-b border-slate-100 dark:border-slate-800">
           Las pruebas ligadas a reglas no se ejecutaron en este análisis (sin sandbox o sin pytest): sus reglas quedan sin verificar.

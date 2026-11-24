@@ -92,7 +92,7 @@ function RulesModal({ url, branch, initial, title, canImport, imported, onUse, o
           </button>
         </div>
         <p className="text-sm text-slate-500 mb-3">
-          Se guardan en el proyecto (cargadas en la app) al iniciar el análisis y se usan mientras el repositorio no tenga un {RULES_FILENAME} válido. Descárgalas para subirlas al repo.
+          Se guardan en el proyecto (cargadas en la app) al iniciar el análisis y se usan en cada análisis mientras el repositorio no tenga un {RULES_FILENAME} válido.
           {canImport && ' También puedes subir el documento de requisitos (PDF o Word) y la IA saca las reglas.'}
         </p>
         <div className="mb-3">

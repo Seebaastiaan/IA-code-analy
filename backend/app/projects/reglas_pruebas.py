@@ -431,6 +431,10 @@ def _answer(llm: LLM, turns: list[Turn]) -> tuple[dict, str]:
     return (reply.data if isinstance(reply.data, dict) else {}), reply.model
 
 
+# Cambios que no notó la prueba que se le muestran a la IA al endurecerla
+MAX_SURVIVORS = 6
+
+
 def repair_turns(code: str, failure: str) -> list[Turn]:
     """La prueba anterior y por qué se rompió al correrla: para que la IA la corrija en vez de empezar de cero."""
     return [
@@ -445,21 +449,43 @@ def repair_turns(code: str, failure: str) -> list[Turn]:
     ]
 
 
+def harden_turns(code: str, survivors: list[str]) -> list[Turn]:
+    """
+    La prueba anterior pasa, pero también pasó con el código cambiado a propósito (prueba de fuerza): se le muestran
+    esos cambios para que la prueba compruebe de verdad la regla. Con `reservas-demo` dos reglas rotas pasaban por esto.
+    """
+    listed = "\n".join(f"- {s}" for s in survivors[:MAX_SURVIVORS])
+    return [
+        Turn("model", json.dumps({"codigo": code}, ensure_ascii=False)),
+        Turn(
+            "user",
+            "Esta prueba PASA con el código actual, pero también siguió pasando cuando se cambiaron a propósito estas líneas del "
+            f"proyecto (si la prueba comprobara la regla, debería haber fallado):\n{listed}\n"
+            "Reescríbela para que compruebe exactamente lo que pide la regla, con casos en el límite (el valor justo, uno antes y uno "
+            "después) y revisando la respuesta y el estado guardado, no solo el código de respuesta. No la ajustes al código actual: "
+            "si el código no cumple la regla, la prueba debe fallar. Si un cambio no tiene que ver con la regla, ignóralo. Mismo "
+            "formato JSON, con \"codigo\".",
+        ),
+    ]
+
+
 def generate(
     llm: LLM, root: Path, project_map: mapa.ProjectMap, harness_code: str, rule: reglas.BusinessRule,
-    allowed: set[str] = frozenset(), broken: tuple[str, str] | None = None,
+    allowed: set[str] = frozenset(), broken: tuple[str, str] | None = None, weak: tuple[str, list[str]] | None = None,
 ) -> Generated:
     """
     Bloqueante (red). LlmError si Gemini falla; GenerationError si la respuesta no sirve. Si la prueba no pasa la
     validación (sintaxis, fixtures, nombres), se le devuelven los errores a la IA una vez para que la corrija.
     Una regla con `tipo = "proceso"` no llama a la IA: es fuera del código. `broken` = (código, por qué se rompió) de la
-    prueba anterior, que se corrió y falló al preparar el escenario: se le pide corregirla.
+    prueba anterior, que se corrió y falló al preparar el escenario: se le pide corregirla. `weak` = (código, cambios que
+    no notó) de una prueba que pasa pero salió floja en la prueba de fuerza: se le pide endurecerla.
     """
     if rule.process:
         return Generated("fuera_del_codigo", "proceso", "", [], [], "", 'Regla de proceso (tipo = "proceso"): no está en el código')
     question = Turn("user", prompt(root, project_map, harness_code, rule))
-    if broken is not None:
-        data, model = _answer(llm, [question, *repair_turns(*broken)])
+    feedback = repair_turns(*broken) if broken is not None else harden_turns(*weak) if weak is not None else None
+    if feedback is not None:
+        data, model = _answer(llm, [question, *feedback])
         if not str(data.get("codigo") or "").strip():
             data, model = _answer(llm, [question])
     else:

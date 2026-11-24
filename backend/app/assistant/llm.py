@@ -30,6 +30,9 @@ EMBED_BATCH = 100
 TIMEOUT_S = 60
 # Un 503 (alta demanda) suele pasar en segundos: se reintenta una vez el mismo modelo
 BUSY_RETRY_WAIT_S = 1.5
+# Sin streaming (trabajos en segundo plano, importar): dos reintentos más, a 1,5 s y 6 s; con streaming (el chat, alguien
+# esperando) se queda en uno
+BUSY_RETRY_FACTORS = (1, 4)
 
 GROQ_LABEL = "Groq · Llama 3.3"
 
@@ -143,14 +146,20 @@ class LLM:
         return models
 
     def _post(self, url: str, headers: dict, body: dict, provider: str) -> httpx.Response:
-        """POST con un reintento si el modelo está saturado (503)."""
-        for attempt in (1, 2):
+        """
+        POST con dos reintentos si el modelo está saturado (503), esperando cada vez más. Con el modelo principal saturado
+        a ratos (3.8 Flash, nov 2026), un solo reintento de 1,5 s pasaba casi siempre al respaldo, que es más débil.
+        """
+        waits = [BUSY_RETRY_WAIT_S * f for f in BUSY_RETRY_FACTORS]
+        for attempt in range(len(waits) + 1):
             try:
                 res = self.http.post(url, headers=headers, json=body)
+            except httpx.TimeoutException as exc:
+                raise LlmError(f"{provider} tardó demasiado en responder") from exc
             except httpx.HTTPError as exc:
-                raise LlmError(f"No se pudo contactar a {provider}: {type(exc).__name__}") from exc
-            if res.status_code == 503 and attempt == 1:
-                time.sleep(BUSY_RETRY_WAIT_S)
+                raise LlmError(f"No se pudo contactar a {provider} (falla de red)") from exc
+            if res.status_code == 503 and attempt < len(waits):
+                time.sleep(waits[attempt])
                 continue
             _check(res, provider)
             return res

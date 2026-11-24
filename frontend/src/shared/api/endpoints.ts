@@ -55,6 +55,7 @@ export const EP = {
     expected: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/esperado`,
     write: (projectId: string) => `/api/projects/${projectId}/reglas/redactar`,
     answer: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/respuesta`,
+    contradiction: (projectId: string) => `/api/projects/${projectId}/reglas/contradiccion`,
     /** Mapa del proyecto (endpoints, modelos, roles) leído del código sin IA */
     map: (projectId: string) => `/api/projects/${projectId}/reglas/mapa`,
     /** Arnés de pruebas: GET / POST (proponer con IA) / PUT (editar) / DELETE */

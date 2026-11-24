@@ -199,7 +199,7 @@ export function precheckView(p: RulesPrecheck, form: RulesValidation | null): Pr
       tone: 'ok', uses: 'form', title: `${count(form)} escritas aquí`,
       detail: p.status === 'invalid'
         ? `${file?.path} del repositorio tiene errores: este análisis usará estas reglas corregidas. Súbelas al repositorio.`
-        : 'Se guardan en el proyecto. Descárgalas y súbelas al repositorio para que cuenten como entregable.',
+        : 'Se guardan en el proyecto y se usan en cada análisis.',
     }
   const app = p.uploaded?.valid ? p.uploaded : null
   if (p.status === 'invalid' && file)
@@ -210,9 +210,10 @@ export function precheckView(p: RulesPrecheck, form: RulesValidation | null): Pr
     return app
       ? { tone: 'neutral', uses: 'app', title: 'Este repo no declara reglas de negocio', detail: `Se usarán las cargadas en la app (${count(app)}).` }
       : {
-          tone: 'neutral', uses: null, title: 'Reglas de negocio: después de analizar',
-          detail: p.documents.length
-            ? `Encontré ${p.documents.length === 1 ? baseName(p.documents[0]) : `${p.documents.length} documentos de requisitos`}. Al terminar el análisis, en Configuración → Reglas el programa saca las reglas de ahí y solo te pregunta lo que no puede decidir.`
+          tone: 'neutral', uses: null,
+          title: p.documents.length && p.can_import ? 'Las reglas salen del documento de requisitos' : 'Reglas de negocio: después de analizar',
+          detail: p.documents.length && p.can_import
+            ? `Encontré ${p.documents.length === 1 ? baseName(p.documents[0]) : `${p.documents.length} documentos de requisitos`}. Al analizar, el programa saca las reglas y las guarda en el proyecto: no tienes que descargar ni subir nada.`
             : 'Al terminar el análisis, en Configuración → Reglas puedes subir el documento de requisitos: el programa saca las reglas y solo te pregunta lo que no puede decidir.',
         }
   return { tone: 'neutral', uses: app ? 'app' : null, title: 'No se pudieron revisar las reglas', detail: p.message }

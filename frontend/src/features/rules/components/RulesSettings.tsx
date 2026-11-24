@@ -8,6 +8,7 @@ import { baseName, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, saveText }
 import { useImportRules } from '../hooks/useImportRules'
 import { AutoVerifyCard } from './AutoVerifyCard'
 import { ConcordanceCard } from './ConcordanceCard'
+import { ContradictionsCard } from './ContradictionsCard'
 import { DocumentDropzone } from './DocumentDropzone'
 import { HarnessCard } from './HarnessCard'
 import { ImportNotice } from './ImportNotice'
@@ -15,12 +16,23 @@ import { RuleTestsCard } from './RuleTestsCard'
 import { WriteRuleCard } from './WriteRuleCard'
 import { RulesApprovalTable } from './RulesApprovalTable'
 import { QuestionsCard } from './QuestionsCard'
+import { ReviewCard } from './ReviewCard'
 import { ResultStep, RulesStepper } from './RulesStepper'
 import { currentStep } from '../utils/steps'
 import { ValidationResult } from './ValidationResult'
 import { cn } from '@/shared/utils/cn'
 
 function Origin({ data }: { data: ProjectRules }) {
+  const open = data.contradictions?.length ?? 0
+  if (open)
+    return (
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone="brand">Guardadas en el proyecto</Chip>
+        <span className="text-sm text-slate-500">
+          El documento se contradice en {open === 1 ? 'un punto' : `${open} puntos`}: elige abajo cuál vale y sigues con las preguntas.
+        </span>
+      </p>
+    )
   if (data.active === 'repo' && data.repo)
     return (
       <p className="flex flex-wrap items-center gap-2">
@@ -37,7 +49,7 @@ function Origin({ data }: { data: ProjectRules }) {
       <p className="flex flex-wrap items-center gap-2">
         <Chip tone="brand">Corregidas en la app</Chip>
         <span className="text-sm text-slate-500">
-          El <code className="font-mono">{data.repo.path}</code> del repositorio tiene errores: el análisis usa las reglas corregidas aquí. Descárgalas y súbelas al repositorio.
+          El <code className="font-mono">{data.repo.path}</code> del repositorio tiene errores: el análisis usa las reglas corregidas aquí.
         </span>
       </p>
     )
@@ -45,13 +57,13 @@ function Origin({ data }: { data: ProjectRules }) {
     return (
       <p className="flex flex-wrap items-center gap-2">
         <Chip tone="brand">Cargadas en la app</Chip>
-        <span className="text-sm text-slate-500">No están en el repositorio: descárgalas y súbelas con un commit para que cuenten como entregable.</span>
+        <span className="text-sm text-slate-500">Guardadas en el proyecto: se usan en cada análisis, sin descargar ni subir nada.</span>
       </p>
     )
   return (
     <p className="flex flex-wrap items-center gap-2">
       <Chip>Sin reglas</Chip>
-      <span className="text-sm text-slate-500">{data.cloned ? 'El repositorio todavía no trae reglas: importa el documento de requisitos.' : 'Analiza el repositorio para saber si trae el archivo.'}</span>
+      <span className="text-sm text-slate-500">{data.cloned ? data.documents.length && data.can_import ? 'Todavía no hay reglas: el próximo análisis las saca solo del documento de requisitos, o sácalas ahora abajo.' : 'El repositorio todavía no trae reglas: sube el documento de requisitos.' : 'Analiza el repositorio para saber si trae el archivo.'}</span>
     </p>
   )
 }
@@ -70,7 +82,7 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     setText(done.content)
     setResult(done.validation)
     setNotice(done)
-    if (!done.validation.valid) setAdvanced(true)
+    if (!done.validation.valid && !done.contradictions.length) setAdvanced(true)
   })
   const fromDocument = (path: string) => {
     setReading(path)
@@ -114,6 +126,9 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
     importRules.mutate({ file, extra: { project_id: repoId } }, { onSettled: () => setReading(null) })
   }
 
+  // Lo único que falla son las contradicciones que marcó la importación: se guarda y se deciden con botones
+  const onlyContradictions = Boolean(notice?.contradictions.length) && text === notice?.content
+  const blocked = result?.valid === false && !onlyContradictions
   const dirty = Boolean(text.trim()) && text !== (data.uploaded?.content ?? data.repo?.content ?? '')
   const busy = validate.isPending || save.isPending || importRules.isPending
   // El archivo del repo es válido: gana a lo que se guarde aquí
@@ -161,19 +176,19 @@ function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
       {repoInvalid && (
         <p className="mb-3 text-sm text-slate-500">
           {data.uploaded ? 'Estas son las reglas corregidas que usa el análisis' : 'Corrige aquí el archivo y guárdalo en la app: el análisis usará esta versión'} mientras{' '}
-          <code className="font-mono">{data.repo?.path}</code> del repositorio siga con errores. Después descárgalo y súbelo al repositorio.
+          <code className="font-mono">{data.repo?.path}</code> del repositorio siga con errores.
         </p>
       )}
       {dirty && !fromRepo && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 px-3.5 py-2.5 text-sm text-brand-800 dark:text-brand-200">
           <span>Las reglas nuevas todavía no están guardadas: guárdalas para revisarlas y aprobarlas en la tabla.</span>
-          <Button onClick={() => save.mutate()} disabled={busy || result?.valid === false}>
+          <Button onClick={() => save.mutate()} disabled={busy || blocked}>
             {save.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="save" className="w-4 h-4" />}
             Guardar reglas
           </Button>
         </div>
       )}
-      {result?.valid === false && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">Las reglas tienen un error: corrígelo en «Avanzado» para poder guardarlas.</p>}
+      {blocked && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">Las reglas tienen un error: corrígelo en «Avanzado» para poder guardarlas.</p>}
       {/* El archivo .toml es un formato interno: queda en «Avanzado», cerrado salvo que haya un error que corregir */}
       <details open={advanced} onToggle={(e) => setAdvanced(e.currentTarget.open)} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
         <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">Avanzado: archivo {RULES_FILENAME}, plantilla y patrones</summary>
@@ -273,7 +288,7 @@ function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
 
   return (
     <div className="space-y-4">
-      <RulesStepper repoId={repoId} rules={rules} step={step} onStep={setStep} />
+      <RulesStepper repoId={repoId} rules={rules} step={step} onStep={setStep} contradictions={data.contradictions?.length ?? 0} />
       <div className={cn('space-y-4', show(0))}>
         <Card className="p-5">
           <h2 className="font-semibold mb-3">De dónde vienen las reglas</h2>
@@ -284,6 +299,7 @@ function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
             </p>
           )}
         </Card>
+        <ContradictionsCard repoId={repoId} data={data} />
         {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
         <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
       </div>
@@ -291,8 +307,9 @@ function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
         <QuestionsCard repoId={repoId} data={data} />
         <RulesApprovalTable repoId={repoId} data={data} />
       </div>
-      <div className={show(2)}>
+      <div className={cn('space-y-4', show(2))}>
         <AutoVerifyCard repoId={repoId} />
+        <ReviewCard repoId={repoId} />
       </div>
       <div className={show(3)}>
         <ResultStep repoId={repoId} />

@@ -144,8 +144,8 @@ def test_aprueba_solas_solo_las_pruebas_fuertes_que_coinciden_con_la_lectura(mon
 
     assert job.summary == preparar.DONE and not job.running
     assert fake.explained == ["RN-001", "RN-002", "RN-003", "RN-004"]
-    # RN-004 no coincidía: se escribió y corrió una vez más, y como sigue sin coincidir queda para el equipo con RN-003 (débil)
-    assert fake.generated == [["RN-004"]] and fake.ran == [["RN-004"]]
+    # RN-004 no coincidía y RN-003 era débil: se escribieron y corrieron una vez más; como siguen igual, quedan para el equipo
+    assert fake.generated == [["RN-003", "RN-004"]] and fake.ran == [["RN-003", "RN-004"]]
     assert fake.approved_tests == ["RN-001", "RN-002"]
     nota = {s.id: s.note for s in job.steps}
     assert nota["correr"] == "3 cumplen · 1 no cumplen · 0 con prueba rota"
@@ -203,11 +203,34 @@ def test_una_prueba_rota_se_escribe_de_nuevo_y_una_que_falla_y_coincide_se_aprue
     monkeypatch.setattr(preparar.db, "session", lambda path: _NoConn())
     job = preparar.Job(user_id="u1")
     asyncio.run(preparar._work(preparar.Flow(NS(database_path=""), "r1", job, llm=object())))
-    assert fake.generated == [["RN-004", "RN-005"]]
+    assert fake.generated == [["RN-003", "RN-004", "RN-005"]]
     # Rota no tenía lectura del código: se lee después de escribirla de nuevo
     assert fake.explained == ["RN-001", "RN-002", "RN-003", "RN-004", "RN-005"]
     assert fake.approved_tests == ["RN-001", "RN-002", "RN-005"]
     assert {s.id: s.note for s in job.steps}["revision"].startswith("3 aprobadas solas · 2 esperan tu revisión")
+
+
+def test_una_prueba_floja_se_endurece_y_si_ahora_falla_y_coincide_se_aprueba(monkeypatch):
+    # Prueba real con reservas-demo: dos reglas rotas pasaban porque sus pruebas eran flojas (no notaban los cambios al código)
+    fake = Rutas()
+    floja = next(r for r in fake.rows if r.id == "RN-003")
+    floja.crosscheck = NS(status="discrepa")
+
+    def generate(repo_id, body, *a):
+        fake.generated.append(body.ids)
+        if "RN-003" in body.ids:
+            # Reescrita viendo los cambios que no notó: ahora falla y la lectura del código ya decía que no se cumple
+            floja.test = _test("no_cumple", None)
+            floja.crosscheck = NS(status="coincide")
+
+    fake.generate_tests = generate
+    for name in ("rule_routes", "harness_routes", "test_routes"):
+        monkeypatch.setattr(preparar, name, fake)
+    monkeypatch.setattr(preparar.db, "session", lambda path: _NoConn())
+    job = preparar.Job(user_id="u1")
+    asyncio.run(preparar._work(preparar.Flow(NS(database_path=""), "r1", job, llm=object())))
+    assert fake.generated == [["RN-003", "RN-004"]]
+    assert fake.approved_tests == ["RN-001", "RN-002", "RN-003"]
 
 
 def test_quien_se_aprueba_solo():

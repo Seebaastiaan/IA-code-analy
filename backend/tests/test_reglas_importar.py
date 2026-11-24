@@ -40,8 +40,14 @@ class FakeLLM:
         self.second: list[dict] = []
         self.second_reply: dict = {"contradicciones": []}
         self.second_fail: LlmError | None = None
+        # Tercera pasada (sí o no por cada par sospechoso): tampoco cuenta en `calls`
+        self.third: list[dict] = []
+        self.third_reply: dict = {"pares": []}
 
     def answer(self, system: str, turns: list, schema: dict, on_delta=None) -> Answer:
+        if set(schema["properties"]) == {"pares"}:
+            self.third.append({"turns": turns})
+            return Answer(self.third_reply, "Gemini 3.5 Flash Lite")
         if set(schema["properties"]) == {"contradicciones"}:
             self.second.append({"turns": turns})
             if self.second_fail:
@@ -287,6 +293,39 @@ def test_la_segunda_pasada_encuentra_lo_que_la_primera_no(client, llm):
     assert importar_archivo(client, "Requisitos.pdf", PDF).json()["contradictions"] == ["RN-001 (§4.2) y RN-003 (§7.1): de la primera"]
 
 
+RN_COMISION = {"titulo": "Comisión bancaria en reembolsos", "descripcion": "En todo reembolso se descuenta una comisión del 10 %.", "severidad": "media", "fuente": "§7.2"}
+RN_100 = {"titulo": "Cancelar a tiempo reembolsa el 100 %", "descripcion": "Con 24 h o más de anticipación se reembolsa el 100 % del anticipo.", "severidad": "alta", "fuente": "§4.2"}
+RN_ANTICIPO = {"titulo": "Anticipo del 30 %", "descripcion": "Al reservar se paga un anticipo del 30 % del precio.", "severidad": "alta", "fuente": "§4.1"}
+RN_TARDE = {"titulo": "Cancelar tarde retiene el anticipo", "descripcion": "Con menos de 24 h el anticipo no se reembolsa.", "severidad": "alta", "fuente": "§4.3"}
+
+
+def test_pares_sospechosos_sin_ia():
+    # Corrida real (reservas-demo, modelo de respaldo): las dos pasadas no vieron que §4.2 choca con §7.2
+    rules = [RN_ANTICIPO, RN_100, RN_TARDE, RN_COMISION]
+    found = importar.suspects(rules)
+    assert (1, 3) in found
+    # Misma sección (§4.2 y §4.3 se complementan) o temas sin palabras en común (§4.1 y §7.2): no son sospechosos
+    assert (1, 2) not in found and (0, 3) not in found
+    # Ya marcados por otra pasada o de proceso: no se vuelven a preguntar
+    assert (1, 3) not in importar.suspects(rules, {(1, 3)})
+    assert importar.suspects([RN_100, {**RN_COMISION, "tipo": "proceso"}]) == []
+    # «pág. 4 · §3.2» es de la sección 3, no de la 4
+    assert importar._section("pág. 4 · §3.2") == "3" and importar._section("Escrita por el equipo") is None
+
+
+def test_la_tercera_pasada_pregunta_si_o_no_por_cada_par(client, llm):
+    llm.reply = {"reglas": [RN_100, RN_COMISION], "contradicciones": [], "dudas": []}
+    llm.third_reply = {"pares": [{"par": 1, "contradiccion": True, "motivo": "§4.2 reembolsa el 100 % y §7.2 descuenta 10 %"}, {"par": 9, "contradiccion": True, "motivo": "no existe"}]}
+    body = importar_archivo(client, "Requisitos.pdf", PDF).json()
+    assert body["contradictions"] == ["RN-001 (§4.2) y RN-002 (§7.2): §4.2 reembolsa el 100 % y §7.2 descuenta 10 %"]
+    assert not body["validation"]["valid"]
+    text = llm.third[0]["turns"][0].text
+    assert "Par 1:" in text and "A) §4.2" in text and "B) §7.2" in text
+    # Si la IA dice que no, no se marca
+    llm.third_reply = {"pares": [{"par": 1, "contradiccion": False, "motivo": ""}]}
+    assert importar_archivo(client, "Requisitos.pdf", PDF).json()["contradictions"] == []
+
+
 def test_si_falla_la_segunda_pasada_la_importacion_sigue(client, llm):
     llm.reply = {"reglas": [RN_24H, RN_48H], "contradicciones": [], "dudas": []}
     llm.second_fail = LlmError("caído")
@@ -418,6 +457,57 @@ def test_configuracion_importa_de_la_copia_del_proyecto(client, llm):
     assert client.get(f"/api/projects/{rid}/reglas").json()["uploaded"] is None
 
 
+@pytest.fixture
+def llm_del_analisis(settings, llm, monkeypatch) -> FakeLLM:
+    """El análisis usa la IA sin pasar por el endpoint: se le da la misma IA falsa."""
+    from app.projects import reglas_auto
+
+    settings.gemini_api_key = "clave"
+    monkeypatch.setattr(reglas_auto, "LLM", lambda _settings: llm)
+    return llm
+
+
+def test_al_analizar_saca_las_reglas_del_documento_y_las_guarda(client, llm_del_analisis):
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    assert job["status"] == "done", job
+    assert any("saqué 2 reglas de docs/Requisitos.docx" in line for line in job["logs"])
+    # El paso 10 no dice «sin reglas declaradas» mientras las saca del documento
+    assert any("reglas sacadas de docs/Requisitos.docx: entran en borrador" in line for line in job["logs"])
+    assert not any("sin reglas declaradas" in line for line in job["logs"])
+    project = client.get(f"/api/projects/{job['repo_id']}/reglas").json()
+    # Quedan en el proyecto, en borrador: nadie tuvo que descargarlas ni subirlas
+    assert project["active"] == "app" and project["uploaded"]["valid"]
+    assert [r["id"] for r in project["uploaded"]["rules"]] == ["RN-001", "RN-002"]
+    assert {r["status"] for r in project["uploaded"]["rules"]} == {"borrador"}
+    # El siguiente análisis no vuelve a leer el documento ni pisa lo guardado
+    wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    assert len(llm_del_analisis.calls) == 1
+
+
+def test_al_analizar_no_pisa_las_reglas_del_equipo(client, llm_del_analisis):
+    rid = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])["repo_id"]
+    propias = importar.build_toml("ana/api-pagos", "a mano", [RN_DECIMAL])
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": propias}).status_code == 200
+    wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    assert [r["title"] for r in client.get(f"/api/projects/{rid}/reglas").json()["uploaded"]["rules"]] == [RN_DECIMAL["titulo"]]
+
+
+def test_al_analizar_si_la_ia_falla_el_analisis_sigue(client, llm_del_analisis):
+    llm_del_analisis.fail = LlmError("saturado", kind="busy")
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    assert job["status"] == "done"
+    assert any("la IA no pudo leer docs/Requisitos.docx" in line for line in job["logs"])
+    assert client.get(f"/api/projects/{job['repo_id']}/reglas").json()["uploaded"] is None
+
+
+def test_al_analizar_con_contradicciones_las_guarda_para_decidir(client, llm_del_analisis):
+    llm_del_analisis.second_reply = {"contradicciones": [{"reglas": [1, 2], "motivo": "chocan"}]}
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    assert job["status"] == "done"
+    uploaded = client.get(f"/api/projects/{job['repo_id']}/reglas").json()["uploaded"]
+    assert uploaded is not None and "CONTRADICCI" in uploaded["content"]
+
+
 def test_proyecto_de_otro_equipo(client, llm):
     res = client.post("/api/reglas/importar", json={"project_id": "no-existe", "path": "docs/Requisitos.docx"})
     assert res.status_code == 404
@@ -498,3 +588,49 @@ def test_las_frases_omitidas_se_avisan_solo_si_estan_en_el_documento(client, llm
     body = importar_archivo(client, "Reglas.docx", docx(DOC_CITAS)).json()
     avisos = [d for d in body["doubts"] if d.startswith("Posible regla que no se extrajo")]
     assert avisos == ["Posible regla que no se extrajo: «Los pagos mayores a $1,000 requieren la aprobación de Finanzas»"]
+
+
+# ─── Contradicciones: el equipo elige con un botón, sin tocar el archivo ───
+
+RN_TERCERA = {"titulo": "Cancelar con 24 h reembolsa todo", "descripcion": "Reembolso completo.", "severidad": "media", "fuente": "§4.2"}
+
+
+def _con_contradicciones() -> str:
+    return importar.build_toml("ana/api-pagos", "Requisitos.pdf", [RN_LIMITE, RN_DECIMAL, RN_TERCERA], [(0, 1, "límite contra centavos"), (0, 2, "otra")])
+
+
+def test_resolver_contradiccion_quita_la_regla_que_no_vale():
+    text = _con_contradicciones()
+    assert [(c.a, c.b) for c in reglas.marked_contradictions(text)] == [("RN-001", "RN-002"), ("RN-001", "RN-003")]
+    # Gana RN-002: RN-001 se va y con ella su otra marca (RN-001 ↔ RN-003 ya no existe)
+    out = reglas.resolve_contradiction(text, "RN-001", "RN-002", "RN-002")
+    rs = reglas.parse(out)
+    assert [r.id for r in rs.rules] == ["RN-002", "RN-003"] and "CONTRADICCI" not in out
+    assert rs.project == "ana/api-pagos" and len(rs.rules[1].scenarios) == len(reglas.parse(importar.build_toml("x", "y", [RN_TERCERA])).rules[0].scenarios)
+
+
+def test_resolver_contradiccion_ambas_valen():
+    text = _con_contradicciones()
+    out = reglas.resolve_contradiction(text, "RN-002", "RN-001", "ambas")
+    assert [(c.a, c.b) for c in reglas.marked_contradictions(out)] == [("RN-001", "RN-003")]
+    out = reglas.resolve_contradiction(out, "RN-001", "RN-003", "RN-001")
+    assert [r.id for r in reglas.parse(out).rules] == ["RN-001", "RN-002"]
+    with pytest.raises(reglas.RulesError):
+        reglas.resolve_contradiction(out, "RN-001", "RN-002", "RN-001")
+
+
+def test_contradicciones_se_guardan_y_se_deciden_con_botones(client, llm):
+    rid = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])["repo_id"]
+    res = client.put(f"/api/projects/{rid}/reglas", json={"content": _con_contradicciones()})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["uploaded"]["valid"] is False
+    first = body["contradictions"][0]
+    assert first["a"]["title"] == RN_LIMITE["titulo"] and first["b"]["source"] == "§3.1" and first["reason"] == "límite contra centavos"
+    body = client.post(f"/api/projects/{rid}/reglas/contradiccion", json={"a": "RN-001", "b": "RN-002", "keep": "RN-001"}).json()
+    assert len(body["contradictions"]) == 1 and body["uploaded"]["valid"] is False
+    body = client.post(f"/api/projects/{rid}/reglas/contradiccion", json={"a": "RN-001", "b": "RN-003", "keep": "ambas"}).json()
+    assert body["contradictions"] == [] and body["uploaded"]["valid"] and [r["id"] for r in body["uploaded"]["rules"]] == ["RN-001", "RN-003"]
+    # Un archivo con otro error sigue rechazándose
+    assert client.put(f"/api/projects/{rid}/reglas", json={"content": _con_contradicciones().replace("[proyecto]", "[proyect]")}).status_code == 422
+    assert client.post(f"/api/projects/{rid}/reglas/contradiccion", json={"a": "RN-001", "b": "RN-003", "keep": "RN-001"}).status_code == 422

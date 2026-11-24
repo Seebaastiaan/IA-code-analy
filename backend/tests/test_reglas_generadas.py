@@ -240,6 +240,17 @@ def test_una_prueba_rota_se_corrige_con_el_error_de_su_corrida(mp, harness):
     assert g.kind == "prueba"
 
 
+def test_una_prueba_floja_se_endurece_con_los_cambios_que_no_noto(mp, harness):
+    # Corrida real (reservas-demo): la prueba del empalme pasaba aunque el código lo permitía; la de fuerza no notó el cambio
+    llm = FakeLLM(reply(hand_test("RN-002")))
+    anterior = "def test_rn002_viejo(como):\n    pass\n"
+    cambios = ["inventario/rutas_productos.py:40: `sku in vistos` → `sku not in vistos`"]
+    g = pruebas.generate(llm, INVENTARIO, mp, harness, RULES["RN-002"], weak=(anterior, cambios))
+    turns = llm.calls[0]
+    assert [t.role for t in turns] == ["user", "model", "user"] and "test_rn002_viejo" in turns[1].text
+    assert "también siguió pasando" in turns[2].text and "`sku not in vistos`" in turns[2].text and g.kind == "prueba"
+
+
 def test_si_dice_no_implementada_con_endpoints_que_existen_se_le_insiste(mp, harness):
     # Corrida real con Gemini: «no implementada» con POST /citas en el mapa y el código vacío; al insistir escribió la prueba
     vacia = reply("", endpoints=["POST /productos"], implementada=False, motivo="No encontré la validación")

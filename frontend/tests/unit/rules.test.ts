@@ -138,10 +138,12 @@ describe('revisión de reglas en Nuevo análisis', () => {
     expect(precheckView(check({ status: 'unavailable', message: 'Sin acceso' }), null)).toMatchObject({ tone: 'neutral', detail: 'Sin acceso' })
   })
 
-  it('sin archivo pero con documento de requisitos: avisa que las reglas se sacan en Configuración después de analizar', () => {
+  it('sin archivo pero con documento de requisitos: avisa que el análisis saca las reglas solo', () => {
     const docs = check({ documents: ['docs/Requerimientos.pdf'], can_import: true })
-    expect(precheckView(docs, null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Reglas de negocio: después de analizar' })
-    expect(precheckView(docs, null).detail).toContain('Encontré Requerimientos.pdf. Al terminar el análisis, en Configuración → Reglas')
+    expect(precheckView(docs, null)).toMatchObject({ tone: 'neutral', uses: null, title: 'Las reglas salen del documento de requisitos' })
+    expect(precheckView(docs, null).detail).toContain('Encontré Requerimientos.pdf. Al analizar, el programa saca las reglas')
+    // Sin IA no se puede: se dice dónde subirlo
+    expect(precheckView({ ...docs, can_import: false }, null).title).toBe('Reglas de negocio: después de analizar')
     expect(precheckView({ ...docs, documents: ['a.md', 'b.pdf'] }, null).detail).toContain('2 documentos de requisitos')
     // Sin documento: se dice dónde subirlo, sin plantilla ni TOML
     expect(precheckView({ ...docs, documents: [] }, null).detail).not.toMatch(/plantilla|toml/i)

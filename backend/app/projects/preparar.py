@@ -197,8 +197,11 @@ class Flow:
         except ApiError as exc:
             if exc.status != 503:
                 raise
-            self.unread.append(rule_id)
+            if rule_id not in self.unread:
+                self.unread.append(rule_id)
             return 0
+        if rule_id in self.unread:
+            self.unread.remove(rule_id)
         return 1
 
     def check(self) -> None:
@@ -356,9 +359,12 @@ class Flow:
         # prueba se escribe una vez más (solo las de la IA que nadie aprobó), se corre y se mide; la lectura se conserva
         # Las que se rompieron al preparar el escenario también: la IA la corrige con el error a la vista
         broken = {r.id for r in t.rules if r.test and r.test.run is not None and r.test.run.verdict == "prueba_rota"}
+        # Y las flojas: pasan, pero también pasaron con el código cambiado a propósito (así se escapaban reglas rotas); la IA
+        # la reescribe viendo esos cambios
+        weak = {r.id for r in t.rules if is_weak(r)}
         retry = [
             r.id for r in t.rules
-            if r.test and r.test.origin == "ia" and not r.test.approved and (r.crosscheck.status == "discrepa" or r.id in broken)
+            if r.test and r.test.origin == "ia" and not r.test.approved and (r.crosscheck.status == "discrepa" or r.id in broken or r.id in weak)
         ]
         if retry and t.can_generate and self.llm is not None:
             t = await self.second_try(retry)
@@ -408,6 +414,15 @@ class Flow:
             await self.until(lambda: rid in test_routes._busy)
             t = await self.tests()
         return t
+
+
+def is_weak(row) -> bool:
+    """Una prueba que pasa y que la prueba de fuerza dejó parcial o débil (no notó algún cambio a las líneas de la regla)."""
+    t = row.test
+    return (
+        t is not None and t.run is not None and t.run.verdict == "cumple"
+        and t.strength is not None and t.strength.status in ("parcial", "debil")
+    )
 
 
 def trusted_by_program(row) -> bool:

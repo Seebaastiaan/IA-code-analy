@@ -1,7 +1,7 @@
 import type { RulePreview } from '../types'
 
 export const FLOW_STEPS = [
-  { title: 'Importar', text: 'Sube el documento de requisitos y la IA saca las reglas.' },
+  { title: 'Importar', text: 'Al analizar, el programa saca las reglas del documento de requisitos del repo.' },
   { title: 'Preguntas y aprobación', text: 'Contesta Sí o No a lo ambiguo y aprueba las reglas. Solo lo aprobado se verifica.' },
   { title: 'Preparar todo', text: 'El programa prepara el entorno, escribe las pruebas y las corre.' },
   { title: 'Resultado', text: 'Analiza el repositorio y mira qué reglas se cumplen.' },
@@ -21,7 +21,13 @@ export function currentStep(rules: RulePreview[]): number {
 }
 
 /** Lo que el programa recomienda hacer ahora, en una frase y con el paso al que lleva. */
-export function nextAction(rules: RulePreview[]): { text: string; step: number; label: string } {
+export function nextAction(rules: RulePreview[], contradictions = 0): { text: string; step: number; label: string } {
+  if (contradictions > 0)
+    return {
+      text: `El documento se contradice en ${contradictions === 1 ? 'un punto' : `${contradictions} puntos`}: elige cuál regla vale.`,
+      step: 0,
+      label: 'Decidir',
+    }
   if (!rules.length) return { text: 'Empieza importando el documento de requisitos del proyecto.', step: 0, label: 'Importar' }
   const drafts = rules.filter(isDraft)
   const asking = drafts.filter(hasDoubts).length

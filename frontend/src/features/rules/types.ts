@@ -153,6 +153,21 @@ export interface ProjectRules {
   can_import: boolean
   /** Avisos de la última acción (reglas que no se pudieron aprobar y por qué) */
   messages?: string[]
+  /** Pares de reglas que el documento contradice: el equipo elige cuál vale */
+  contradictions?: Contradiction[]
+}
+
+export interface ContradictionSide {
+  id: string
+  title: string
+  description: string
+  source: string | null
+}
+
+export interface Contradiction {
+  a: ContradictionSide
+  b: ContradictionSide
+  reason: string
 }
 
 /** Archivo de reglas del repo: valid | invalid | missing. unavailable = no se pudo leer sin clonar (acceso, rama, GitHub) */

@@ -389,6 +389,20 @@ def broken_of(settings: Settings, repo_id: str, rule: reglas.BusinessRule) -> tu
     return row["code"], "\n".join(why) or str(run.get("detail") or "")
 
 
+def weak_of(settings: Settings, repo_id: str, rule: reglas.BusinessRule) -> tuple[str, list[str]] | None:
+    """(código, cambios que no notó) si la prueba actual pasa pero la prueba de fuerza la dejó parcial o débil."""
+    with db.session(settings.database_path) as conn:
+        row = RuleTestsStore(conn).get(repo_id, rule.id)
+    if row is None or row["kind"] != "prueba" or row["rule_hash"] != pruebas.rule_hash(rule) or not row["strength_result"]:
+        return None
+    if row["strength_status"] != "hecho" or row["strength_hash"] != arnes.code_hash(row["code"]):
+        return None
+    result = fuerza.loads(row["strength_result"])
+    if result is None or result.status not in ("parcial", "debil") or not result.survivors:
+        return None
+    return row["code"], [f"{s.file}:{s.line}: {s.description}" for s in result.survivors]
+
+
 async def _generate(settings: Settings, repo_id: str, llm: LLM, ids: list[str], user_id: str) -> None:
     busy = _busy[repo_id]
     messages: list[str] = []
@@ -404,7 +418,9 @@ async def _generate(settings: Settings, repo_id: str, llm: LLM, ids: list[str], 
             if rule is None or ctx.harness is None:
                 continue
             try:
-                g = await asyncio.to_thread(pruebas.generate, llm, ctx.ws.root, mp, ctx.harness, rule, allowed, broken_of(settings, repo_id, rule))
+                broken = broken_of(settings, repo_id, rule)
+                weak = None if broken else weak_of(settings, repo_id, rule)
+                g = await asyncio.to_thread(pruebas.generate, llm, ctx.ws.root, mp, ctx.harness, rule, allowed, broken, weak)
             except pruebas.GenerationError as exc:
                 messages.append(f"{rid}: {exc}")
                 continue

@@ -5,6 +5,23 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
 ## [Sin publicar] — Reglas de negocio verificables (docs/PROPUESTA_REGLAS_VERIFICABLES.md)
 
 ### Agregado
+- Las reglas salen solas al analizar: si el repo no trae `reglas_negocio.toml` y el proyecto todavía no tiene reglas, el análisis
+  saca las reglas del documento de requisitos del repo (PDF o Word, `docs/` primero) mientras corren los analizadores y las
+  guarda en el proyecto, en borrador (`app/projects/reglas_auto.py`). Ya no hay que descargar el archivo ni subirlo en
+  Configuración; nunca pisa lo que el equipo guardó y, si la IA falla, el análisis sigue y lo dice en la terminal. La app ya no
+  pide «descárgalas y súbelas al repo».
+- Contradicciones del documento con botones: en Configuración → Reglas, «El documento se contradice: ¿cuál vale?» muestra las
+  dos reglas y se elige «Vale RN-…» (la otra se quita) o «Las dos valen» (`POST /api/projects/{id}/reglas/contradiccion`). Las
+  reglas importadas con contradicciones ya se guardan en el proyecto y no hay que tocar el archivo en «Avanzado».
+- «Preparar todo» endurece las pruebas flojas: si una prueba pasa pero no notó algún cambio a propósito en el código de la regla,
+  la IA la reescribe viendo esos cambios (con reservas-demo, dos reglas rotas pasaban por pruebas flojas).
+- «Esperan tu revisión» en Configuración → Reglas (paso «Preparar todo»): una fila por prueba que el programa no aprobó solo, con
+  lo que dice, por qué no se aprobó sola, qué conviene hacer y «Aprobar» en un clic (o «Aprobar las recomendadas»).
+- El importador busca contradicciones sin depender de que la IA las vea en la lista entera: elige los pares sospechosos (secciones
+  distintas, cantidades de la misma clase que no coinciden y el mismo tema) y pregunta sí o no por cada uno. Con el modelo de
+  respaldo ahora marca §4.2 ↔ §7.2 de reservas-demo, que antes se le pasaba.
+- Con Gemini saturado (503), los trabajos sin streaming reintentan dos veces con espera creciente antes de pasar al modelo de
+  respaldo; un tiempo agotado o una falla de red se dicen en español.
 - Revisión en Chrome del flujo completo con reservas-demo: «Preparar todo» guarda su avance (se ve tras reiniciar el servidor
   y, si se cortó, ofrece «Reintentar»); una lectura del código que agota el tiempo de Gemini ya no detiene el paso; la franja
   «Siguiente» dice qué hacer durante y después de «Preparar todo»; «Analizar de nuevo» analiza el mismo repo; el reporte explica
