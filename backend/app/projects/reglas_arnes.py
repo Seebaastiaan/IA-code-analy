@@ -54,21 +54,47 @@ def preparar(condicion: bool, motivo: str) -> None:
 
 
 class Reloj:
-    """Hora controlada: `reloj.ir_a(datetime(2026, 12, 1, 9))`, `reloj.avanzar(hours=2)`."""
+    """
+    Hora controlada: `reloj.ir_a(datetime(2026, 12, 1, 9))`, `reloj.avanzar(hours=2)`. Con `sistema=True` también mueve
+    `date.today()` y `datetime.now()` (time_machine), para proyectos que leen la hora del sistema sin una función propia;
+    entonces el fixture llama `reloj.detener()` al terminar.
+    """
 
-    def __init__(self, momento):
+    def __init__(self, momento, sistema: bool = False):
         self.momento = momento
+        self._viaje = self._destino = None
+        if sistema:
+            import time_machine
+
+            self._viaje = time_machine.travel(self._local(momento), tick=False)
+            self._destino = self._viaje.start()
 
     def ahora(self):
         return self.momento
 
     def ir_a(self, momento) -> None:
         self.momento = momento
+        if self._destino is not None:
+            self._destino.move_to(self._local(momento))
 
     def avanzar(self, **delta) -> None:
         from datetime import timedelta
 
-        self.momento += timedelta(**delta)
+        self.ir_a(self.momento + timedelta(**delta))
+
+    @staticmethod
+    def _local(momento):
+        """Una fecha o una hora sin zona se toma como hora LOCAL (time_machine la tomaría como UTC y cambiaría el día)."""
+        from datetime import date, datetime, time
+
+        if not isinstance(momento, datetime) and isinstance(momento, date):
+            momento = datetime.combine(momento, time(12))
+        return momento.astimezone() if isinstance(momento, datetime) and momento.tzinfo is None else momento
+
+    def detener(self) -> None:
+        if self._viaje is not None:
+            self._viaje.stop()
+            self._viaje = self._destino = None
 '''
 
 HEADER = '''"""
@@ -127,7 +153,11 @@ Escribe el cuerpo de un `conftest.py` de pytest con estos fixtures de NOMBRE FIJ
   (`itertools.count`), para que una prueba pueda crear varios.
 - Si el mapa tiene usos de la hora: `reloj`, que devuelve un `Reloj(datetime(2026, 12, 1, 8, 0))` (la clase que ya
   existe, no otra) y con `monkeypatch` sustituye la función del proyecto que da la hora (la que señala el mapa) por
-  `reloj.ahora`.
+  `reloj.ahora`. Si el proyecto NO tiene una función propia y llama directo a `date.today()`, `datetime.now()` o
+  `timezone.now()` (así lo marca el mapa en `time`), crea `Reloj(datetime(2026, 12, 1, 8, 0), sistema=True)`, entrégalo
+  con `yield` y llama `reloj.detener()` después, SIN sustituir `date` ni `datetime` con monkeypatch: así también se mueve
+  la hora del sistema (con f1-pitwall el reloj no
+  controlaba `date.today()` y una prueba de «eventos ya corridos» falló sin que el código tuviera la culpa).
 - Si el mapa tiene correo, SMS o push: `buzon`, una lista donde `monkeypatch` guarda lo que la app "envió" (sustituye la
   función del proyecto que entrega el mensaje). Nunca se envía nada de verdad.
 - Si el mapa tiene pagos o HTTP a terceros: `pagos`, una lista donde se guardan los cobros y reembolsos que la app pidió
@@ -254,6 +284,19 @@ def code_checks(tree: ast.Module, project_map: mapa.ProjectMap, allowed: set[str
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for a in node.names:
                 imported.setdefault(a.asname or a.name.split(".")[0], node.lineno)
+    # Reemplazar la clase `date`/`datetime` de un módulo por el reloj rompe `date.fromisoformat`, `date(…)`… (f1-pitwall):
+    # para la hora del sistema está `Reloj(…, sistema=True)`
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and mapa._name(node.func).endswith("setattr") and node.args:
+            target = node.args[0]
+            names = [target.value] if isinstance(target, ast.Constant) and isinstance(target.value, str) else []
+            if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+                names.append(node.args[1].value)
+            if any(n.rsplit(".", 1)[-1] in ("date", "datetime") for n in names):
+                errors.append(
+                    f"línea {node.lineno}: no reemplaces `date` ni `datetime` del proyecto con monkeypatch (rompe `date.fromisoformat`, "
+                    "`date(…)`); si el proyecto lee la hora del sistema, usa `Reloj(…, sistema=True)`"
+                )
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in imported:
             errors.append(
@@ -712,7 +755,10 @@ def context_files(root: Path, project_map: mapa.ProjectMap) -> list[str]:
 HTML_NOTE = (
     "La app responde PÁGINAS HTML con formularios (no JSON): crea los datos de los `crear_*` directo en la base temporal "
     "(devuelve un dict con el id y los campos) y expón en `sesiones` una conexión o fábrica de sesiones a la MISMA base "
-    "que usa la app en la prueba: las pruebas comprueban ahí si algo se guardó, porque un rechazo no llega como 4xx."
+    "que usa la app en la prueba: las pruebas comprueban ahí si algo se guardó, porque un rechazo no llega como 4xx. "
+    "Si usa Flask-WTF, desactiva el CSRF en la configuración de prueba (`WTF_CSRF_ENABLED=False`); si usa Flask-Login o "
+    "sesiones, `como(rol)` inicia sesión con el formulario de login de la app (o con `client.session_transaction()`) y "
+    "devuelve un cliente distinto por rol."
 )
 
 

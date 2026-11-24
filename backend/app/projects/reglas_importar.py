@@ -418,6 +418,55 @@ def add_time_doubts(rules: list[dict]) -> None:
             r["dudas"] = [*(r.get("dudas") or []), *extra]
 
 
+# ─── Dudas de límites que el documento ya contesta ───
+# Con f1-pitwall la IA preguntó «¿el 25 % incluye el valor exacto?» cuando el documento dice «25 % o más», y lo mismo con
+# «al menos el 50 %» y «del 1 al 99». Esas preguntas sobran: el texto ya dice si el límite entra.
+
+BOUNDARY_DOUBT = re.compile(r"\b(incluye|incluido|incluida|inclusiv\w*|exact\w*|extremos?)\b")
+BOUNDARY_UNITS = r"(?:\s*(?:por ciento|vueltas?|horas?|h|dias?|minutos?|min|semanas?|meses|mes|pesos|piezas?|unidades?|autos?|pilotos?|citas?|intentos?))?"
+
+
+# Palabras que ya dicen si el límite entra («al menos 50», «menos de 2», «hasta 3»)
+CLEAR_WORDS = (
+    r"(?:al menos|como minimo|como maximo|minimo de|maximo de|no mas de|no menos de|a lo sumo|hasta|mayor o igual a|"
+    r"menor o igual a|mas de|menos de|mayor que|menor que|mayor a|menor a)"
+)
+
+
+def _boundary_is_clear(n: str, text: str) -> bool:
+    """¿El texto (ya normalizado con `_fold`) dice si el límite `n` entra o no?"""
+    patterns = (
+        rf"\b{n}{BOUNDARY_UNITS}\s+o\s+(?:mas|menos)\b",
+        rf"\b{CLEAR_WORDS}\s+(?:el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?{n}\b",
+        rf"\bdel?\s+{n}\s+al?\s+(?:el\s+)?\d+\b",
+        rf"\bdel?\s+\d+\s+al?\s+(?:el\s+)?{n}\b",
+    )
+    return any(re.search(p, text) for p in patterns)
+
+
+def answered_boundary_doubts(rule: dict) -> list[str]:
+    """Las dudas de la regla sobre si un límite entra que su cita o su descripción ya contestan («25 % o más»)."""
+    text = _fold(" ".join(str(rule.get(k) or "") for k in ("cita", "descripcion", "titulo")))
+    out = []
+    for doubt in rule_doubts(rule):
+        folded = _fold(doubt)
+        if not BOUNDARY_DOUBT.search(folded):
+            continue
+        # Los números de la pregunta, sin la explicación «(Sí = …; No = …)» y sin decimales en cero («25.0» es 25)
+        question = re.sub(r"\((?:s[ií]|no)\s*=.*", "", doubt, flags=re.IGNORECASE)
+        numbers = re.findall(r"\b\d+\b", _fold(re.sub(r"(\d+)[.,]0+\b", r"\1", question)))
+        if numbers and all(_boundary_is_clear(n, text) for n in dict.fromkeys(numbers)):
+            out.append(doubt)
+    return out
+
+
+def drop_answered_boundary_doubts(rules: list[dict]) -> None:
+    for r in rules:
+        drop = set(answered_boundary_doubts(r))
+        if drop:
+            r["dudas"] = [d for d in r.get("dudas") or [] if not (isinstance(d, str) and _clean(d, reglas.MAX_DOUBT) in drop)]
+
+
 def _clean(value: object, limit: int) -> str:
     """Texto de una sola línea (TOML básico), sin caracteres de control y recortado a `limit`."""
     text = " ".join(CONTROL.sub("", str(value or "")).split())
@@ -714,6 +763,7 @@ def extract(llm: LLM, project: str, name: str, data: bytes) -> Imported:
     document = document_text(name, data)
     check_quotes(rules, document)
     add_time_doubts(rules)
+    drop_answered_boundary_doubts(rules)
     skipped = omitted(answer, document)
     pairs = _contradictions(answer, rules, kept, reglas.MAX_RULES)
     general = [d for d in (_clean(x, 300) for x in answer.get("dudas") or []) if d]

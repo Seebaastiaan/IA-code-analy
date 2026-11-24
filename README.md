@@ -83,7 +83,7 @@ para usar el backend simulado (MSW) con la cuenta de prueba.
 |---|---|
 | [backend/](backend) | API FastAPI + SQLite (detalle en [backend/README.md](backend/README.md)) |
 | [frontend/](frontend) | React 19 + Vite + Tailwind, por módulos (`app → features → shared`) |
-| [docs/](docs) | Especificación y estructura del frontend, ADRs y documentación técnica; [repos de prueba](docs/repos-de-prueba.md) |
+| [docs/](docs) | Especificación y estructura del frontend, ADRs y documentación técnica; [repos de prueba](docs/repos-de-prueba.md); [guía de reglas de negocio](docs/GUIA_REGLAS_DE_NEGOCIO.md) |
 | [ia_voy_prototipo.html](ia_voy_prototipo.html) | Wireframes navegables originales |
 
 ## Equipos

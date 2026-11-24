@@ -641,3 +641,27 @@ def test_contradicciones_se_guardan_y_se_deciden_con_botones(client, llm):
     # Un archivo con otro error sigue rechazándose
     assert client.put(f"/api/projects/{rid}/reglas", json={"content": _con_contradicciones().replace("[proyecto]", "[proyect]")}).status_code == 422
     assert client.post(f"/api/projects/{rid}/reglas/contradiccion", json={"a": "RN-001", "b": "RN-003", "keep": "RN-001"}).status_code == 422
+
+
+def test_dudas_de_limites_que_el_documento_ya_contesta():
+    """f1-pitwall: «25 % o más», «al menos el 50 %» y «del 1 al 99» ya dicen si el límite entra; no se pregunta."""
+    regla = lambda cita, duda: {"titulo": "t", "descripcion": "d", "cita": cita, "dudas": [duda]}
+    sobran = [
+        regla("con 25 % o más de la distancia, 13-10-8", "¿El límite de distancia de 25% incluye exactamente el valor? (Sí = 25.0% otorga el tramo mayor)"),
+        regla("si el líder completó al menos el 50 % de la distancia", "¿El umbral del 50% incluye exactamente el valor obtenido?"),
+        regla("El número de piloto va del 1 al 99 y no se repite.", "¿El rango del 1 al 99 incluye los extremos exactos?"),
+        regla("Máximo 3 citas activas; como máximo 3 por cliente", "¿El límite de 3 citas incluye el valor exacto?"),
+    ]
+    for r in sobran:
+        assert importar.answered_boundary_doubts(r) == r["dudas"], r
+    quedan = [
+        regla("se reserva con 2 horas de anticipación", "¿La anticipación de 2 horas incluye el valor exacto?"),
+        regla("entre 1 y 99", "¿El rango del 1 al 99 incluye los extremos?"),
+        regla("con 25 % o más", "¿Una cita pasada cuenta dentro de las tres activas?"),
+        regla("al menos el 50 %", "¿El 50 % y el 75 % incluyen el valor exacto?"),
+    ]
+    for r in quedan:
+        assert importar.answered_boundary_doubts(r) == [], r
+    rules = [dict(sobran[0]), dict(quedan[0])]
+    importar.drop_answered_boundary_doubts(rules)
+    assert rules[0]["dudas"] == [] and rules[1]["dudas"] == quedan[0]["dudas"]

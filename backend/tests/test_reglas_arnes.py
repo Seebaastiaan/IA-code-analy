@@ -567,3 +567,40 @@ def test_el_validador_avisa_de_nombres_sin_importar():
     ok = ast.parse("from typing import Any\ntry:\n    pass\nexcept ValueError as exc:\n    print(exc)\nwith open('f') as fh:\n    pass\nlambda q: q\n")
     assert arnes.undefined_names(ok) == []
     assert arnes.undefined_names(ast.parse("from x import *\nfoo()\n")) == []
+
+
+def test_reloj_mueve_la_hora_del_sistema_si_se_pide():
+    """f1-pitwall lee `date.today()` directo: el reloj del arnés tiene que mover también la hora del sistema."""
+    pytest.importorskip("time_machine")
+    from datetime import date, datetime
+
+    ns: dict = {}
+    exec(arnes.BASE, ns)  # noqa: S102 — el preámbulo fijo del arnés, escrito por IA voy
+    real = date.today()
+    reloj = ns["Reloj"](datetime(2030, 3, 4, 8, 0), sistema=True)
+    try:
+        assert date.today() == date(2030, 3, 4)
+        reloj.ir_a(date(2031, 1, 5))
+        assert date.today() == date(2031, 1, 5) and datetime.now().date() == date(2031, 1, 5)
+        reloj.avanzar(days=1)
+        assert date.today() == date(2031, 1, 6)
+    finally:
+        reloj.detener()
+    assert date.today() == real
+    # Sin `sistema`, como siempre: solo la hora que el proyecto pide a su propia función
+    solo = ns["Reloj"](datetime(2030, 3, 4, 8, 0))
+    solo.avanzar(hours=2)
+    assert solo.ahora() == datetime(2030, 3, 4, 10, 0) and date.today() == real
+    assert "sistema=True" in arnes.SYSTEM
+
+
+def test_no_se_reemplaza_date_del_proyecto():
+    """f1-pitwall: el arnés hizo `monkeypatch.setattr("app.reglas.date", reloj)` y `date.fromisoformat` dejó de existir."""
+    import ast
+
+    mp = mapa.ProjectMap()
+    malo = 'def f(monkeypatch, reloj):\n    monkeypatch.setattr("app.reglas.date", reloj)\n    monkeypatch.setattr(reglas_app, "datetime", reloj)\n'
+    errors, _ = arnes.code_checks(ast.parse(malo), mp)
+    assert sum("no reemplaces `date`" in e for e in errors) == 2
+    bueno = 'def f(monkeypatch, reloj):\n    monkeypatch.setattr("app.reloj.ahora", reloj.ahora)\n'
+    assert not any("no reemplaces" in e for e in arnes.code_checks(ast.parse(bueno), mp)[0])

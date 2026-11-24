@@ -15,6 +15,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   caso válido que sí se guarda y usan las claves exactas que acepta el código (sus constantes en MAYÚSCULAS van en el prompt). Una
   prueba que decide un rechazo con `assert r.status_code` se rechaza y se reescribe. Con `iTsS4ma/f1-pitwall` (11 reglas, todas
   cumplidas según las 43 pruebas del autor) se pasó de 0 cumplen · 8 no cumplen a 8 cumplen · 0 no cumplen.
+- El reloj de las pruebas mueve también la hora del sistema (`Reloj(…, sistema=True)`, time_machine en hora local) para proyectos que leen `date.today()` sin función propia; el arnés ya no puede reemplazar `date`/`datetime` del proyecto.
+- La importación quita sin IA las dudas de límites que el documento ya contesta («25 % o más», «al menos el 50 %», «del 1 al 99»).
+- Guía para el equipo: `docs/GUIA_REGLAS_DE_NEGOCIO.md` (cómo se usa, con qué repos sí y no, cómo saber si el resultado está bien).
 - En `docs/` cuenta cualquier PDF o Word como documento de requisitos («Documentacion.pdf» no se detectaba).
 - Una prueba de la IA que dice «no cumple» ya no se aprueba sola si el repo trae sus propias pruebas de esa regla; «Esperan tu
   revisión» lo dice.
