@@ -48,6 +48,18 @@ def test_repos_de_otro_equipo_son_invisibles(client, other, settings):
     assert other.get("/api/repos").json() == []
 
 
+def test_solo_el_dueno_del_equipo_puede_quitar_un_repositorio(client, other, settings):
+    repo_id = seed("ana", settings)
+    path = f"/api/repos/{repo_id}"
+    assert other.delete(path).status_code == 404
+    other.post("/api/team/join", json={"code": invite(client)})
+    denied = other.delete(path)
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "not_owner"
+    assert client.delete(path).status_code == 204
+    assert other.get("/api/repos").json() == []
+    assert other.get("/api/team").json()["repos"] == 0
+
+
 def test_unirse_comparte_repos_y_analisis(client, other, settings):
     repo_id = seed("ana", settings)
     code = invite(client)

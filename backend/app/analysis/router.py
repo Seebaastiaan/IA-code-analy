@@ -15,7 +15,7 @@ from app.auth import current_user_id
 from app.config import Settings, get_settings
 from app.db import connect, get_db
 from app.errors import ApiError
-from app.teams.store import team_id_of
+from app.teams.store import membership, team_id_of
 
 router = APIRouter(tags=["analysis"])
 
@@ -92,9 +92,8 @@ def _start(
         if jobs.running_for_repo(conn, repo_id):
             raise ApiError(409, "already_running", "Ya hay un análisis en curso para este repositorio")
         conn.execute("UPDATE repos SET status = 'analizando', error = NULL, branch = ?, url = ? WHERE id = ?", (branch, url, repo_id))
-    conn.commit()
     return jobs.start(
-        settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, _latest_cat(conn, repo_id),
+        conn, settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, _latest_cat(conn, repo_id),
         sandbox=sandbox, analyzers=chosen, index=index,
     )
 
@@ -112,7 +111,10 @@ def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: s
 
 @router.post("/api/analyze", response_model=JobStarted)
 async def analyze(body: AnalyzeRequest, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> JobStarted:
-    job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers), index=body.index)
+    membership(conn, user_id)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers), index=body.index)
     return JobStarted(job_id=job.id)
 
 
@@ -129,12 +131,17 @@ def cancel_job(job_id: str, user_id: UserId, jobs: Jobs, settings: Config, conn:
 
 @router.post("/api/jobs/{job_id}/retry", response_model=JobStarted)
 async def retry_job(job_id: str, user_id: UserId, jobs: Jobs, settings: Config, conn: Db) -> JobStarted:
-    job = _own_job(conn, jobs, job_id, user_id)
-    if job.status == "running":
-        raise ApiError(409, "already_running", "El análisis sigue en curso")
-    if job.status == "done":
-        raise ApiError(409, "already_done", "El análisis ya terminó; inicia uno nuevo")
-    jobs.retry(settings, job)
+    membership(conn, user_id)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        job = _own_job(conn, jobs, job_id, user_id)
+        if job.status == "running":
+            raise ApiError(409, "already_running", "El análisis sigue en curso")
+        if job.status == "done":
+            raise ApiError(409, "already_done", "El análisis ya terminó; inicia uno nuevo")
+        if jobs.running_for_repo(conn, job.repo_id):
+            raise ApiError(409, "already_running", "Ya hay un análisis en curso para este repositorio")
+        jobs.retry(conn, settings, job)
     return JobStarted(job_id=job.id)
 
 
@@ -186,13 +193,16 @@ async def job_socket(ws: WebSocket, job_id: str, jobs: Jobs, settings: Config) -
 
 @router.post("/api/repos/{repo_id}/analyze", response_model=JobStarted)
 async def reanalyze(repo_id: str, user_id: UserId, conn: Db, jobs: Jobs, settings: Config) -> JobStarted:
-    repo = conn.execute("SELECT * FROM repos WHERE id = ? AND team_id = ?", (repo_id, team_id_of(conn, user_id))).fetchone()
-    if repo is None:
-        raise ApiError(404, "not_found", "Repositorio no encontrado")
-    # Mismos analizadores que el último análisis del repo
-    last = conn.execute("SELECT analyzers FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
-    analyzers = json.loads(last["analyzers"] or "[]") if last else []
-    return JobStarted(job_id=_start(conn, jobs, settings, user_id, repo["url"], repo["branch"], analyzers=analyzers).id)
+    membership(conn, user_id)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        repo = conn.execute("SELECT * FROM repos WHERE id = ? AND team_id = ?", (repo_id, team_id_of(conn, user_id))).fetchone()
+        if repo is None:
+            raise ApiError(404, "not_found", "Repositorio no encontrado")
+        # Mismos analizadores que el último análisis del repo
+        last = conn.execute("SELECT analyzers FROM reports WHERE repo_id = ? ORDER BY num DESC LIMIT 1", (repo_id,)).fetchone()
+        analyzers = json.loads(last["analyzers"] or "[]") if last else []
+        return JobStarted(job_id=_start(conn, jobs, settings, user_id, repo["url"], repo["branch"], analyzers=analyzers).id)
 
 
 def sandbox_service(settings: Settings) -> dict:

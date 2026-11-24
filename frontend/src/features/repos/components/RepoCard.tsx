@@ -5,13 +5,21 @@ import { CATEGORIES } from '@/shared/types/common'
 import { Card, Icon, ProgressBar, ScoreRing, Spinner, StatusChip, buttonClass } from '@/shared/ui'
 import { timeAgo } from '@/shared/utils/format'
 import { useReanalyze } from '../hooks/useReanalyze'
+import { useRemoveRepo } from '../hooks/useRemoveRepo'
 import type { Repo } from '../types'
 
-export function RepoCard({ repo }: { repo: Repo }) {
+export function RepoCard({ repo, canRemove }: { repo: Repo; canRemove: boolean }) {
   const reanalyze = useReanalyze()
+  const remove = useRemoveRepo()
+
+  function confirmRemoval() {
+    if (window.confirm(`¿Quitar ${repo.name} del analizador? Se eliminarán sus análisis, enlaces compartidos y copias locales para todo el equipo. El repositorio seguirá disponible en GitHub.`)) {
+      remove.mutate(repo)
+    }
+  }
 
   return (
-    <Card className="p-5 flex flex-col">
+    <Card className="min-w-0 p-5 flex flex-col">
       <div className="flex items-start gap-3">
         <span className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 grid place-items-center text-slate-500">
           <Icon name="folder" />
@@ -23,7 +31,21 @@ export function RepoCard({ repo }: { repo: Repo }) {
             {repo.branch} · {repo.files} archivos .py
           </p>
         </div>
-        <StatusChip status={repo.status} />
+        <div className="flex shrink-0 items-center gap-1">
+          <StatusChip status={repo.status} />
+          {canRemove && (
+            <button
+              type="button"
+              onClick={confirmRemoval}
+              disabled={repo.status === 'analizando' || reanalyze.isPending || remove.isPending}
+              className={buttonClass('ghost', 'px-2 hover:text-rose-600 dark:hover:text-rose-400 focus-visible:ring-2 focus-visible:ring-rose-500')}
+              title={repo.status === 'analizando' ? 'Espera a que termine el análisis o cancélalo' : 'Quitar del analizador'}
+              aria-label={`Quitar ${repo.name} del analizador`}
+            >
+              {remove.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="trash" className="w-4 h-4" />}
+            </button>
+          )}
+        </div>
       </div>
 
       {repo.status === 'analizando' ? (
@@ -62,7 +84,7 @@ export function RepoCard({ repo }: { repo: Repo }) {
             </Link>
           )}
           {repo.status !== 'analizando' && (
-            <button type="button" onClick={() => reanalyze.mutate(repo)} disabled={reanalyze.isPending} className={buttonClass('ghost')} title="Re-analizar" aria-label={`Re-analizar ${repo.name}`}>
+            <button type="button" onClick={() => reanalyze.mutate(repo)} disabled={reanalyze.isPending || remove.isPending} className={buttonClass('ghost')} title="Re-analizar" aria-label={`Re-analizar ${repo.name}`}>
               <Icon name="refresh" className="w-4 h-4" />
             </button>
           )}

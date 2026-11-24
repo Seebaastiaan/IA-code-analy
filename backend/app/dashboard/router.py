@@ -1,13 +1,21 @@
 """Tablero y lista de repositorios (docs/FRONTEND_SPEC.md §5.2, §5.4 y §6.2)."""
 
-from fastapi import APIRouter, Query
+import logging
+
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel
 
 from app.analyses.access import Analyses, Jobs, UserId, require_repo
 from app.analyses.schemas import Finding, Repo, Scores, Thresholds
 from app.analyses.store import AnalysisStore
 from app.analyses.views import finding_view, repo_view, report_scores, scores, visible
+from app.analyses.workspace import Workspace
+from app.analysis.clone import remove_tree
+from app.analysis.router import Config
+from app.errors import ApiError
+from app.teams.store import delete_repo, membership, remove_repo_clones
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["tablero"])
 
 HISTORY_POINTS = 7
@@ -79,6 +87,27 @@ def dashboard(store: Analyses, user_id: UserId, jobs: Jobs, repo: str | None = Q
 @router.get("/repos", response_model=list[Repo])
 def list_repos(store: Analyses, user_id: UserId, jobs: Jobs) -> list[Repo]:
     return [repo_view(store, jobs, r) for r in store.repos(user_id)]
+
+
+@router.delete("/repos/{repo_id}", status_code=204)
+def remove_repo(repo_id: str, store: Analyses, user_id: UserId, jobs: Jobs, settings: Config) -> Response:
+    """Quita el repositorio del equipo y elimina su historial de análisis."""
+    conn = store.conn
+    membership(conn, user_id)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        require_repo(store, user_id, repo_id)
+        if membership(conn, user_id)["role"] != "owner":
+            raise ApiError(403, "not_owner", "Solo quien administra el equipo puede quitar repositorios")
+        if jobs.running_for_repo(conn, repo_id):
+            raise ApiError(409, "already_running", "Espera a que termine el análisis o cancélalo antes de quitar el repositorio")
+        delete_repo(conn, repo_id)
+    remove_repo_clones(settings, repo_id)
+    try:
+        remove_tree(Workspace(settings, repo_id).backup_root)
+    except OSError:
+        log.warning("No se pudieron limpiar los respaldos del repositorio %s", repo_id, exc_info=True)
+    return Response(status_code=204)
 
 
 @router.get("/repos/{repo_id}/history", response_model=list[HistoryPoint])

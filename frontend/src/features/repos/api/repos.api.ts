@@ -5,6 +5,7 @@ import type { ReanalyzeResponse, Repo, TreeEntry } from '../types'
 
 export const reposApi = {
   list: () => http.get<Repo[]>(EP.repos.list),
+  remove: (repoId: string) => http.delete<void>(EP.repos.remove(repoId)),
   reanalyze: (repoId: string) => http.post<ReanalyzeResponse>(EP.repos.analyze(repoId)),
   tree: (repoId: string) => http.get<TreeEntry[]>(EP.repos.tree(repoId)),
 }

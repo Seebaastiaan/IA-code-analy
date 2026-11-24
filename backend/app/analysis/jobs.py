@@ -32,7 +32,7 @@ from app.analyses.store import AnalysisStore
 from app.analyses.views import report_scores
 from app.analyses.workspace import Workspace
 from app.analysis import fake, languages, pipeline, sandbox
-from app.analysis.clone import CloneError, Cloner, clone_dir
+from app.analysis.clone import CloneError, Cloner, clone_dir, remove_tree
 from app.assistant.index import index_for_job
 from app.config import Settings
 from app.db import connect, session
@@ -138,16 +138,21 @@ class JobManager:
 
     def get(self, conn: sqlite3.Connection, job_id: str) -> Job | None:
         """El job, corra en este proceso o en otro. Uno interrumpido (sin latido) queda en error."""
-        if job_id in self._jobs:
-            return self._jobs[job_id]
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        row = conn.execute("SELECT j.* FROM jobs j JOIN repos r ON r.id = j.repo_id WHERE j.id = ?", (job_id,)).fetchone()
         if row is None:
+            self._jobs.pop(job_id, None)
             return None
+        if job_id in self._jobs:
+            job = self._jobs[job_id]
+            job.team_id = row["team_id"]
+            return job
         if _stale(row):
+            in_transaction = conn.in_transaction
             conn.execute("UPDATE jobs SET status = 'error', error = ? WHERE id = ? AND status = 'running'", (json.dumps(INTERRUPTED), job_id))
-            conn.commit()
+            if not in_transaction:
+                conn.commit()
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        return _from_row(row, "")
+        return _from_row(row, "") if row is not None else None
 
     def running_for_repo(self, conn: sqlite3.Connection, repo_id: str) -> Job | None:
         local = next((j for j in self._jobs.values() if j.repo_id == repo_id and j.status == "running"), None)
@@ -193,10 +198,14 @@ class JobManager:
         conn = connect(settings.database_path)
         try:
             job = self.get(conn, job_id)
+            if job is None:
+                return
             yield {"type": "snapshot", "job": job.public()}
             while job.status == "running":
                 await asyncio.sleep(REMOTE_POLL_S)
                 new = self.get(conn, job_id)
+                if new is None:
+                    return
                 for line in new.logs[len(job.logs):]:
                     yield {"type": "log", "line": line}
                 for i in range(job.step, new.step):
@@ -215,7 +224,7 @@ class JobManager:
     # ─── Ciclo de vida ───
 
     def start(
-        self, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, prev_cat: dict | None,
+        self, conn: sqlite3.Connection, settings: Settings, user_id: str, team_id: str, repo_id: str, url: str, name: str, branch: str, prev_cat: dict | None,
         sandbox: bool = True, analyzers: list[str] | None = None, index: bool = True,
     ) -> Job:
         seed = random.randrange(2**31)
@@ -224,26 +233,29 @@ class JobManager:
             seed=seed, cat=fake.next_categories(prev_cat, random.Random(seed)), db_path=settings.database_path,
             sandbox=sandbox, analyzers=list(analyzers or pipeline.ALL_ANALYZERS), index=index, logs=[f"$ ia-voy analyze {url} --branch {branch}"],
         )
-        self._conn(job.db_path).execute(
+        conn.execute(
             """INSERT INTO jobs (id, user_id, team_id, repo_id, url, name, branch, seed, cat, options, step, total, status, logs, heartbeat, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'running', ?, ?, ?)""",
             (job.id, user_id, team_id, repo_id, url, name, branch, seed, json.dumps(job.cat), json.dumps(job.options), job.total,
              json.dumps(job.logs, ensure_ascii=False), time.time(), now_iso()),
         )
-        self._conn(job.db_path).commit()
+        conn.commit()
         self._jobs[job.id] = job
         self._launch(settings, job)
         return job
 
-    def retry(self, settings: Settings, job: Job) -> Job:
+    def retry(self, conn: sqlite3.Connection, settings: Settings, job: Job) -> Job:
         """Reintenta en este proceso. Un job de otro worker (interrumpido) empieza de nuevo desde el clonado."""
         if not self.is_local(job):
             job.db_path = settings.database_path
             job.step = 0
             self._jobs[job.id] = job
+        conn.execute("UPDATE jobs SET status = 'running', heartbeat = ? WHERE id = ?", (time.time(), job.id))
+        conn.execute("UPDATE repos SET status = 'analizando', error = NULL WHERE id = ?", (job.repo_id,))
+        conn.commit()
+        job.status = "running"
         self._emit(job, {"type": "log", "line": "— Reintentando —"})
         job.started = time.monotonic()
-        _set_repo(settings, job.repo_id, "analizando", None)
         self._launch(settings, job)
         return job
 
@@ -271,7 +283,7 @@ class JobManager:
         while job.status == "running":
             await asyncio.sleep(HEARTBEAT_S)
             row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job.id,)).fetchone()
-            if row and row["status"] == "cancelled" and job.status == "running":
+            if (row is None or row["status"] == "cancelled") and job.status == "running":
                 job.status = "cancelled"
                 if job.task and not job.task.done():
                     job.task.cancel()
@@ -303,13 +315,37 @@ class JobManager:
         """Paso 1 real. Devuelve False si falló (el job queda en error)."""
         attempt = secrets.token_hex(4)
         token = _github_token(settings, job.user_id)
+        clone = asyncio.create_task(asyncio.to_thread(self.cloner.clone, settings, job.repo_id, job.url, job.branch, token, attempt))
         try:
-            result = await asyncio.to_thread(self.cloner.clone, settings, job.repo_id, job.url, job.branch, token, attempt)
+            result = await asyncio.shield(clone)
+        except asyncio.CancelledError:
+            def remove_attempt(finished: asyncio.Task) -> None:
+                if not finished.cancelled():
+                    finished.exception()
+                path = clone_dir(settings, f"{job.repo_id}.tmp-{attempt}")
+                try:
+                    remove_tree(path)
+                except OSError:
+                    log.warning("No se pudo limpiar el clonado temporal de %s", job.repo_id, exc_info=True)
+
+            clone.add_done_callback(remove_attempt)
+            raise
         except CloneError as err:
             self._fail(settings, job, err)
             return False
-        # Si se cancela aquí, el hilo de git termina solo y su carpeta temporal se limpia en el próximo clonado
-        await asyncio.to_thread(self.cloner.promote, settings, job.repo_id, attempt)
+        def promote() -> None:
+            try:
+                self.cloner.promote(settings, job.repo_id, attempt)
+            finally:
+                # El hilo puede terminar después de cancelar y eliminar el repo.
+                with session(settings.database_path) as conn:
+                    exists = conn.execute("SELECT 1 FROM repos WHERE id = ?", (job.repo_id,)).fetchone()
+                if exists is None:
+                    try:
+                        remove_tree(clone_dir(settings, job.repo_id))
+                    except OSError:
+                        log.warning("No se pudo limpiar el clon de %s", job.repo_id, exc_info=True)
+        await asyncio.to_thread(promote)
         job.commit = result.commit
         # IA voy analiza solo Python: sin Python no hay nada que analizar; con poco, se avisa.
         # El conteo ignora dependencias y entornos subidos al repo (node_modules, venv…).

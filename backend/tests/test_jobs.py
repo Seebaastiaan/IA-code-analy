@@ -4,13 +4,16 @@ sobre la misma base de datos, como dos procesos de uvicorn.
 """
 
 import time
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.analyses.workspace import Workspace
 from app.analysis import fake
 from app.analysis import jobs as jobs_mod
 from app.analysis import router as analysis_router
+from app.analysis.clone import clone_dir
 from app.analysis.jobs import JobManager
 from app.db import connect
 from app.main import create_app
@@ -72,6 +75,65 @@ def test_un_job_vivo_en_otro_worker_bloquea_otro_analisis(client, worker2, setti
     assert repo["status"] == "analizando" and repo["progress"]["job_id"] == job_id
     settings.job_step_seconds = 0
     wait_done(client, job_id, timeout=15)
+
+
+def test_quitar_repo_desde_otro_worker_borra_historial_y_permite_agregar_de_nuevo(client, worker2, settings):
+    settings.job_step_seconds = 0.2
+    job_id = start(client)
+    repo_id = client.get(f"/api/jobs/{job_id}").json()["repo_id"]
+    path = f"/api/repos/{repo_id}"
+    blocked = worker2.delete(path)
+    assert blocked.status_code == 409 and blocked.json()["error"]["code"] == "already_running"
+    settings.job_step_seconds = 0
+    job = wait_done(client, job_id)
+    shared = client.post(f"/api/report/{job['report_id']}/share", json={})
+    assert shared.status_code == 200, shared.text
+    backup = Workspace(settings, repo_id).backup_root
+    backup.mkdir(parents=True)
+    assert clone_dir(settings, repo_id).is_dir()
+
+    assert worker2.delete(path).status_code == 204
+    assert client.get("/api/repos").json() == []
+    assert client.get("/api/dashboard").json()["selected"] is None
+    assert client.get(f"/api/report/{job['report_id']}").status_code == 404
+    assert client.get(f"/api/public/r/{shared.json()['share_id']}").status_code == 404
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
+    assert client.post(f"/api/jobs/{job_id}/retry").status_code == 404
+    assert client.post(f"{path}/analyze").status_code == 404
+    assert worker2.delete(path).status_code == 404
+    assert not clone_dir(settings, repo_id).exists() and not backup.exists()
+
+    readded = wait_done(client, start(client))
+    assert readded["repo_id"] != repo_id
+    assert client.get(f"/api/report/{readded['report_id']}").json()["num"] == 1
+
+
+def test_quitar_repo_cancelado_limpia_un_clon_que_termina_tarde(client, settings, cloner, monkeypatch):
+    started = Event()
+    resume = Event()
+    promoted = Event()
+
+    def slow_promote(settings, repo_id, attempt):
+        started.set()
+        if resume.wait(5):
+            # Simula al hilo de promoción cuando publica una carpeta después de la cancelación.
+            clone_dir(settings, repo_id).mkdir()
+            promoted.set()
+
+    monkeypatch.setattr(cloner, "promote", slow_promote)
+    job_id = start(client)
+    repo_id = client.get(f"/api/jobs/{job_id}").json()["repo_id"]
+    try:
+        assert started.wait(5)
+        assert client.delete(f"/api/jobs/{job_id}").status_code == 204
+        assert client.delete(f"/api/repos/{repo_id}").status_code == 204
+    finally:
+        resume.set()
+    assert promoted.wait(5)
+    end = time.monotonic() + 5
+    while clone_dir(settings, repo_id).exists() and time.monotonic() < end:
+        time.sleep(0.02)
+    assert not clone_dir(settings, repo_id).exists()
 
 
 def test_cancelar_desde_otro_worker(client, worker2, settings, monkeypatch):

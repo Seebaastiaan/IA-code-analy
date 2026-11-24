@@ -5,13 +5,16 @@ El primer login crea un equipo propio ("Equipo de Ana"); para trabajar juntos, e
 enlace de invitación (app.teams.router).
 """
 
+import logging
 import secrets
 import shutil
 import sqlite3
 from datetime import UTC, datetime
 
-from app.analysis.clone import clone_dir
+from app.analysis.clone import clone_dir, clones_root, remove_tree
 from app.config import Settings
+
+log = logging.getLogger(__name__)
 
 
 def now_iso() -> str:
@@ -57,10 +60,23 @@ def members(conn: sqlite3.Connection, team_id: str) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def delete_repo(settings: Settings, conn: sqlite3.Connection, repo_id: str) -> None:
-    """Borra un repo con sus reportes, hallazgos, índice y clon (la cascada de SQLite hace el resto)."""
+def delete_repo(conn: sqlite3.Connection, repo_id: str) -> None:
+    """Borra los registros de un repo. SQLite elimina los reportes y sus datos relacionados."""
+    conn.execute(
+        "DELETE FROM share_failures WHERE share_id IN (SELECT s.id FROM shares s JOIN reports r ON r.id = s.report_id WHERE r.repo_id = ?)",
+        (repo_id,),
+    )
+    conn.execute("DELETE FROM jobs WHERE repo_id = ?", (repo_id,))
     conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
-    shutil.rmtree(clone_dir(settings, repo_id), ignore_errors=True)
+
+
+def remove_repo_clones(settings: Settings, repo_id: str) -> None:
+    root = clones_root(settings)
+    for path in (clone_dir(settings, repo_id), root / f"{repo_id}.sandbox", *root.glob(f"{repo_id}.tmp-*")):
+        try:
+            remove_tree(path)
+        except OSError:
+            log.warning("No se pudo limpiar la copia local del repositorio %s", repo_id, exc_info=True)
 
 
 def move_user(settings: Settings, conn: sqlite3.Connection, user_id: str, new_team_id: str | None) -> None:
@@ -79,7 +95,8 @@ def move_user(settings: Settings, conn: sqlite3.Connection, user_id: str, new_te
         taken = {r["name"].lower() for r in conn.execute("SELECT name FROM repos WHERE team_id = ?", (new_team_id,))}
         for repo in conn.execute("SELECT id, name FROM repos WHERE team_id = ?", (old,)).fetchall():
             if repo["name"].lower() in taken:
-                delete_repo(settings, conn, repo["id"])
+                delete_repo(conn, repo["id"])
+                shutil.rmtree(clone_dir(settings, repo["id"]), ignore_errors=True)
             else:
                 conn.execute("UPDATE repos SET team_id = ? WHERE id = ?", (new_team_id, repo["id"]))
         conn.execute("UPDATE jobs SET team_id = ? WHERE team_id = ?", (new_team_id, old))

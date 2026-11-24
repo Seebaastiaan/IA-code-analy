@@ -1,5 +1,6 @@
 /** Equipo simulado (modo mock): "Equipo IA VOY" con 6 miembros, como en el prototipo. */
 import type { InvitePreview, Team, TeamInvite, TeamMember } from '@/features/team/types'
+import { listRepos } from './db'
 import { customUser, demoUser } from './fixtures/user'
 
 const DAY = 86_400_000
@@ -43,7 +44,7 @@ const view = (): Team => ({
   name: team.name,
   role: team.members.find((m) => m.id === demoUser.id)?.role ?? 'member',
   members: [...team.members],
-  repos: 5,
+  repos: listRepos().length,
 })
 
 /** El usuario de la sesión simulada refleja el equipo (nombre y número de miembros). */

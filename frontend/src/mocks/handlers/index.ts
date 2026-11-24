@@ -54,6 +54,13 @@ export const handlers = [
   // ─── Tablero y repos ───
   http.get(EP.dashboard, route(({ request }) => json(db.dashboard(param(request, 'repo'))))),
   http.get(EP.repos.list, route(() => json(db.listRepos()))),
+  http.delete(EP.repos.remove(':repoId'), route(({ params }) => {
+    const repoId = params.repoId as string
+    db.getRepo(repoId)
+    if (team.getTeam().role !== 'owner') return fail(403, 'not_owner', 'Solo quien administra el equipo puede quitar repositorios')
+    if (!db.removeRepo(repoId)) return fail(409, 'already_running', 'Espera a que termine el análisis o cancélalo antes de quitar el repositorio')
+    return new HttpResponse(null, { status: 204 })
+  })),
   http.post(EP.repos.analyze(':repoId'), route(({ params }) => json({ job_id: db.reanalyze(params.repoId as string) }))),
   http.get(EP.repos.tree(':repoId'), route(({ params }) => json(db.tree(params.repoId as string)))),
   http.get(EP.repos.analyses(':repoId'), route(({ params }) => json(db.analyses(params.repoId as string)))),

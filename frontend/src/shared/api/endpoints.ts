@@ -9,6 +9,7 @@ export const EP = {
   dashboard: '/api/dashboard',
   repos: {
     list: '/api/repos',
+    remove: (id: string) => `/api/repos/${id}`,
     history: (id: string) => `/api/repos/${id}/history`,
     analyze: (id: string) => `/api/repos/${id}/analyze`,
     tree: (id: string) => `/api/repos/${id}/tree`,

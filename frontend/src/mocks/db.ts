@@ -131,14 +131,14 @@ const repos: RepoRecord[] = [
   { id: 'r5', name: 'equipo/cli-utilidades', url: 'https://github.com/equipo/cli-utilidades', branch: 'main', files: 12, status: 'error', error: 'pytest no pudo importar el módulo "click"', history: [], reports: [], content: { ...FILES }, jobId: null },
 ]
 
-const configs: Record<string, ProjectConfig> = Object.fromEntries(
-  repos.map((r) => [r.id, { weights: { seg: 50, test: 30, prac: 20 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }]),
-)
+const defaultConfig: ProjectConfig = { weights: { seg: 50, test: 30, prac: 20 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }
+const configs: Record<string, ProjectConfig> = Object.fromEntries(repos.map((r) => [r.id, structuredClone(defaultConfig)]))
 
 const jobs = new Map<string, JobRecord>()
 const shares = new Map<string, ShareRecord>()
 const shareTokens = new Map<string, string>()
 let jobSeq = 0
+let repoSeq = repos.length
 
 // ───────────────────────── Vistas (DTO) ─────────────────────────
 
@@ -201,6 +201,23 @@ export function repoView(r: RepoRecord): Repo {
 }
 
 export const listRepos = () => repos.map(repoView)
+
+export function removeRepo(repoId: string): boolean {
+  const repo = getRepo(repoId)
+  if ([...jobs.values()].some((job) => job.repo_id === repoId && job.status === 'running')) return false
+  repos.splice(repos.indexOf(repo), 1)
+  delete configs[repoId]
+  const reportIds = new Set(repo.reports.map((report) => report.id))
+  for (const [id, share] of shares) {
+    if (!reportIds.has(share.report_id)) continue
+    shares.delete(id)
+    shareTokens.delete(id)
+  }
+  for (const [id, job] of jobs) {
+    if (job.repo_id === repoId) jobs.delete(id)
+  }
+  return true
+}
 
 export function reportView(repoId: string, reportId: string): Report {
   const { repo, report } = findReport(repoId, reportId)
@@ -417,9 +434,9 @@ function startStep(job: JobRecord) {
 function finishJob(job: JobRecord) {
   let repo = repos.find((r) => r.name === job.name)
   if (!repo) {
-    repo = { id: `r${repos.length + 1}`, name: job.name, url: job.url, branch: job.branch, files: 20, status: 'listo', error: null, history: [], reports: [], content: { ...FILES }, jobId: null }
+    repo = { id: `r${++repoSeq}`, name: job.name, url: job.url, branch: job.branch, files: 20, status: 'listo', error: null, history: [], reports: [], content: { ...FILES }, jobId: null }
     repos.push(repo)
-    configs[repo.id] = structuredClone(configs.r1)
+    configs[repo.id] = structuredClone(defaultConfig)
   }
   const last = latestReport(repo)
   const num = (last?.num ?? 0) + 1

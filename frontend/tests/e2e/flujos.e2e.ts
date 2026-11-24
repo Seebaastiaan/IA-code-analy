@@ -160,6 +160,27 @@ test('equipo: invitar, ceder y quitar miembros', async ({ page }) => {
   await expect(page.getByText('5 miembro(s)')).toBeVisible()
 })
 
+test('quitar un repositorio pide confirmación y actualiza la lista', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/repos')
+  const remove = page.getByRole('button', { name: 'Quitar equipo/api-pagos del analizador' })
+  await expect(remove).toBeVisible()
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('equipo/api-pagos')
+    await dialog.dismiss()
+  })
+  await remove.click()
+  await expect(remove).toBeVisible()
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await remove.click()
+  await expect(page.getByText('Se quitó equipo/api-pagos del analizador')).toBeVisible()
+  await expect(remove).toHaveCount(0)
+  await expect(page.getByText('4 repositorios conectados al equipo')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Quitar equipo/notebooks-ml del analizador' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Re-analizar equipo/etl-ventas' })).toBeEnabled()
+})
+
 test('nuevo análisis exige un analizador por categoría', async ({ page }) => {
   await page.goto('/analyze')
   await page.getByLabel('URL del repositorio').fill('https://github.com/equipo/api-pagos')

@@ -47,6 +47,7 @@ interface JobState {
   /** Se suscribe al WebSocket del job (no reabre si ya está conectado, salvo `force`) */
   connect: (jobId: string, force?: boolean) => void
   markCancelled: () => void
+  forgetRepo: (repoId: string) => void
 }
 
 export const useJobStore = create<JobState>((set, get) => ({
@@ -70,5 +71,12 @@ export const useJobStore = create<JobState>((set, get) => ({
     socketJobId = null
     const job = get().job
     if (job) set({ job: { ...job, status: 'cancelled' } })
+  },
+  forgetRepo: (repoId) => {
+    if (get().job?.repo_id !== repoId) return
+    socket?.close()
+    socket = null
+    socketJobId = null
+    set({ job: null })
   },
 }))

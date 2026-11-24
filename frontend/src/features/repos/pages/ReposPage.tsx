@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { useTeam } from '@/features/team/api/team.api'
 import { paths } from '@/shared/constants/paths'
 import { EmptyState, ErrorState, Icon, Input, PageHeader, Skeleton, buttonClass } from '@/shared/ui'
 import { useRepos } from '../api/repos.api'
@@ -7,6 +8,7 @@ import { RepoCard } from '../components/RepoCard'
 
 export default function ReposPage() {
   const { data: repos, isPending, error, refetch } = useRepos()
+  const { data: team } = useTeam()
   const [q, setQ] = useState('')
   const visible = repos?.filter((r) => r.name.toLowerCase().includes(q.toLowerCase())) ?? []
 
@@ -28,7 +30,7 @@ export default function ReposPage() {
       {error ? (
         <ErrorState error={error} onRetry={() => void refetch()} />
       ) : isPending ? (
-        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-56" />
           ))}
@@ -42,9 +44,9 @@ export default function ReposPage() {
       ) : !visible.length ? (
         <EmptyState title="Ningún repositorio coincide con el filtro" />
       ) : (
-        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {visible.map((r) => (
-            <RepoCard key={r.id} repo={r} />
+            <RepoCard key={r.id} repo={r} canRemove={team?.role === 'owner'} />
           ))}
         </div>
       )}
