@@ -434,8 +434,9 @@ class JobManager:
                 else:
                     await asyncio.sleep(settings.job_step_seconds)
                     summary = pipeline.step_summary(job.step, job.result)
-                    if job.step == pipeline.RULES_STEP and rules_task and (job.result.rules is None or job.result.rules.source is None):
-                        # Sin esto decía «sin reglas declaradas» justo cuando el programa las está sacando del documento
+                    if job.step == pipeline.RULES_STEP and rules_task:
+                        # El proyecto no tenía reglas al empezar: las únicas son las que se están sacando del documento (borradores,
+                        # aunque la lectura termine antes de este paso). Sin esto decía «sin reglas declaradas»
                         summary = (
                             f"  reglas sacadas de {rules_task.get_name()}: entran en borrador y se comprueban desde el próximo análisis, "
                             "cuando las apruebes («Preparar todo» en Configuración → Reglas)"

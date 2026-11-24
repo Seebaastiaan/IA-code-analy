@@ -46,7 +46,7 @@ export function ContradictionsCard({ repoId, data }: { repoId: string; data: Pro
         </Chip>
       </div>
       <p className="text-sm text-slate-500 mb-3">
-        Estas dos reglas no pueden cumplirse a la vez{c.reason ? `: ${c.reason.replace(/[.\s]+$/, '')}.` : '.'} La que elijas se queda y la otra se quita.
+        Estas dos reglas no pueden cumplirse a la vez{c.reason ? `: ${c.reason.replace(/[.\s]+$/, '')}${c.reason.trim().endsWith('…') ? '' : '.'}` : '.'} La que elijas se queda y la otra se quita.
       </p>
       <div className="flex flex-col sm:flex-row gap-3">
         <Side side={c.a} />

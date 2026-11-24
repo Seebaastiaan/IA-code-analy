@@ -86,7 +86,8 @@ def run(settings: Settings, repo_id: str, project: str, user_id: str | None, doc
             valid = True
             # Lo que el equipo ya contestó en otra importación no se vuelve a preguntar
             try:
-                content, _ = respuestas.apply(content, [dict(r) for r in store.answers(repo_id)], None)
+                # Por texto y por significado (la IA redacta la misma duda distinto en cada importación)
+                content, _ = respuestas.apply(content, [dict(r) for r in store.answers(repo_id)], lambda texts: llm.embed(texts, "SEMANTIC_SIMILARITY"))
             except reglas.RulesError:
                 pass
         store.save_upload(repo_id, content, user_id)
