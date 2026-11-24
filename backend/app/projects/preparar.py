@@ -431,13 +431,16 @@ def trusted_by_program(row) -> bool:
     - pasa, es fuerte (notó todas las violaciones inyectadas) y la lectura del código confirma la regla; o
     - falla y la lectura del código tampoco encuentra la regla completa. La prueba de fuerza no aplica aquí: mide si una
       prueba que pasa es floja, y una que falla ya está señalando el problema.
+    Una que falla NO se aprueba sola si el repo trae sus propias pruebas de esa regla: con f1-pitwall dos reglas se
+    aprobaron solas como «no cumple» (la lectura «no encontró» el código porque no le llegaron los fragmentos) mientras
+    las pruebas del autor de esas mismas reglas pasaban.
     """
     t = row.test
     if t is None or t.approved or t.blocked or row.crosscheck.status != "coincide" or t.run is None:
         return False
     if t.run.verdict == "cumple":
         return t.strength is not None and t.strength.status == "fuerte"
-    return t.run.verdict == "no_cumple"
+    return t.run.verdict == "no_cumple" and not getattr(row, "repo_tests", 0)
 
 
 async def _work(flow: Flow) -> None:

@@ -708,9 +708,18 @@ def context_files(root: Path, project_map: mapa.ProjectMap) -> list[str]:
     return seen
 
 
+# Apps de páginas (Flask con plantillas, Django con render): las pruebas revisan la base, no el código de la respuesta
+HTML_NOTE = (
+    "La app responde PÁGINAS HTML con formularios (no JSON): crea los datos de los `crear_*` directo en la base temporal "
+    "(devuelve un dict con el id y los campos) y expón en `sesiones` una conexión o fábrica de sesiones a la MISMA base "
+    "que usa la app en la prueba: las pruebas comprueban ahí si algo se guardó, porque un rechazo no llega como 4xx."
+)
+
+
 def prompt(root: Path, project_map: mapa.ProjectMap, requirements: str) -> str:
     parts = [
         f"Framework: {project_map.framework}",
+        *([HTML_NOTE] if project_map.html else []),
         "MAPA DEL PROYECTO (JSON):",
         json.dumps(_compact_map(project_map), ensure_ascii=False)[:40_000],
     ]

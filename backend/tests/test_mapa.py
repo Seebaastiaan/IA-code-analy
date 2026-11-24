@@ -355,3 +355,31 @@ def test_raiz_del_codigo_solo_si_es_inequivoca(tmp_path):
     assert mapa.source_root([".github/pyproject.toml", "app/manage.py"]) == "app"
     write(tmp_path, {"main.py": "x = 1", "requirements.txt": ""})
     assert mapa.find_source_root(tmp_path) == "" and mapa.build(tmp_path).source_root == ""
+
+
+def test_app_de_paginas_html_se_reconoce(tmp_path):
+    """f1-pitwall: Flask con plantillas y flash; un rechazo vuelve a mostrar la página (200), no un 4xx."""
+    paginas = build_from(tmp_path / "paginas", {
+        "requirements.txt": "flask\n",
+        "app/__init__.py": "from flask import Flask\napp = Flask(__name__)\nfrom . import rutas\n",
+        "app/rutas.py": """
+            from flask import flash, redirect, render_template, request
+            from . import app
+
+            @app.route("/pilotos", methods=["GET", "POST"])
+            def pilotos():
+                if request.method == "POST":
+                    flash("Número ocupado", "error")
+                return render_template("pilotos.html")
+        """,
+    })
+    api = build_from(tmp_path / "api", {
+        "requirements.txt": "flask\n",
+        "app.py": "from flask import Flask, jsonify\napp = Flask(__name__)\n\n@app.get('/x')\ndef x():\n    return jsonify(ok=True)\n",
+    })
+    assert paginas.html is True and api.html is False
+    assert mapa.build(SEED / "reservas_demo").html is False
+
+
+def build_from(root: Path, files: dict[str, str]) -> mapa.ProjectMap:
+    return mapa.build(write(root, files))

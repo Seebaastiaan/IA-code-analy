@@ -10,6 +10,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). V
   guarda en el proyecto, en borrador (`app/projects/reglas_auto.py`). Ya no hay que descargar el archivo ni subirlo en
   Configuración; nunca pisa lo que el equipo guardó y, si la IA falla, el análisis sigue y lo dice en la terminal. La app ya no
   pide «descárgalas y súbelas al repo».
+- Apps de páginas HTML (Flask con `render_template`/`flash`, Django con `render`): el mapa las reconoce (`html`) y las pruebas
+  revisan la base en lugar del código de respuesta (un rechazo vuelve a mostrar la página con 200 o redirige con 302), incluyen el
+  caso válido que sí se guarda y usan las claves exactas que acepta el código (sus constantes en MAYÚSCULAS van en el prompt). Una
+  prueba que decide un rechazo con `assert r.status_code` se rechaza y se reescribe. Con `iTsS4ma/f1-pitwall` (11 reglas, todas
+  cumplidas según las 43 pruebas del autor) se pasó de 0 cumplen · 8 no cumplen a 8 cumplen · 0 no cumplen.
+- En `docs/` cuenta cualquier PDF o Word como documento de requisitos («Documentacion.pdf» no se detectaba).
+- Una prueba de la IA que dice «no cumple» ya no se aprueba sola si el repo trae sus propias pruebas de esa regla; «Esperan tu
+  revisión» lo dice.
 - Contradicciones del documento con botones: en Configuración → Reglas, «El documento se contradice: ¿cuál vale?» muestra las
   dos reglas y se elige «Vale RN-…» (la otra se quita) o «Las dos valen» (`POST /api/projects/{id}/reglas/contradiccion`). Las
   reglas importadas con contradicciones ya se guardan en el proyecto y no hay que tocar el archivo en «Avanzado».

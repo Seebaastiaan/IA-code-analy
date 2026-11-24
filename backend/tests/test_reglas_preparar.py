@@ -239,6 +239,9 @@ def test_quien_se_aprueba_solo():
     assert not ok("cumple", "parcial", "coincide") and not ok("cumple", "fuerte", "discrepa") and not ok("no_cumple", None, "discrepa")
     assert not ok("no_cumple", None, "sin_revisar") and not ok("prueba_rota", None, "coincide")
     assert not ok("no_cumple", None, "coincide", approved=True) and not ok("cumple", "fuerte", "coincide", blocked="Córrela primero")
+    # El repo trae sus propias pruebas de la regla: un «no cumple» de la IA espera a una persona (f1-pitwall)
+    con_propias = lambda verdict, strength: preparar.trusted_by_program(NS(test=_test(verdict, strength), crosscheck=NS(status="coincide"), repo_tests=2))
+    assert not con_propias("no_cumple", None) and con_propias("cumple", "fuerte")
 
 
 def test_si_el_arnes_de_la_ia_no_arranca_se_corrige_y_se_prueba_otra_vez(monkeypatch):

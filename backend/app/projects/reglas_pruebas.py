@@ -303,12 +303,82 @@ def _rule_text(rule: reglas.BusinessRule) -> str:
     return "\n".join(parts)
 
 
+# Con f1-pitwall (Flask con plantillas) 8 de 11 reglas salieron «no cumple» porque las pruebas esperaban 400/409/422 y la
+# app, al rechazar, vuelve a mostrar la página con un aviso (200); las 43 pruebas del autor pasaban
+HTML_NOTE = """ESTA APP RESPONDE PÁGINAS HTML CON FORMULARIOS, NO UNA API JSON. Esto REEMPLAZA lo dicho sobre códigos de rechazo:
+- Los formularios se envían con `data={...}` (no `json=`), con los nombres EXACTOS de `request.form[...]` del código.
+- Un rechazo por una regla NO llega como 4xx: la app vuelve a mostrar la página con un aviso (normalmente 200) y una
+  operación que sale bien suele redirigir (302). NUNCA decidas con `status_code` si algo se rechazó.
+- El *Entonces* de un rechazo se comprueba en la BASE, con el fixture del arnés que da acceso a ella (`sesiones` u otro
+  que el arnés exponga): el registro no existe o el dato no cambió (cuenta antes y después). Si el código muestra el
+  aviso con `flash`, comprueba además que su texto EXACTO aparece en `r.get_data(as_text=True)`.
+- Toda prueba de un rechazo incluye también el caso VÁLIDO más cercano y comprueba en la base que ese SÍ se guardó
+  (el 2.º piloto activo se acepta y el 3.º no; posiciones 1 y 2 se guardan, dos veces la 1 no). Sin eso la prueba pasa
+  también con un código que no guarda nada o que rechaza todo (con f1-pitwall, 6 pruebas siguieron pasando así).
+- Cálculos (puntos, totales, saldos): lee el valor guardado en la base y compáralo exacto; no busques un número en el
+  HTML (un «8» aparece en cualquier página).
+- Los valores de listas y opciones (selects, estados, tipos) son las claves EXACTAS que acepta el código (las de sus
+  diccionarios, tuplas o `choices`), no su texto visible: si la regla dice «75 % o más» y el código acepta `"75"`,
+  manda `"75"`. No inventes claves («75%», «1v»).
+- Un caso que DEBE guardarse (para luego revisar un cálculo) puede no guardarse porque la prueba mandó un dato mal
+  armado, y la página no lo dice con un código: comprueba con `preparar(fila is not None, "…")` que se guardó ANTES de
+  revisar el valor con `assert`. Así un formulario mal llenado sale como prueba rota y no como «no cumple».
+- Una respuesta 500 (la app lanzó una excepción) NO es un rechazo correcto: la prueba debe fallar."""
+
+
+MAX_CHOICES = 40
+MAX_CHOICE_VALUES = 12
+
+
+def _text_values(node: ast.AST) -> list[str] | None:
+    """Claves de un dict o elementos de una tupla/lista/conjunto si todos son textos; None si no."""
+    items = node.keys if isinstance(node, ast.Dict) else node.elts if isinstance(node, (ast.Tuple, ast.List, ast.Set)) else None
+    if not items or not all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in items):
+        return None
+    return [k.value for k in items]
+
+
+def choices(root: Path, project_map: mapa.ProjectMap) -> list[str]:
+    """
+    Los valores que el código acepta, de sus constantes en MAYÚSCULAS (`DISTANCIAS_CARRERA = {"menos2": …, "75": …}`,
+    `ESTADOS = ("Abandono", …)`). La IA inventaba «75%» o «0.5» porque esas constantes suelen estar al inicio del módulo,
+    fuera de los fragmentos que recibe: el formulario no guardaba nada y la prueba salía rota.
+    """
+    out: list[str] = []
+    files = sorted(dict.fromkeys(e.file for e in project_map.endpoints)) + sorted(
+        f.relative_to(root).as_posix() for pkg in project_map.packages for f in (root / project_map.source_root / pkg).rglob("*.py")
+        if (root / project_map.source_root / pkg).is_dir()
+    )
+    for rel in dict.fromkeys(files):
+        if mapa._skip(rel) or "test" in PurePosixPath(rel).name:
+            continue
+        try:
+            tree = ast.parse((root / rel).read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for node in tree.body:
+            target = node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else node.target if isinstance(node, ast.AnnAssign) else None
+            if not isinstance(target, ast.Name) or not target.id.isupper() or node.value is None:
+                continue
+            values = _text_values(node.value)
+            if values:
+                shown = ", ".join(json.dumps(v, ensure_ascii=False) for v in values[:MAX_CHOICE_VALUES]) + (" …" if len(values) > MAX_CHOICE_VALUES else "")
+                out.append(f"{rel}: {target.id} = {'claves ' if isinstance(node.value, ast.Dict) else ''}{shown}")
+            if len(out) >= MAX_CHOICES:
+                return out
+    return out
+
+
 def prompt(root: Path, project_map: mapa.ProjectMap, harness_code: str, rule: reglas.BusinessRule) -> str:
     parts = [
         "REGLA:\n" + _rule_text(rule),
+        *([HTML_NOTE] if project_map.html else []),
         "MAPA DEL PROYECTO (JSON):\n" + json.dumps(_map_context(project_map), ensure_ascii=False)[:30_000],
         f"ARNÉS ({CONFTEST}, sus fixtures son los que puedes usar):\n<<<\n{harness_code[:25_000]}\n>>>",
     ]
+    accepted = choices(root, project_map)
+    if accepted:
+        parts.append("VALORES QUE ACEPTA EL CÓDIGO (constantes; usa estas claves exactas en formularios y JSON):\n" + "\n".join(accepted))
     budget = MAX_CONTEXT - sum(len(p) for p in parts)
     # Los esquemas de entrada (Pydantic, serializers) con sus restricciones: así la prueba manda datos válidos
     for rel in dict.fromkeys(s.file for s in project_map.schemas):
@@ -648,6 +718,17 @@ def validate(
                     f"línea {n.lineno}: espera exactamente {n.test.comparators[0].value}; un rechazo puede llegar como 400, 409 o 422 "
                     "(usa `in (400, 409, 422)` salvo que la regla dé el código)"
                 )
+        if project_map.html:
+            # En una app de páginas el código de respuesta no dice si hubo rechazo (f1-pitwall redirige con 302 aunque
+            # rechace): el resultado se revisa en la base. `preparar(r.status_code …)` sigue permitido en el *Dado*
+            for n in ast.walk(node):
+                if isinstance(n, ast.Assert) and any(
+                    isinstance(c, ast.Compare) and mapa._name(c.left).endswith("status_code") for c in ast.walk(n.test)
+                ):
+                    errors.append(
+                        f"línea {n.lineno}: esta app responde páginas HTML; un rechazo no se ve en `status_code` (vuelve a "
+                        "mostrar la página o redirige igual): comprueba en la base que el dato no se guardó o no cambió"
+                    )
         errors += quality_errors(node, rule_text)
         if not any(isinstance(n, ast.Assert) for n in ast.walk(node)) and not any(
             isinstance(n, ast.Call) and mapa._name(n.func) in ("pytest.raises", "pytest.fail") for n in ast.walk(node)

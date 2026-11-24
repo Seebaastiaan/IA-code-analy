@@ -181,6 +181,9 @@ class ProjectMap:
     warnings: list[str] = field(default_factory=list)
     # Carpeta del repo donde está el código ("" = la raíz): las pruebas y el sandbox trabajan desde ahí
     source_root: str = ""
+    # Las rutas responden páginas HTML con formularios (render_template/flash de Flask, render de Django), no JSON:
+    # un rechazo no llega como 4xx sino como la misma página con un aviso
+    html: bool = False
 
     @property
     def empty(self) -> bool:
@@ -1192,6 +1195,14 @@ def _skip(path: str) -> bool:
     return any(part in SKIP_DIRS or part.startswith(".") for part in parts[:-1])
 
 
+# Lo que usa una app que responde páginas (formularios) en lugar de JSON: (módulo, nombre importado)
+HTML_IMPORTS = {("flask", "render_template"), ("flask", "flash"), ("django.shortcuts", "render")}
+
+
+def _renders_html(m: _Module) -> bool:
+    return any((mod, attr) in HTML_IMPORTS or mod.startswith("django.views.generic") for mod, attr in m.imports.values())
+
+
 def build(root: Path, files: list[str] | None = None) -> ProjectMap:
     """Mapa del repo en `root`. `files` = rutas relativas (las del clon); None = recorrer la carpeta."""
     if files is None:
@@ -1242,6 +1253,7 @@ def build(root: Path, files: list[str] | None = None) -> ProjectMap:
     mp = b.map
     mp.source_root = prefix
     mp.files = len(modules)
+    mp.html = any(not m.is_test and _renders_html(m) for m in modules)
     mp.packages = sorted({m.name.split(".")[0] for m in modules if not m.is_test and m.name and m.name.split(".")[0] not in ("setup", "manage", "conftest", "noxfile")})
     if not mp.framework:
         warnings.append("No se reconoció FastAPI, Flask ni Django: las reglas solo se pueden verificar con patrones o con las pruebas del equipo.")

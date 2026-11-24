@@ -19,6 +19,12 @@ const row = (id: string, t: GeneratedTest | null, cross: 'coincide' | 'discrepa'
 const view = (rules: RuleTestRow[]) => ({ rules }) as RuleTestsView
 
 describe('reviewItems', () => {
+  it('un «no se cumple» de una regla que el repo ya prueba no se recomienda aprobar (f1-pitwall)', () => {
+    const [item] = reviewItems(view([{ ...row('RN-001', test('no_cumple', null), 'coincide'), repo_tests: 3 }]))
+    expect(item.recommended).toBe(false)
+    expect(item.why).toEqual(['El repositorio trae 3 pruebas propias de esta regla: compara con su resultado en el análisis'])
+  })
+
   it('lista solo las pruebas sin aprobar que dieron un resultado, con el motivo en palabras', () => {
     const items = reviewItems(
       view([

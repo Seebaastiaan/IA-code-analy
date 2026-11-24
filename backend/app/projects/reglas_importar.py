@@ -49,6 +49,8 @@ EXTENSIONS = tuple(TYPES)
 DOC_NAME = re.compile(r"requerim|requisit|regla|negocio|srs|historia|especificac|casos?[ _-]?de[ _-]?uso|user[ _-]?stor|requirement")
 # Carpetas que nunca tienen el documento del proyecto
 SKIP_DIRS = {"node_modules", ".venv", "venv", "tests", "test", ".git", "site-packages", "dist", "build"}
+# Carpetas de documentación: cualquier PDF o Word que tengan puede traer los requisitos
+DOC_DIRS = {"docs", "doc", "documentacion", "documentation"}
 SKIP_NAMES = {"changelog", "license", "licencia", "contributing", "code_of_conduct"}
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -231,9 +233,13 @@ def find_documents(blobs: dict[str, int]) -> list[str]:
             continue
         if any(_plain(part) in SKIP_DIRS for part in p.parts[:-1]) or _plain(p.stem) in SKIP_NAMES:
             continue
-        if not DOC_NAME.search(_plain(p.stem)):
+        in_docs = _plain(p.parts[0]) in DOC_DIRS and len(p.parts) > 1
+        named = bool(DOC_NAME.search(_plain(p.stem)))
+        # En `docs/` cuenta cualquier PDF o Word («Documentacion.pdf» de f1-pitwall traía las reglas y no se detectaba),
+        # después de los que por su nombre ya dicen que son de requisitos
+        if not named and not in_docs:
             continue
-        rank = 0 if p.parts[0].lower() == "docs" else 1 if len(p.parts) == 1 else 2
+        rank = (0 if in_docs else 2 if len(p.parts) == 1 else 3) if named else 1
         found.append((rank, path))
     return [path for _, path in sorted(found, key=lambda x: (x[0], x[1].lower()))][:MAX_DOCUMENTS]
 

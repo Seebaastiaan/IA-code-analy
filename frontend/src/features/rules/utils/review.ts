@@ -36,6 +36,9 @@ export function reviewItems(view: RuleTestsView | undefined): ReviewItem[] {
     }
     if (row.crosscheck.status === 'discrepa') why.push(passes ? 'La IA leyó el código y cree que la regla no está completa' : 'La IA leyó el código y cree que la regla sí está')
     if (row.crosscheck.status === 'sin_revisar') why.push('Falta la segunda opinión (la IA no respondió)')
+    // Como trusted_by_program: el repo trae sus propias pruebas de la regla y el análisis también las corre
+    const ownTests = !passes && row.repo_tests > 0
+    if (ownTests) why.push(`El repositorio trae ${row.repo_tests === 1 ? 'su propia prueba' : `${row.repo_tests} pruebas propias`} de esta regla: compara con su resultado en el análisis`)
     const disagree = row.crosscheck.status === 'discrepa'
     const advice = weak
       ? 'Mejor no la apruebes todavía: «Volver a preparar» la escribe de nuevo con lo que no notó.'
@@ -52,7 +55,7 @@ export function reviewItems(view: RuleTestsView | undefined): ReviewItem[] {
       passes,
       why,
       advice,
-      recommended: !weak && !disagree,
+      recommended: !weak && !disagree && !ownTests,
       failure: failed && failed.length > MAX_FAILURE ? `${failed.slice(0, MAX_FAILURE)}…` : failed,
     }
   })

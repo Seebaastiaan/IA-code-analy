@@ -526,3 +526,45 @@ def test_una_prueba_rota_sin_aprobar_dice_que_se_escribe_de_nuevo():
     h = arnes.code_hash(code)
     row = {"kind": "prueba", "code": code, "run_hash": h, "run_result": json.dumps({"verdict": "prueba_rota"}), "strength_hash": None, "strength_result": None}
     assert "Preparar todo" in pruebas.unapproved_note(row) and "apruébala" not in pruebas.unapproved_note(row)
+
+
+def test_en_apps_de_paginas_html_el_prompt_pide_revisar_la_base():
+    """En una app de formularios un rechazo vuelve a mostrar la página (200): la prueba no puede esperar un 4xx."""
+    mp = mapa.build(INVENTARIO)
+    rule = RULES["RN-002"]
+    assert pruebas.HTML_NOTE not in pruebas.prompt(INVENTARIO, mp, "", rule)
+    mp.html = True
+    text = pruebas.prompt(INVENTARIO, mp, "", rule)
+    assert pruebas.HTML_NOTE in text and "NUNCA decidas con `status_code`" in text
+    assert arnes.HTML_NOTE in arnes.prompt(INVENTARIO, mp, "")
+
+
+def test_el_prompt_lleva_los_valores_que_acepta_el_codigo(tmp_path):
+    """f1-pitwall: la IA mandaba «75%» y «0.5» porque DISTANCIAS_CARRERA estaba fuera de los fragmentos que recibía."""
+    (tmp_path / "app").mkdir()
+    (tmp_path / "requirements.txt").write_text("flask\n", encoding="utf-8")
+    (tmp_path / "app" / "__init__.py").write_text("from flask import Flask\napp = Flask(__name__)\nfrom . import rutas\n", encoding="utf-8")
+    (tmp_path / "app" / "reglas.py").write_text(
+        'DISTANCIAS = {"menos2": (), "75": (25, 18)}\nESTADOS = ("Abandono", "No salió")\nlimite = ("x",)\nNUMEROS = (1, 2)\n', encoding="utf-8",
+    )
+    (tmp_path / "app" / "rutas.py").write_text(
+        "from flask import request\nfrom . import app, reglas\n\n@app.post('/carreras')\ndef carreras():\n    return reglas.DISTANCIAS[request.form['distancia']]\n",
+        encoding="utf-8",
+    )
+    mp = mapa.build(tmp_path)
+    assert pruebas.choices(tmp_path, mp) == ['app/reglas.py: DISTANCIAS = claves "menos2", "75"', 'app/reglas.py: ESTADOS = "Abandono", "No salió"']
+    assert 'DISTANCIAS = claves "menos2", "75"' in pruebas.prompt(tmp_path, mp, "", RULES["RN-002"])
+
+
+def test_en_apps_de_paginas_no_se_decide_con_status_code():
+    """f1-pitwall: `assert r.status_code == 200` para un rechazo, y la app redirigía (302) aunque rechazara."""
+    mp = mapa.build(INVENTARIO)
+    code = (
+        'import pytest\n\n@pytest.mark.regla("RN-002")\ndef test_rn002_x(api, preparar):\n'
+        '    r = api.post("/x", data={})\n    preparar(r.status_code in (200, 302), "no se pudo")\n'
+        '    assert r.status_code == 200\n    assert 1 == 1\n'
+    )
+    assert not any("status_code" in e for e in pruebas.validate(code, "RN-002", mp, ["api"]).errors)
+    mp.html = True
+    errors = pruebas.validate(code, "RN-002", mp, ["api"]).errors
+    assert [e for e in errors if "status_code" in e] == [e for e in errors if e.startswith("línea 7:")] and len([e for e in errors if "status_code" in e]) == 1

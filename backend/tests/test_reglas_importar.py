@@ -96,6 +96,13 @@ def test_detecta_documentos_de_requisitos():
     assert importar.find_documents(blobs) == ["docs/Requerimientos.pdf", "Reglas de Negocio.docx"]
 
 
+def test_en_docs_cuenta_cualquier_pdf_o_word():
+    blobs = {"docs/Documentacion.pdf": 900, "docs/capturas/01.png": 50, "Requisitos.docx": 30, "otros/manual.pdf": 40, "docs/Requerimientos.pdf": 10}
+    # Primero los de docs/ con nombre de requisitos, luego cualquier otro de docs/, luego los de la raíz; fuera de docs/
+    # solo cuenta el nombre
+    assert importar.find_documents(blobs) == ["docs/Requerimientos.pdf", "docs/Documentacion.pdf", "Requisitos.docx"]
+
+
 def test_solo_cuentan_pdf_y_word():
     blobs = {
         "requirements.txt": 50, "requirements-dev.txt": 20, "backend/requirements.txt": 30, "docs/requirements.md": 40,
