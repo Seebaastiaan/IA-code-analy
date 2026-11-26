@@ -17,7 +17,7 @@ Implementado hasta ahora:
 - **Asistente IA** (`app/assistant`): `POST /api/chat/stream` (respuesta por SSE mientras se genera),
   `POST /api/chat` y `GET /api/repos/{id}/index` (RAG sobre el código con Gemini).
 - **Configuración** (`app/projects`): `GET` y `PUT /api/projects/{id}/config` (pesos, umbrales, reglas
-  ignoradas, rutas excluidas) y `.ia_voy.toml`.
+  ignoradas, rutas excluidas) y `.ia_voy.toml`; reglas de negocio cargadas en la app (`/api/projects/{id}/reglas`).
 - **Comparativa** (`app/compare`): `GET /api/repos/{id}/analyses` y `POST /api/diff` (nuevos y resueltos entre
   dos análisis del mismo repo; los hallazgos se reconocen por herramienta, regla, archivo y texto de la línea).
 - **Equipos** (`app/teams`): `/api/team`, invitaciones, unirse, salir, quitar y ceder (ver [Equipos](#equipos)).
@@ -38,7 +38,7 @@ copy .env.example .env   # y llena GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-Con `uv`: `uv sync --extra dev` y `uv run uvicorn app.main:app --reload --port 8000`.
+Con `uv`: `uv sync --extra dev` y `uv run uvicorn app.main:app --reload --reload-dir app --port 8000`.
 
 En el frontend, `frontend/.env.development` con `VITE_USE_MOCKS=false`: Vite redirige `/api` y `/ws` a
 `http://localhost:8000` (`VITE_PROXY_TARGET`).
@@ -51,9 +51,9 @@ En el frontend, `frontend/.env.development` con `VITE_USE_MOCKS=false`: Vite red
 | `SECRET_KEY` / `TOKEN_ENCRYPTION_KEY` | Opcionales. Vacías, el backend las genera la primera vez y las guarda en `data/secrets.json` (no se sube a git). Si ese archivo se borra, las sesiones vencen y hay que volver a iniciar sesión. |
 | `JOB_STEP_SECONDS` | Pausa de los pasos que no esperan al sandbox en la terminal del frontend (por defecto 0.9 s). |
 | `SANDBOX` | Dónde corren pytest, coverage y pip-audit: `off` (simulados, por defecto en código), `wsl` o `docker`. Ver [Sandbox](#sandbox). |
-| `SANDBOX_WSL_DISTRO` / `SANDBOX_DOCKER_IMAGE` / `SANDBOX_TIMEOUT_S` | Opcionales. Por defecto `Ubuntu-24.04`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` y 1200 s por análisis. |
-| `GEMINI_API_KEY` | Asistente IA (respuestas y embeddings): https://aistudio.google.com/apikey. Sin ella el asistente responde `503 llm_not_configured`. |
-| `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Opcionales. Por defecto `gemini-3.8-flash` y, si responde 429/503, `gemini-3.5-flash,gemini-3.1-flash-lite`. |
+| `SANDBOX_WSL_DISTRO` / `SANDBOX_DOCKER_IMAGE` / `SANDBOX_TIMEOUT_S` | Opcionales. Por defecto `Ubuntu-24.04`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` y 1200 s por análisis. Para repos ajenos con dependencias que se compilan usa `ghcr.io/astral-sh/uv:python3.12-bookworm` (trae `gcc`, 1.5 GB). |
+| `GEMINI_API_KEY` | Asistente IA (respuestas y embeddings) e importar reglas desde un documento: https://aistudio.google.com/apikey. Sin ella el asistente y la importación responden `503 llm_not_configured`. |
+| `GEMINI_MODEL` / `GEMINI_FALLBACK_MODELS` | Opcionales. Por defecto `gemini-3.5-flash-lite` y, si responde 429/503, `gemini-3.5-flash,gemini-3.1-flash-lite`. |
 | `GROQ_API_KEY` | Opcional. Último respaldo (Llama 3.3), independiente de Google: https://console.groq.com/keys |
 | `CLONES_PATH` | Carpeta de los repos clonados (por defecto `%LOCALAPPDATA%\ia-voy\repos`). No uses una carpeta de OneDrive/Dropbox. |
 
@@ -80,7 +80,7 @@ que el frontend interpreta como sesión vencida) y el frontend ofrece volver a a
 
 ## Análisis
 
-`POST /api/analyze` `{url, branch, analyzers, sandbox, index}` acepta solo URLs `https://github.com/owner/repo`,
+`POST /api/analyze` `{url, branch, analyzers, sandbox, index, rules?}` acepta solo URLs `https://github.com/owner/repo`,
 crea el repo (o reutiliza el del equipo con el mismo `owner/repo`) y lanza un job que emite por
 `WS /ws/jobs/{id}` los mensajes `snapshot`, `step`, `log`, `step_done`, `error` y `done`.
 
@@ -115,13 +115,49 @@ job termina en `error` con un mensaje claro y se puede reintentar.
 
 **Paso 10, reglas de negocio** ([app/analyses/reglas.py](app/analyses/reglas.py),
 [ADR-003](../docs/adr/ADR-003-reglas-de-negocio.md)): lee `reglas_negocio.toml` (raíz del repo o `docs/`), lo
-valida y verifica el nivel **patrón** en el backend: `prohibido` (regex que no debe aparecer) y `obligatorio`
-(regex que debe aparecer en cada archivo con código) sobre los `.py` de `rutas`, sin las pruebas ni las rutas
-excluidas. Cada regla queda `cumple`, `no_cumple` (con `archivo:línea`) o `sin_verificar` (sin patrón; las
-pruebas con `@pytest.mark.regla` llegan en el Sprint 8). Un archivo inválido no detiene el análisis: el paso
-muestra el error. Los resultados van en sus propias tablas (`business_rule_checks`, `business_rule_results`),
-**no** son hallazgos y todavía no entran al score. `GET /api/report/{id}/reglas` (o `latest?repo=`) devuelve
-la matriz regla → estado → evidencia, con `historia`, `responsable` y `criterio` para la trazabilidad.
+valida y la verifica en dos niveles:
+- **Patrón**, en el backend: `prohibido` (regex que no debe aparecer) y `obligatorio` (regex que debe aparecer
+  en cada archivo con código) sobre los `.py` de `rutas`, sin las pruebas ni las rutas excluidas.
+- **Pruebas**: las marcadas `@pytest.mark.regla("RN-002")` (en la función, la clase o `pytestmark`) o llamadas
+  `test_rn002_…`. En el sandbox pytest corre con el plugin [`-p ia_voy_reglas`](app/analysis/ia_voy_reglas.py)
+  (se copia a la carpeta de salida y registra el marcador), que escribe `reglas.json` con cada prueba ligada y
+  su resultado. Sin sandbox, o si no se eligió pytest, las pruebas se encuentran leyendo el código (`ast`) y
+  sus reglas quedan "sin verificar" con el motivo.
+
+Estado: `no_cumple` si aparece el patrón o falla una de sus pruebas; `cumple` si todo lo que la verifica pasó;
+`sin_verificar` si no tiene patrón ni pruebas, o sus pruebas no corrieron. Las pruebas que usan una regla que
+no existe salen como avisos en la terminal. Un archivo inválido no detiene el análisis: el paso muestra el
+error. Los resultados van en sus propias tablas (`business_rule_checks`, `business_rule_results`), **no** son
+hallazgos y todavía no entran al score. `GET /api/report/{id}/reglas` (o `latest?repo=`) devuelve la matriz
+regla → estado → evidencia (`archivo:línea` del patrón y `tests`), con `historia`, `responsable` y `criterio`.
+
+**Cargar reglas desde la app** ([app/projects/reglas.py](app/projects/reglas.py), de apoyo mientras se redactan):
+`GET`/`PUT`/`DELETE /api/projects/{id}/reglas` (`PUT {content}` valida y responde `422 invalid_rules` con la línea
+del error), `POST /api/projects/{id}/reglas/validar` (sintaxis y rutas del repo del proyecto) y `GET /api/projects/{id}/reglas/plantilla` (con el nombre y carpetas del proyecto). Se guardan en `business_rules_upload` y el
+análisis las usa si el repo no tiene su `reglas_negocio.toml` **o el suyo no es válido** (un archivo válido del
+repo siempre gana). En ese segundo caso el reporte trae `repo_error` con el error del archivo del repo. La
+terminal avisa que hay que subirlas al repositorio.
+
+**Revisar las reglas al cargar el repo** (Nuevo análisis): `POST /api/reglas/revisar` `{url, branch, content?}`
+lee `reglas_negocio.toml` con la API de GitHub, sin clonar (árbol de la rama y el archivo crudo; con el token del
+usuario y, si GitHub lo rechaza, sin él), y lo valida con el mismo parser y contra las rutas de la rama. Responde
+`status` (`valid`, `invalid`, `missing`, o `unavailable` si no se pudo leer: nunca bloquea), el archivo, las
+reglas cargadas en la app si el repo ya es proyecto, cuáles usará el análisis (`active`) y una plantilla con el
+nombre y carpetas del repo. Con `content` valida ese texto en vez del archivo (editor del formulario). Las reglas
+corregidas en el formulario viajan en `POST /api/analyze` como `rules`: se validan (`422 invalid_rules`) y se
+guardan como reglas cargadas en la app del proyecto. La respuesta trae además `documents` (documentos de requisitos
+del árbol: PDF, `.docx`, `.md` o `.txt` con nombre de requisitos, los de `docs/` primero) y `can_import` (hay
+`GEMINI_API_KEY`); `GET /api/projects/{id}/reglas` trae lo mismo para la copia del proyecto.
+
+**Importar reglas desde un documento** ([app/projects/reglas_importar.py](app/projects/reglas_importar.py),
+[plan](../docs/PLAN_IMPORTAR_REGLAS_DOCUMENTO.md)): `POST /api/reglas/importar` con `{url, branch, path}` (documento
+del repo en GitHub), `{project_id, path}` (copia del proyecto) o `{filename, data}` (archivo subido en base64; máx.
+10 MB). Gemini lee el PDF tal cual (`inlineData`), el `.docx` como texto (`zipfile`, sin dependencias) y el `.md`/`.txt`
+como texto, y responde JSON con esquema; el backend numera las reglas (`RN-001`…), pone la fuente como comentario
+y valida el TOML. Responde `{content, count, doubts, source, validation, model}` y **no guarda nada**: el usuario lo
+revisa en el editor. Errores: `415 unsupported_type`, `413 file_too_large`, `422 invalid_document` / `no_rules_found`,
+`503 llm_not_configured` / `llm_rate_limited` / `llm_busy` / `llm_unavailable`. El `demo_repo` trae
+[docs/Requerimientos.md](seed_data/demo_repo/docs/Requerimientos.md) para probarlo.
 
 ### Sandbox
 
@@ -205,8 +241,17 @@ conservan los `seg/test/prac` que se guardaron.
 - `PUT /api/file` respalda la versión anterior en `data/backups/{repo}/{fecha}/{ruta}` y re-analiza el
   archivo con Ruff y Bandit: resuelve lo que desapareció, mueve lo que cambió de línea y agrega lo
   nuevo. Responde `{resolved_ids, new_ids, score_before, score_after}`.
-- `POST /api/fix` devuelve parches con las correcciones "safe" de Ruff, ubicando cada hallazgo por regla
-  y texto de su línea. Bandit no tiene correcciones automáticas.
+- `POST /api/fix` devuelve parches `{patches, notes}` para todo hallazgo que se arregla en el código
+  (`fix_kind`, [docs/ia/catalogo-reglas.md](../docs/ia/catalogo-reglas.md)):
+  - `auto`: las correcciones `safe` y `unsafe` de Ruff (cada hallazgo se ubica por regla y texto de su línea) y
+    la versión corregida de pip-audit en `requirements*.txt`.
+  - `ia` ([app/editor/ai_fix.py](app/editor/ai_fix.py)): Bandit, Ruff sin corrección, pruebas que fallan y
+    pip-audit en `pyproject.toml`. Gemini recibe la función del hallazgo numerada y devuelve ediciones por rango
+    de líneas (más imports); se rechazan (`422 ai_fix_invalid`) si salen de esa función, se solapan o el `.py`
+    no compila. Necesita `GEMINI_API_KEY` (`503 llm_not_configured`); `notes` explica qué cambió.
+  - Sin corrección: `COV` y `DEPS` (no se arreglan con un parche). Nada se guarda hasta aceptar el diff.
+- Cada hallazgo de Bandit y Ruff trae una recomendación concreta en español
+  ([app/analyses/remedies.py](app/analyses/remedies.py)), no un enlace a la documentación.
 
 **Datos de demostración** (sin analizar un repo de GitHub): entra una vez con GitHub y luego
 
@@ -216,7 +261,7 @@ conservan los `seg/test/prac` que se guardaron.
 
 Analiza [seed_data/demo_repo](seed_data/demo_repo) (con problemas a propósito) con Ruff, Bandit y Radon
 reales y crea 4 análisis semanales para que la tendencia tenga historia. Incluye un
-[reglas_negocio.toml](seed_data/demo_repo/reglas_negocio.toml) con 4 reglas (1 cumple, 2 no cumplen, 1 sin verificar).
+[reglas_negocio.toml](seed_data/demo_repo/reglas_negocio.toml) con 4 reglas (1 cumple, 2 no cumplen, 1 sin verificar: su prueba `test_rn004_…` no se ejecuta sin sandbox).
 
 ## Asistente IA
 
@@ -233,7 +278,8 @@ guardado en el editor se refleja sin re-indexar todo.
    mencionado en la pregunta (`regla` y `archivo:línea`) con ±12 líneas de código, y los fragmentos.
 3. Pide a Gemini una respuesta JSON con esquema (`answer`, `sources`, `finding_id`).
 4. Valida: solo quedan las fuentes que estaban en el contexto (nada de `archivo:línea` inventados) y la
-   acción solo se ofrece si el hallazgo está abierto y tiene corrección automática.
+   acción solo se ofrece si el hallazgo está abierto y tiene corrección ("Aplicar corrección automática" o
+   "Corregir con IA"). El prompt le prohíbe responder solo "revisa la documentación": debe decir qué cambiar.
 
 **`POST /api/chat/stream`** hace lo mismo pero responde con Server-Sent Events: `delta` (`{text}`) con cada
 trozo del campo `answer` mientras Gemini lo genera (`streamGenerateContent`), y al final `done` (la misma

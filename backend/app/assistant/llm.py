@@ -8,6 +8,7 @@ Clientes de los modelos por REST (httpx, sin SDK):
 Las claves viajan en cabeceras (`x-goog-api-key`, `Authorization`), nunca en la URL.
 """
 
+import base64
 import json
 import logging
 import re
@@ -29,6 +30,9 @@ EMBED_BATCH = 100
 TIMEOUT_S = 60
 # Un 503 (alta demanda) suele pasar en segundos: se reintenta una vez el mismo modelo
 BUSY_RETRY_WAIT_S = 1.5
+# Sin streaming (trabajos en segundo plano, importar): dos reintentos más, a 1,5 s y 6 s; con streaming (el chat, alguien
+# esperando) se queda en uno
+BUSY_RETRY_FACTORS = (1, 4)
 
 GROQ_LABEL = "Groq · Llama 3.3"
 
@@ -51,9 +55,18 @@ class LlmError(Exception):
 
 
 @dataclass
+class Attachment:
+    """Archivo que acompaña al texto de un turno (p. ej. un PDF): Gemini lo lee directamente."""
+
+    mime_type: str
+    data: bytes
+
+
+@dataclass
 class Turn:
     role: str  # "user" | "model"
     text: str
+    files: tuple[Attachment, ...] = ()
 
 
 @dataclass
@@ -133,14 +146,20 @@ class LLM:
         return models
 
     def _post(self, url: str, headers: dict, body: dict, provider: str) -> httpx.Response:
-        """POST con un reintento si el modelo está saturado (503)."""
-        for attempt in (1, 2):
+        """
+        POST con dos reintentos si el modelo está saturado (503), esperando cada vez más. Con el modelo principal saturado
+        a ratos (3.8 Flash, nov 2026), un solo reintento de 1,5 s pasaba casi siempre al respaldo, que es más débil.
+        """
+        waits = [BUSY_RETRY_WAIT_S * f for f in BUSY_RETRY_FACTORS]
+        for attempt in range(len(waits) + 1):
             try:
                 res = self.http.post(url, headers=headers, json=body)
+            except httpx.TimeoutException as exc:
+                raise LlmError(f"{provider} tardó demasiado en responder") from exc
             except httpx.HTTPError as exc:
-                raise LlmError(f"No se pudo contactar a {provider}: {type(exc).__name__}") from exc
-            if res.status_code == 503 and attempt == 1:
-                time.sleep(BUSY_RETRY_WAIT_S)
+                raise LlmError(f"No se pudo contactar a {provider} (falla de red)") from exc
+            if res.status_code == 503 and attempt < len(waits):
+                time.sleep(waits[attempt])
                 continue
             _check(res, provider)
             return res
@@ -198,7 +217,7 @@ class LLM:
     def _gemini_body(self, system: str, turns: list[Turn], schema: dict) -> dict:
         return {
             "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": t.role, "parts": [{"text": t.text}]} for t in turns],
+            "contents": [{"role": t.role, "parts": _parts(t)} for t in turns],
             "generationConfig": {
                 "temperature": 0.2,
                 "responseMimeType": "application/json",
@@ -243,8 +262,10 @@ class LLM:
                             continue
                         text += "".join(p.get("text", "") for p in candidates[0].get("content", {}).get("parts", []) if not p.get("thought"))
                         emit(partial_answer(text))
+            except httpx.TimeoutException as exc:
+                raise LlmError("Gemini tardó demasiado en responder") from exc
             except httpx.HTTPError as exc:
-                raise LlmError(f"No se pudo contactar a Gemini: {type(exc).__name__}") from exc
+                raise LlmError("No se pudo contactar a Gemini (falla de red)") from exc
             if not text:
                 raise LlmError(f"Gemini no respondió ({blocked or 'sin respuesta'})")
             return _parse(text, "Gemini")
@@ -257,6 +278,11 @@ class LLM:
         body = {"model": self.settings.groq_model, "messages": messages, "temperature": 0.2, "response_format": {"type": "json_object"}}
         res = self._post(GROQ_URL, {"Authorization": f"Bearer {self.settings.groq_api_key}"}, body, "Groq")
         return _parse(res.json()["choices"][0]["message"]["content"], "Groq")
+
+
+def _parts(turn: Turn) -> list[dict]:
+    files = [{"inlineData": {"mimeType": f.mime_type, "data": base64.b64encode(f.data).decode("ascii")}} for f in turn.files]
+    return [*files, {"text": turn.text}]
 
 
 def _parse(text: str, provider: str) -> dict:

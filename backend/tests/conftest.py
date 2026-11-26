@@ -25,6 +25,12 @@ class FakeGithub:
             {"full_name": "ana/api-pagos", "html_url": "https://github.com/ana/api-pagos", "default_branch": "main", "private": True, "description": "Cobros", "pushed_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"},
             {"full_name": "ana/dotfiles", "html_url": "https://github.com/ana/dotfiles", "default_branch": "master", "private": False, "description": None, "pushed_at": None, "updated_at": "2026-09-01T00:00:00Z"},
         ]
+        # Árbol de la rama main de cada repo (sin el archivo de reglas; ese va en `files`)
+        self.trees: dict[str, list[str]] = {"ana/api-pagos": ["main.py", "app/__init__.py", "app/core/servicio.py", "app/pagos/cobro.py"]}
+        self.files: dict[tuple[str, str], str] = {}
+        self.tree_tokens: list[str | None] = []
+        # GitHub rechaza el token (revocado): se reintenta sin él
+        self.reject_token = False
 
     def authorize_url(self, state: str) -> str:
         return f"https://github.com/login/oauth/authorize?client_id={self.settings.github_client_id}&state={state}"
@@ -46,6 +52,26 @@ class FakeGithub:
         if full_name != "ana/api-pagos":
             raise GithubError(404, "Not Found")
         return [{"name": "main"}, {"name": "develop"}]
+
+    # ─── Revisión de reglas sin clonar (POST /api/reglas/revisar) ───
+
+    def set_file(self, path: str, content: str, full_name: str = "ana/api-pagos") -> None:
+        self.files[(full_name, path)] = content
+
+    async def get_tree(self, token: str | None, full_name: str, ref: str) -> dict:
+        self.tree_tokens.append(token)
+        if token and self.reject_token:
+            raise GithubAuthError()
+        if full_name not in self.trees or ref != "main":
+            raise GithubError(404, "Not Found")
+        paths = [*self.trees[full_name], *(p for n, p in self.files if n == full_name)]
+        return {
+            "tree": [{"path": p, "type": "blob", "size": len(self.files.get((full_name, p), "x").encode())} for p in dict.fromkeys(paths)],
+            "truncated": False,
+        }
+
+    async def get_file(self, token: str | None, full_name: str, path: str, ref: str) -> bytes:
+        return self.files[(full_name, path)].encode()
 
 
 class FakeCloner:

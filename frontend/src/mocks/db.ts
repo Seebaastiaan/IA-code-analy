@@ -97,11 +97,13 @@ function seedRepo(
     complexity: COMPLEXITY,
     summary: { coverage_total: latest.cov, tests_failed: latest.failed, avg_complexity: latest.cc },
   })
-  const prevCat: Weights = { seg: clamp(latest.cat.seg - 8), test: clamp(latest.cat.test - 1), prac: clamp(latest.cat.prac - 7) }
+  // Reglas de negocio (opcional): solo los repos con reglas medibles traen nota
+  const neg = (delta: number) => (latest.cat.neg == null ? {} : { neg: clamp(latest.cat.neg + delta) })
+  const prevCat: Weights = { seg: clamp(latest.cat.seg - 8), test: clamp(latest.cat.test - 1), prac: clamp(latest.cat.prac - 7), ...neg(-6) }
   // Reporte anterior: sin los hallazgos 2, 3 y 7 y con dos que luego se resolvieron
   const prevFindings = [...findings.filter((f) => ![2, 3, 7].includes(f.id)), ...RESOLVED_BEFORE]
   const reports = [
-    mk(latest.num - 8, latest.agoMs + 14 * DAY, { seg: clamp(latest.cat.seg - 5), test: clamp(latest.cat.test - 4), prac: clamp(latest.cat.prac - 4) }, prevFindings, 'f04b2d9'),
+    mk(latest.num - 8, latest.agoMs + 14 * DAY, { seg: clamp(latest.cat.seg - 5), test: clamp(latest.cat.test - 4), prac: clamp(latest.cat.prac - 4), ...neg(-11) }, prevFindings, 'f04b2d9'),
     mk(latest.num - 1, latest.agoMs + 7 * DAY, prevCat, prevFindings, '91ce07b'),
     mk(latest.num, latest.agoMs, latest.cat, findings, latest.commit),
   ]
@@ -115,7 +117,7 @@ function seedRepo(
     error: null,
     history: [4, 3, 2, 1].map((w, i) => ({
       date: iso(latest.agoMs + (w + 2) * 7 * DAY),
-      cat: { seg: clamp(latest.cat.seg + OFFSETS.seg[i]), test: clamp(latest.cat.test + OFFSETS.test[i]), prac: clamp(latest.cat.prac + OFFSETS.prac[i]) },
+      cat: { seg: clamp(latest.cat.seg + OFFSETS.seg[i]), test: clamp(latest.cat.test + OFFSETS.test[i]), prac: clamp(latest.cat.prac + OFFSETS.prac[i]), ...neg(OFFSETS.prac[i] - 14) },
     })),
     reports,
     content: { ...FILES },
@@ -124,14 +126,14 @@ function seedRepo(
 }
 
 const repos: RepoRecord[] = [
-  seedRepo('r1', 'equipo/api-pagos', 'main', 48, { num: 128, commit: 'a3f9c1e', agoMs: 2 * 3_600_000, cat: { seg: 68, test: 85, prac: 73 }, ids: FINDINGS.map((f) => f.id), cov: 78, failed: 1, cc: 6.2 }),
+  seedRepo('r1', 'equipo/api-pagos', 'main', 48, { num: 128, commit: 'a3f9c1e', agoMs: 2 * 3_600_000, cat: { seg: 68, test: 85, prac: 73, neg: 62.5 }, ids: FINDINGS.map((f) => f.id), cov: 78, failed: 1, cc: 6.2 }),
   seedRepo('r2', 'equipo/etl-ventas', 'develop', 31, { num: 97, commit: '7bd21aa', agoMs: DAY, cat: { seg: 92, test: 84, prac: 86 }, ids: [4, 9, 10, 12], cov: 81, failed: 0, cc: 4.1 }),
   seedRepo('r3', 'equipo/bot-soporte', 'main', 22, { num: 64, commit: 'e01c4f2', agoMs: 3 * DAY, cat: { seg: 48, test: 61, prac: 66 }, ids: [1, 2, 5, 6, 7, 8, 11], cov: 52, failed: 3, cc: 8.7 }),
   { id: 'r4', name: 'equipo/notebooks-ml', url: 'https://github.com/equipo/notebooks-ml', branch: 'feature/limpieza', files: 17, status: 'analizando', error: null, history: [], reports: [], content: { ...FILES }, jobId: null },
   { id: 'r5', name: 'equipo/cli-utilidades', url: 'https://github.com/equipo/cli-utilidades', branch: 'main', files: 12, status: 'error', error: 'pytest no pudo importar el módulo "click"', history: [], reports: [], content: { ...FILES }, jobId: null },
 ]
 
-const defaultConfig: ProjectConfig = { weights: { seg: 50, test: 30, prac: 20 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }
+const defaultConfig: ProjectConfig = { weights: { seg: 50, test: 30, prac: 20, neg: 0 }, thresholds: { score: 70, cov: 60 }, ignored: ['S101', 'D100'], excluded: ['migrations/', 'tests/fixtures/'] }
 const configs: Record<string, ProjectConfig> = Object.fromEntries(repos.map((r) => [r.id, structuredClone(defaultConfig)]))
 
 const jobs = new Map<string, JobRecord>()
@@ -143,6 +145,9 @@ let repoSeq = repos.length
 // ───────────────────────── Vistas (DTO) ─────────────────────────
 
 export class NotFound extends Error {}
+
+/** Proyecto del equipo con ese "owner/repo" (como el backend, sin distinguir mayúsculas). */
+export const findRepoByName = (name: string) => repos.find((r) => r.name.toLowerCase() === name.toLowerCase())
 
 export const getRepo = (id: string) => {
   const r = repos.find((x) => x.id === id)
@@ -170,7 +175,9 @@ function findingView(report: ReportRecord, f: FindingTemplate, withCode = true):
           .map((text, i) => ({ line: i + 1, text }))
           .filter((l) => Math.abs(l.line - f.line) <= 2)
       : undefined
-  return { ...f, status: report.resolved.has(f.id) ? 'resolved' : 'open', snippet }
+  // Como el backend: Ruff y pip-audit con corrección propia; lo demás que se corrige, con IA
+  const fix_kind = f.fix ? (FIXES[f.id] && (f.tool === 'Ruff' || f.tool === 'pip-audit') ? 'auto' : 'ia') : null
+  return { ...f, fix_kind, status: report.resolved.has(f.id) ? 'resolved' : 'open', snippet }
 }
 
 /** Hallazgos visibles: sin las reglas ignoradas en la configuración, ordenados por severidad. */
@@ -297,6 +304,13 @@ export function getFile(repoId: string, path: string) {
   const content = getRepo(repoId).content[path]
   if (content === undefined) throw new NotFound(`${path} no existe`)
   return content
+}
+
+/** Explicación simulada de la IA para los hallazgos que no corrige una herramienta. */
+export function fixNotes(findingIds: number[]): string[] {
+  return FINDINGS.filter((f) => findingIds.includes(f.id) && f.fix && f.tool !== 'Ruff' && f.tool !== 'pip-audit').map(
+    (f) => `${f.file}: corregí ${f.rule} siguiendo la recomendación (${f.rec.split('.')[0].toLowerCase()}).`,
+  )
 }
 
 export function fixPatches(findingIds: number[]): Patch[] {
@@ -517,6 +531,7 @@ export function startJob(url: string, branch: string, opts: { fail?: boolean; sp
   return job.id
 }
 
+/** Quita el repo con todo lo suyo (como DELETE /api/repos/{id}); con un análisis en curso, un texto = error. */
 export const reanalyze = (repoId: string) => {
   const r = getRepo(repoId)
   return startJob(r.url, r.branch)

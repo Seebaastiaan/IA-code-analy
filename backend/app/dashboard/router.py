@@ -102,6 +102,7 @@ def remove_repo(repo_id: str, store: Analyses, user_id: UserId, jobs: Jobs, sett
         if jobs.running_for_repo(conn, repo_id):
             raise ApiError(409, "already_running", "Espera a que termine el análisis o cancélalo antes de quitar el repositorio")
         delete_repo(conn, repo_id)
+    jobs.forget_repo(repo_id)
     remove_repo_clones(settings, repo_id)
     try:
         remove_tree(Workspace(settings, repo_id).backup_root)

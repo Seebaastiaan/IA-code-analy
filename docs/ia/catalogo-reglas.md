@@ -64,8 +64,10 @@ cobertura.
 
 ### Ruff
 
-Reglas por defecto de Ruff (`E4`, `E7`, `E9`, `F`) más `B` (bugbear), `SIM` (simplificaciones) y `C4`
-(comprensiones). Si el repositorio trae su propia configuración de Ruff, se usa la suya.
+Reglas fijas `E4,E7,E9,F,B,SIM,C4`: las que eran por defecto (`E4`, `E7`, `E9`, `F`) más `B` (bugbear), `SIM`
+(simplificaciones) y `C4` (comprensiones). Se pasan con `--select` porque desde Ruff 0.17 el conjunto por defecto
+trae ~400 reglas (orden de imports, `UP*`, copyright…) que llenaban el reporte de ruido. Si el repositorio trae su
+propia configuración de Ruff, se usa la suya más `B,SIM,C4`.
 
 | Prefijo | Ejemplos | Severidad |
 |---|---|---|
@@ -74,7 +76,23 @@ Reglas por defecto de Ruff (`E4`, `E7`, `E9`, `F`) más `B` (bugbear), `SIM` (si
 | `B*` | `B006` argumento mutable por defecto, `B008` llamada en un default | media |
 | Resto (`E`, `SIM`, `C4`, `I`) | `E501` línea larga, `SIM108` usar ternario | baja |
 
-Las reglas con corrección "safe" de Ruff se marcan con **Fix**: el editor (Sprint 7) las aplica.
+## Recomendaciones y correcciones
+
+Cada hallazgo de Bandit y Ruff trae una recomendación concreta en español: qué cambiar y con qué código
+([`backend/app/analyses/remedies.py`](../../backend/app/analyses/remedies.py)). Ya no dice "revisa la
+documentación" ni manda a un enlace. Las reglas de Ruff que no están en el catálogo usan el ejemplo "Use instead"
+de la documentación de la propia regla.
+
+Todos los hallazgos que se pueden arreglar con un cambio en el código se marcan **Fix** (`fix_kind`):
+
+| `fix_kind` | Qué hallazgos | Quién propone el cambio |
+|---|---|---|
+| `auto` | Ruff con corrección `safe` o `unsafe`; pip-audit en un `requirements*.txt` (sube la versión) | La herramienta, determinista |
+| `ia` | Bandit, Ruff sin corrección, pruebas que fallan de verdad (no simuladas), pip-audit en `pyproject.toml` | El LLM (`POST /api/fix`), con ediciones solo dentro de la función del hallazgo; si el resultado no compila se rechaza |
+| — | `COV` (falta escribir pruebas), `DEPS` (el entorno no se instala), pruebas simuladas | No se corrigen con un parche |
+
+En ambos casos el editor muestra el diff y nada se guarda hasta que la persona acepta. Las correcciones con IA
+necesitan `GEMINI_API_KEY`; las `auto` funcionan sin ella.
 
 ### Radon
 

@@ -8,7 +8,7 @@ import { Card, EmptyState, ErrorState, Icon, PageHeader, Select, Skeleton, butto
 import { cn } from '@/shared/utils/cn'
 import { useDashboard } from '../api/dashboard.api'
 import { RecentAnalyses } from '../components/RecentAnalyses'
-import { CategoryKpiCard, GlobalScoreCard } from '../components/ScoreCards'
+import { BusinessKpiCard, CategoryKpiCard, GlobalScoreCard } from '../components/ScoreCards'
 import { TrendChart } from '../components/TrendChart'
 
 const today = () => {
@@ -84,6 +84,7 @@ export default function DashboardPage() {
             {CATEGORIES.map((k) => (
               <CategoryKpiCard key={k} cat={k} repoId={sel.repo.id} reportId={sel.report_id} value={sel.scores[k]} prev={sel.prev_scores?.[k] ?? null} />
             ))}
+            {sel.scores.neg != null && <BusinessKpiCard repoId={sel.repo.id} reportId={sel.report_id} value={sel.scores.neg} prev={sel.prev_scores?.neg ?? null} />}
           </div>
 
           <div className="grid lg:grid-cols-3 gap-4 mt-4">

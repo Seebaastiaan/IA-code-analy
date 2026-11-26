@@ -1,0 +1,156 @@
+# Reglas de negocio de referencia del inventario demo (docs/PROPUESTA_REGLAS_VERIFICABLES.md §11.1 de IA voy).
+#
+# Es lo que el importador debería proponer a partir de docs/Requerimientos.docx, ya revisado por el equipo y con
+# las 7 dudas del documento resueltas (cada una dice "Duda resuelta"). Está en referencia/ y no en la raíz a
+# propósito: así el repo NO tiene reglas_negocio.toml y la app ofrece "Sacar reglas del documento".
+# Para ver el resultado esperado sin pasar por la IA, carga este archivo en Configuración → Reglas de negocio.
+#
+# Formato v1 (el actual). Las pruebas que verifican cada regla están en tests/reglas/.
+
+[proyecto]
+nombre  = "Inventario de la cafetería"
+version = "1.0"
+
+[[regla]]
+id          = "RN-001"
+titulo      = "Un producto con historial no se borra: pasa a Inactivo"
+descripcion = "Si el producto ya tiene movimientos en el Kardex, eliminarlo lo deja en estado Inactivo y conserva su historial. Duda resuelta: un producto sin movimientos sí se puede borrar físicamente."
+severidad   = "alta"
+historia    = "Requerimientos.docx §4.3"
+criterio    = "Dado un producto con una compra registrada, cuando el gerente lo elimina, entonces sigue existiendo con estado Inactivo y su Kardex intacto"
+
+[[regla]]
+id          = "RN-002"
+titulo      = "El SKU no se repite"
+descripcion = "Dos productos no pueden tener el mismo SKU."
+severidad   = "alta"
+historia    = "Requerimientos.docx §4.2"
+criterio    = "Dado un producto con SKU CAF-001, cuando se da de alta otro con CAF-001, entonces se rechaza (409)"
+
+[[regla]]
+id          = "RN-003"
+titulo      = "El código de barras no se repite"
+descripcion = "Dos productos no pueden tener el mismo código de barras."
+severidad   = "alta"
+historia    = "Requerimientos.docx §4.2"
+criterio    = "Dado un producto con código 7501234567890, cuando se da de alta otro con el mismo código, entonces se rechaza (409)"
+
+[[regla]]
+id          = "RN-004"
+titulo      = "El nombre interno no se repite"
+descripcion = "Dos productos no pueden tener el mismo nombre interno. Duda resuelta: se comparan sin distinguir mayúsculas y sin espacios repetidos."
+severidad   = "media"
+historia    = "Requerimientos.docx §4.2"
+criterio    = "Dado «Café Molido Americano», cuando se da de alta «café  molido americano», entonces se rechaza (409)"
+
+[[regla]]
+id          = "RN-005"
+titulo      = "La unidad base no cambia si ya hay movimientos"
+descripcion = "La unidad de medida base de un producto no se puede editar si el producto ya tiene movimientos de inventario."
+severidad   = "alta"
+historia    = "Requerimientos.docx §4.4"
+criterio    = "Dado un insumo en gramos con una compra registrada, cuando se cambia su unidad base a ml, entonces se rechaza (409) y sigue en gramos"
+
+[[regla]]
+id          = "RN-006"
+titulo      = "El stock nunca es negativo"
+descripcion = "Ninguna venta, merma o ajuste puede dejar las existencias por debajo de 0; se bloquean las ventas sin existencias."
+severidad   = "alta"
+historia    = "Requerimientos.docx §5.1"
+criterio    = "Dado un producto con 3 piezas, cuando se intenta vender 5, entonces se rechaza (409) y quedan 3"
+
+[[regla]]
+id          = "RN-007"
+titulo      = "El stock solo cambia con un movimiento del Kardex"
+descripcion = "stock_actual no se edita directamente; todo cambio de existencias pasa por un movimiento auditado (usuario, fecha, cantidad y saldo)."
+severidad   = "alta"
+historia    = "Requerimientos.docx §5.2"
+criterio    = "Dado un producto con 10 piezas, cuando se envía stock_actual = 999 al editarlo, entonces sigue en 10"
+
+[[regla]]
+id          = "RN-008"
+titulo      = "Las salidas siguen PEPS por fecha de entrada"
+descripcion = "Las salidas se toman primero del lote que entró primero. Duda resuelta: PEPS por fecha de entrada, no por caducidad (FEFO)."
+severidad   = "media"
+historia    = "Requerimientos.docx §5.4"
+criterio    = "Dados un lote A (entró en enero) y un lote B (entró en febrero, caduca antes), cuando se venden 3, entonces salen del lote A"
+
+[[regla]]
+id          = "RN-009"
+titulo      = "Alerta y reabastecimiento al llegar al stock mínimo"
+descripcion = "Cuando las existencias quedan en el stock mínimo o por debajo, el producto pasa a «requiere reabastecer» y se genera una alerta. Duda resuelta: con ≤ (llegar al mínimo ya cuenta); la alerta se consulta en GET /alertas."
+severidad   = "media"
+historia    = "Requerimientos.docx §5.5"
+criterio    = "Dado un producto con 10 piezas y mínimo 5, cuando se venden 5, entonces requiere reabastecer y hay una alerta stock_minimo"
+
+[[regla]]
+id          = "RN-010"
+titulo      = "Los productos con receta descuentan sus insumos"
+descripcion = "Un producto de reventa descuenta 1 a 1; un producto compuesto descuenta de cada insumo la cantidad de su receta por cada unidad vendida."
+severidad   = "alta"
+historia    = "Requerimientos.docx §6.1"
+criterio    = "Dado un latte con receta de 200 ml de leche y 18 g de café, cuando se venden 2, entonces la leche baja 400 ml y el café 36 g"
+
+[[regla]]
+id          = "RN-011"
+titulo      = "Las compras se convierten a la unidad base"
+descripcion = "Lo que se compra en unidades de compra (cajas, costales) entra al stock convertido a la unidad base con el factor del producto."
+severidad   = "media"
+historia    = "Requerimientos.docx §6.2"
+criterio    = "Dado café en gramos que se compra por costal de 1000 g, cuando se compran 2 costales, entonces el stock sube 2000 g"
+
+[[regla]]
+id          = "RN-012"
+titulo      = "Las mermas descuentan stock sin sumar ingresos"
+descripcion = "Las mermas y desperdicios se registran aparte de las ventas: bajan las existencias y no generan ingreso."
+severidad   = "media"
+historia    = "Requerimientos.docx §5.6"
+criterio    = "Dado un producto con 10 piezas, cuando se registra una merma de 2, entonces quedan 8 y los ingresos no cambian"
+
+[[regla]]
+id          = "RN-013"
+titulo      = "El precio de venta es mayor a cero"
+descripcion = "Ningún producto se da de alta ni se edita con precio de venta 0 o negativo."
+severidad   = "alta"
+historia    = "Requerimientos.docx §4.5"
+criterio    = "Dado un alta con precio 0, cuando se envía, entonces se rechaza (422)"
+
+[[regla]]
+id          = "RN-014"
+titulo      = "Precio menor al costo: se permite con aviso"
+descripcion = "Si el precio de venta es menor al costo unitario, el producto se guarda y la respuesta incluye el aviso precio_menor_al_costo. Duda resuelta: el documento dice «alerta/bloqueo»; el equipo eligió alerta."
+severidad   = "media"
+historia    = "Requerimientos.docx §4.5"
+criterio    = "Dado un alta con precio $10 y costo $12, cuando se envía, entonces se guarda (201) con el aviso precio_menor_al_costo"
+
+[[regla]]
+id          = "RN-015"
+titulo      = "El costo se recalcula con promedio ponderado"
+descripcion = "Cada compra recalcula el costo unitario como promedio ponderado por cantidad de las existencias y la compra nueva. Duda resuelta: en pesos con 2 decimales, redondeo a la mitad hacia arriba."
+severidad   = "alta"
+historia    = "Requerimientos.docx §7.1"
+criterio    = "Dadas 10 piezas a $10, cuando se compran 30 a $20, entonces el costo unitario es $17.50"
+
+[[regla]]
+id          = "RN-016"
+titulo      = "Precio base e impuestos separados"
+descripcion = "El catálogo guarda el precio base sin impuestos y muestra aparte las tasas y los montos de IVA e IEPS."
+severidad   = "media"
+historia    = "Requerimientos.docx §4.6"
+criterio    = "Dado un producto de $100 con IVA 16 % e IEPS 8 %, cuando se consulta, entonces precio_base es 100 y los impuestos vienen por separado"
+
+[[regla]]
+id          = "RN-017"
+titulo      = "Permisos separados por rol"
+descripcion = "Duda resuelta (matriz del equipo): cajero y barista solo venden y consultan; el almacenista además da de alta y edita el catálogo, registra compras y mermas; solo el gerente cambia precios y costos, elimina productos, hace ajustes manuales y consulta la bitácora y los ingresos."
+severidad   = "alta"
+historia    = "Requerimientos.docx §8.1"
+criterio    = "Dado un cajero, cuando intenta cambiar el precio de un producto, entonces se rechaza (403)"
+
+[[regla]]
+id          = "RN-018"
+titulo      = "Bitácora de precios, costos y ajustes"
+descripcion = "Todo cambio de precio, costo o ajuste manual de existencias deja un registro con usuario, fecha, valor anterior y valor nuevo."
+severidad   = "alta"
+historia    = "Requerimientos.docx §8.2"
+criterio    = "Dado un producto de $20, cuando el gerente lo cambia a $25, entonces la bitácora registra al gerente, la fecha, 20 y 25"

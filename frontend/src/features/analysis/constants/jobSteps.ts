@@ -8,11 +8,11 @@ export const JOB_STEPS: { name: string; command: string }[] = [
   { name: 'Instalando dependencias', command: 'uv pip install -r requirements.txt' },
   { name: 'Bandit', command: 'bandit -r . -f json' },
   { name: 'pip-audit', command: 'pip-audit --path .venv/…/site-packages -f json' },
-  { name: 'pytest', command: 'coverage run -m pytest -q --maxfail=50' },
+  { name: 'pytest', command: 'coverage run -m pytest -q --maxfail=50 -p ia_voy_reglas' },
   { name: 'coverage', command: 'coverage json' },
   { name: 'Ruff', command: 'ruff check . --output-format json' },
   { name: 'Radon', command: 'radon cc . -j && radon mi . -j' },
-  { name: 'Verificando reglas de negocio', command: 'reglas_negocio.toml → patrones prohibido/obligatorio' },
+  { name: 'Verificando reglas de negocio', command: 'reglas_negocio.toml → patrones y pruebas @pytest.mark.regla' },
   { name: 'Calculando score', command: 'agregación ponderada (.ia_voy.toml)' },
   { name: 'Indexando para el asistente', command: 'ast → embeddings (Gemini) → SQLite' },
 ]

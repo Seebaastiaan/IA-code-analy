@@ -16,8 +16,8 @@ a un asistente IA (RAG), comparar análisis y compartir el reporte con un enlace
 | Backend (FastAPI) | ✅ completo: login con GitHub, **equipos**, análisis con analizadores elegibles (sandbox WSL2/Docker para pytest, coverage y pip-audit), jobs persistentes, tablero, reportes, editor, asistente IA con streaming, configuración, comparativa y compartir / vista pública | [backend/](backend) |
 | Documentación técnica (LaTeX) | ✅ entregada | [docs/latex/](docs/latex) |
 
-Versión **1.0** (Sprint 10, 1 de diciembre de 2026): backend `pytest` → 226 pruebas pasan; frontend `npm test` → 22 pruebas
-unitarias, `npm run test:e2e` → 8 pruebas (los 5 flujos del spec, reintento, equipo y analizadores) pasan;
+Versión **1.0** (Sprint 10, 1 de diciembre de 2026): backend `pytest` → 561 pruebas pasan (15 se omiten sin sandbox ni Gemini); frontend `npm test` → 72 pruebas
+unitarias, `npm run test:e2e` → 26 pruebas (los 5 flujos del spec, reintento, equipo, analizadores, reglas de negocio y quitar repositorios) pasan;
 `npm run build` sin errores.
 
 Documentación detallada:
@@ -71,10 +71,12 @@ flowchart LR
 ### 1.3 Score
 
 ```
-score = (w.seg·seg + w.test·test + w.prac·prac) / (w.seg + w.test + w.prac)
+score = (w.seg·seg + w.test·test + w.prac·prac + w.neg·neg) / (w.seg + w.test + w.prac + w.neg)
 ```
 
-Pesos por defecto `seg = 50`, `test = 30`, `prac = 20`, configurables por proyecto en `.ia_voy.toml`.
+Pesos por defecto `seg = 50`, `test = 30`, `prac = 20`, `neg = 0`, configurables por proyecto en `.ia_voy.toml`.
+`neg` es la nota de las reglas de negocio aprobadas (pesa cada regla según su severidad); con peso 0, o sin reglas
+que se puedan medir, no entra al global.
 El frontend solo lo previsualiza; el valor oficial lo calcula el backend.
 
 ### 1.4 Arquitectura del frontend
@@ -127,7 +129,7 @@ Estado revisado el 2026-10-17 en la máquina de desarrollo (Windows 11):
 Además, para el backend:
 
 - ✅ `backend/.venv` creado con sus dependencias (FastAPI, Uvicorn, httpx, pydantic-settings,
-  cryptography, Ruff, Bandit, Radon, numpy, pytest). `pytest`: 226 pruebas pasan.
+  cryptography, Ruff, Bandit, Radon, numpy, pytest). `pytest`: 561 pruebas pasan.
 - ✅ `backend/.env` creado a partir de `.env.example` (ver [§3.2](#32-backend)), con `SANDBOX=wsl`.
 - ✅ Sandbox WSL2 probado de punta a punta con `seed_data/demo_repo`: entorno, dependencias,
   pip-audit (5 paquetes vulnerables), pytest (2 pasan) y coverage reales en ~16 s.
@@ -272,7 +274,7 @@ backend.
 | ✅ | Tablero / repos | `GET /api/dashboard?repo=`, `GET /api/repos`, `GET /api/repos/{id}/history`, `POST /api/repos/{id}/analyze` |
 | ✅ | Análisis (analizadores elegibles, al menos uno por categoría; pytest, coverage y pip-audit en el sandbox) | `POST /api/analyze`, `WS /ws/jobs/{id}`, `GET /api/jobs/{id}`, `DELETE /api/jobs/{id}`, `POST /api/jobs/{id}/retry` |
 | ✅ | Reporte | `GET /api/report/{id}` (`id` puede ser `latest` con `?repo=`), `GET /api/report/{id}/export?format=json\|html\|md\|sarif` |
-| ✅ | Reglas de negocio del proyecto (`reglas_negocio.toml`, [ADR-003](docs/adr/ADR-003-reglas-de-negocio.md); aún no cuentan en el score) | `GET /api/report/{id}/reglas` |
+| ✅ | Reglas de negocio del proyecto (`reglas_negocio.toml`, [ADR-003](docs/adr/ADR-003-reglas-de-negocio.md); cuentan en el score con el peso `neg`) | `GET /api/report/{id}/reglas` |
 | ✅ | Editor | `GET /api/repos/{id}/tree`, `GET /api/file?repo=&path=`, `PUT /api/file`, `POST /api/fix` |
 | ✅ | Asistente (Gemini + RAG en SQLite; respuesta por streaming SSE) | `POST /api/chat/stream`, `POST /api/chat`, `GET /api/repos/{id}/index` |
 | ✅ | Comparativa (nuevos y resueltos entre dos análisis del mismo repo) | `GET /api/repos/{id}/analyses`, `POST /api/diff` |
@@ -306,8 +308,14 @@ El sandbox corre en paralelo con Ruff/Bandit/Radon y la terminal avanza con cada
 sandbox se simulan: sus números salen de una semilla del job y sus hallazgos dicen "(simulado)".
 
 El paso 10 lee las reglas de negocio que el proyecto declara en `reglas_negocio.toml` (raíz o `docs/`) y deja cada una
-como cumple, no cumple (con `archivo:línea`) o sin verificar. Sus resultados van aparte de los hallazgos y todavía no
-entran al score ([PROPUESTA_REGLAS_NEGOCIO.md](docs/PROPUESTA_REGLAS_NEGOCIO.md)).
+como cumple, no cumple (con `archivo:línea`) o sin verificar. Sus resultados van aparte de los hallazgos y entran al
+score con el peso `neg` ([PROPUESTA_REGLAS_VERIFICABLES.md](docs/PROPUESTA_REGLAS_VERIFICABLES.md)).
+
+Si el repo no trae `reglas_negocio.toml` pero sí un documento de requisitos (PDF o Word), el análisis saca las reglas
+con la IA y las guarda en el proyecto en borrador; el equipo las revisa y aprueba en **Configuración → Reglas**, que
+también prepara el arnés de pruebas, escribe las pruebas de cada regla y las valida con la prueba de fuerza. Guía
+para el equipo: [GUIA_REGLAS_DE_NEGOCIO.md](docs/GUIA_REGLAS_DE_NEGOCIO.md); repos de práctica:
+[repos-de-prueba.md](docs/repos-de-prueba.md).
 
 Los analizadores que no se marcan en el formulario no corren: su paso dice "omitido (no seleccionado)" y no
 aportan hallazgos. Hay que elegir al menos uno por categoría. Sin coverage, la cobertura sale "no medida"

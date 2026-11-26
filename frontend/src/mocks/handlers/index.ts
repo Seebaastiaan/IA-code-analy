@@ -6,10 +6,15 @@ import type { DiffRequest } from '@/features/compare/types'
 import type { SaveFileRequest } from '@/features/editor/types'
 import type { FixRequest } from '@/features/findings/types'
 import type { ProjectConfig } from '@/features/settings/types'
+import type { ImportRulesRequest } from '@/features/rules/types'
 import type { ShareRequest } from '@/features/share/types'
 import { EP } from '@/shared/api/endpoints'
 import * as db from '../db'
 import * as github from '../github'
+import * as harness from '../harness'
+import * as prepare from '../prepare'
+import * as ruleTests from '../ruleTests'
+import * as rules from '../rules'
 import * as team from '../team'
 import { answer } from '../fixtures/chat'
 import { languageOf } from '../fixtures/code'
@@ -81,6 +86,8 @@ export const handlers = [
   http.post(EP.analyze, route(async ({ request }) => {
     const body = (await request.json()) as AnalyzeRequest
     if (!/^https?:\/\/.+\/.+/.test(body.url)) return fail(422, 'invalid_url', 'La URL del repositorio no es válida')
+    const invalid = body.rules === undefined ? null : rules.fromAnalyze(body.url, body.rules)
+    if (invalid) return fail(422, 'invalid_rules', invalid)
     return json({ job_id: db.startJob(body.url, body.branch || 'main') })
   }, 400)),
   http.get(EP.jobs.get(':jobId'), route(({ params }) => json(db.jobSnapshot(params.jobId as string)))),
@@ -135,7 +142,7 @@ export const handlers = [
   }, 1200)),
   http.post(EP.fix, route(async ({ request }) => {
     const body = (await request.json()) as FixRequest
-    return json({ patches: db.fixPatches(body.finding_ids) })
+    return json({ patches: db.fixPatches(body.finding_ids), notes: db.fixNotes(body.finding_ids) })
   })),
 
   // ─── Asistente ───
@@ -172,6 +179,123 @@ export const handlers = [
   // ─── Configuración ───
   http.get(EP.config(':projectId'), route(({ params }) => json(db.getConfig(params.projectId as string)))),
   http.put(EP.config(':projectId'), route(async ({ request, params }) => json(db.saveConfig(params.projectId as string, (await request.json()) as ProjectConfig)))),
+
+  // ─── Reglas de negocio ───
+  http.get(EP.report.rules(':reportId'), route(({ request, params }) => {
+    const repo = param(request, 'repo') ?? (params.reportId as string).split('-')[0]
+    return json(rules.reportRules(repo, params.reportId as string))
+  })),
+  http.get(EP.rules.project(':projectId'), route(({ params }) => json(rules.projectRules(params.projectId as string)))),
+  http.put(EP.rules.project(':projectId'), route(async ({ request, params }) => {
+    const { content } = (await request.json()) as { content: string }
+    const saved = rules.upload(params.projectId as string, content)
+    return typeof saved === 'string' ? fail(422, 'invalid_rules', saved) : json(saved)
+  })),
+  http.post(EP.rules.states(':projectId'), route(async ({ request, params }) => {
+    const { ids, status, by } = (await request.json()) as { ids: string[]; status: 'borrador' | 'aprobada'; by?: 'equipo' | 'programa' }
+    const done = rules.setStates(params.projectId as string, ids, status, by)
+    return typeof done === 'string' ? fail(409, 'no_rules', done) : json(done)
+  })),
+  http.put(EP.rules.doubts(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { doubts } = (await request.json()) as { doubts: string[] }
+    const done = rules.setDoubts(params.projectId as string, params.ruleId as string, doubts)
+    return typeof done === 'string' ? fail(409, 'no_rules', done) : json(done)
+  })),
+  http.get(EP.rules.control(':projectId'), route(({ params }) => json(rules.concordance(params.projectId as string)))),
+  http.put(EP.rules.expected(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { expected } = (await request.json()) as { expected: 'cumple' | 'viola' | null }
+    const done = rules.setExpected(params.projectId as string, params.ruleId as string, expected)
+    return typeof done === 'string' ? fail(404, 'unknown_rule', done) : json(done)
+  })),
+  http.post(EP.rules.write(':projectId'), route(async ({ request, params }) => {
+    const { text } = (await request.json()) as { text: string }
+    const done = rules.writeRule(params.projectId as string, text)
+    return typeof done === 'string' ? fail(422, 'invalid_sentence', done) : json(done)
+  })),
+  http.post(EP.rules.testFixCode(':projectId', ':ruleId'), route(() => fail(409, 'fix_unavailable', 'La corrección del código con IA no está disponible en la demo'))),
+  http.post(EP.rules.answer(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { doubt, answer } = (await request.json()) as { doubt: string; answer: string }
+    const done = rules.answerDoubt(params.projectId as string, params.ruleId as string, doubt, answer)
+    return typeof done === 'string' ? fail(409, 'unknown_doubt', done) : json(done)
+  })),
+  http.delete(EP.rules.project(':projectId'), route(({ params }) => json(rules.remove(params.projectId as string)))),
+  http.post(EP.rules.validate(':projectId'), route(async ({ request, params }) => json(rules.validateFor(params.projectId as string, ((await request.json()) as { content: string }).content)))),
+  http.get(EP.rules.document(':projectId'), route(({ params, request }) => {
+    const doc = rules.documentFor(params.projectId as string, param(request, 'formato') ?? 'html')
+    return typeof doc === 'string' ? fail(409, 'no_rules', doc) : new HttpResponse(doc.body, { headers: { 'Content-Type': doc.type, 'Content-Disposition': `attachment; filename="${doc.name}"` } })
+  })),
+  http.get(EP.rules.template(':projectId'), route(({ params }) => new HttpResponse(rules.templateFor(params.projectId as string), { headers: { 'Content-Type': 'application/toml', 'Content-Disposition': 'attachment; filename="reglas_negocio.toml"' } }))),
+  http.post(EP.rules.precheck, route(async ({ request }) => {
+    const body = (await request.json()) as { url: string; branch: string; content?: string }
+    const result = rules.precheck(body.url, body.branch, body.content)
+    return result ? json(result) : fail(422, 'invalid_url', 'Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)')
+  })),
+  // Leer el documento con IA tarda: se simula una espera más larga
+  http.post(EP.rules.import, route(async ({ request }) => {
+    const result = rules.importDocument((await request.json()) as ImportRulesRequest)
+    return typeof result === 'string' ? fail(415, 'unsupported_type', result) : json(result)
+  }, 1200)),
+  // Mapa y arnés de pruebas: la IA tarda en proponer el arnés; la prueba de humo corre unos segundos
+  http.get(EP.rules.harness(':projectId'), route(({ params }) => json(harness.harnessView(params.projectId as string)))),
+  http.post(EP.rules.harness(':projectId'), route(({ params }) => json(harness.proposeHarness(params.projectId as string)), 1500)),
+  http.post(EP.rules.harnessFromRepo(':projectId'), route(() => fail(404, 'no_repo_harness', 'El repo no tiene un conftest.py con los fixtures `api` y `como`'))),
+  http.put(EP.rules.harness(':projectId'), route(async ({ request, params }) => {
+    const view = harness.editHarness(params.projectId as string, ((await request.json()) as { code: string }).code)
+    return view ? json(view) : fail(404, 'no_harness', 'Todavía no hay arnés: propónlo con la IA o usa el del repo')
+  })),
+  http.delete(EP.rules.harness(':projectId'), route(({ params }) => json(harness.removeHarness(params.projectId as string)))),
+  http.post(EP.rules.harnessSmoke(':projectId'), route(({ params }) => {
+    const view = harness.runSmoke(params.projectId as string)
+    return typeof view === 'string' ? fail(422, 'invalid_harness', view) : json(view)
+  })),
+  http.post(EP.rules.harnessApprove(':projectId'), route(({ params }) => {
+    const view = harness.approveHarness(params.projectId as string, demoUser.name)
+    return typeof view === 'string' ? fail(409, 'smoke_required', view) : json(view)
+  })),
+  // Pruebas de las reglas: generar y correr siguen en segundo plano (la vista se consulta cada 2 s)
+  http.get(EP.rules.tests(':projectId'), route(({ params }) => json(ruleTests.ruleTestsView(params.projectId as string)))),
+  http.post(EP.rules.tests(':projectId'), route(async ({ request, params }) => {
+    const { ids } = (await request.json()) as { ids: string[] | null }
+    const view = ruleTests.generateTests(params.projectId as string, ids)
+    return typeof view === 'string' ? fail(409, 'tests_busy', view) : json(view)
+  })),
+  http.post(EP.rules.testsRun(':projectId'), route(async ({ request, params }) => {
+    const { ids } = (await request.json()) as { ids: string[] | null }
+    const view = ruleTests.runTests(params.projectId as string, ids)
+    return typeof view === 'string' ? fail(409, 'nothing_to_run', view) : json(view)
+  })),
+  http.post(EP.rules.testsApprove(':projectId'), route(async ({ request, params }) => {
+    const { ids } = (await request.json()) as { ids: string[] }
+    return json(ruleTests.approveTests(params.projectId as string, ids, demoUser.name))
+  })),
+  http.put(EP.rules.test(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const view = ruleTests.editTest(params.projectId as string, params.ruleId as string, ((await request.json()) as { code: string }).code)
+    return view ? json(view) : fail(404, 'no_test', `${params.ruleId as string} todavía no tiene prueba: genérala primero`)
+  })),
+  http.delete(EP.rules.test(':projectId', ':ruleId'), route(({ params }) => json(ruleTests.removeTest(params.projectId as string, params.ruleId as string)))),
+  // Fase 5: matriz de permisos, evidencia de apoyo y prueba de fuerza (esta sigue en segundo plano)
+  http.get(EP.rules.testMatrix(':projectId', ':ruleId'), route(({ params }) => json(ruleTests.getMatrix(params.projectId as string, params.ruleId as string)))),
+  http.put(EP.rules.testMatrix(':projectId', ':ruleId'), route(async ({ request, params }) => {
+    const { cells } = (await request.json()) as { cells: Record<string, Record<string, 'permitido' | 'prohibido' | null>> }
+    const view = ruleTests.saveMatrix(params.projectId as string, params.ruleId as string, cells)
+    return typeof view === 'string' ? fail(422, 'empty_matrix', view) : json(view)
+  })),
+  http.post(EP.rules.testEvidence(':projectId', ':ruleId'), route(({ params }) => json(ruleTests.explainRule(params.projectId as string, params.ruleId as string)))),
+  http.post(EP.rules.testsStrength(':projectId'), route(async ({ request, params }) => {
+    const { ids } = (await request.json()) as { ids: string[] | null }
+    const view = ruleTests.strengthTests(params.projectId as string, ids)
+    return typeof view === 'string' ? fail(409, 'nothing_to_test', view) : json(view)
+  })),
+  // «Preparar todo» corre en el «servidor»: sigue aunque se cambie de pantalla
+  http.get(EP.rules.prepare(':projectId'), route(({ params }) => json(prepare.prepareView(params.projectId as string)), 100)),
+  http.post(EP.rules.prepare(':projectId'), route(({ params }) => {
+    const view = prepare.startPrepare(params.projectId as string)
+    return typeof view === 'string' ? fail(409, 'prepare_running', view) : json(view)
+  })),
+  http.delete(EP.rules.prepare(':projectId'), route(({ params }) => json(prepare.stopPrepare(params.projectId as string)))),
+  http.get(EP.rules.export(':projectId'), route(() => new HttpResponse(new Uint8Array([80, 75, 5, 6, ...new Array(18).fill(0)]), {
+    headers: { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="reglas-api-pagos.zip"' },
+  }))),
 
   // ─── Público ───
   http.get(EP.public.get(':shareId'), route(({ request, params }) => {

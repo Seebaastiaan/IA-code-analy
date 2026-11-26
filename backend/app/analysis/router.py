@@ -6,8 +6,10 @@ import sqlite3
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.analyses import reglas
+from app.analyses.reglas_store import RulesStore
 from app.analysis.jobs import Job, JobManager, jobs, now_iso
 from app.analysis.pipeline import ALL_ANALYZERS, CATEGORY_ANALYZERS
 from app.assistant.llm import GROQ_LABEL, model_label
@@ -43,6 +45,9 @@ class AnalyzeRequest(BaseModel):
     analyzers: list[Literal["bandit", "pip-audit", "pytest", "coverage", "ruff", "radon"]] = []
     sandbox: bool = True
     index: bool = True
+    # Reglas de negocio escritas o corregidas en el formulario: se guardan en el proyecto (cargadas en la app) y se
+    # usan si el repo no tiene reglas_negocio.toml o el suyo no es válido
+    rules: str | None = Field(default=None, max_length=reglas.MAX_BYTES)
 
 
 class JobStarted(BaseModel):
@@ -69,9 +74,14 @@ def _analyzers(chosen: list[str]) -> list[str]:
 
 def _start(
     conn: sqlite3.Connection, jobs: JobManager, settings: Settings, user_id: str, url: str, branch: str,
-    sandbox: bool = True, analyzers: list[str] | None = None, index: bool = True,
+    sandbox: bool = True, analyzers: list[str] | None = None, index: bool = True, rules: str | None = None,
 ) -> Job:
     chosen = _analyzers(analyzers or [])
+    if rules is not None:
+        try:
+            reglas.parse(rules)
+        except reglas.RulesError as exc:
+            raise ApiError(422, "invalid_rules", str(exc)) from exc
     m = REPO_URL.match(url.strip())
     if not m:
         raise ApiError(422, "invalid_url", "Usa la URL de un repositorio de GitHub (ej. https://github.com/equipo/proyecto)")
@@ -92,10 +102,15 @@ def _start(
         if jobs.running_for_repo(conn, repo_id):
             raise ApiError(409, "already_running", "Ya hay un análisis en curso para este repositorio")
         conn.execute("UPDATE repos SET status = 'analizando', error = NULL, branch = ?, url = ? WHERE id = ?", (branch, url, repo_id))
-    return jobs.start(
+    job = jobs.start(
         conn, settings, user_id, team_id, repo_id, url, repo["name"] if repo else name, branch, _latest_cat(conn, repo_id),
         sandbox=sandbox, analyzers=chosen, index=index,
     )
+    # Después de crear el job: save_upload confirma su propia transacción y soltaría antes el candado de arriba.
+    # La tarea del análisis no corre hasta que el endpoint cede el control, así que ya encuentra las reglas.
+    if rules is not None:
+        RulesStore(conn).save_upload(repo_id, rules, user_id)
+    return job
 
 
 def _own_job(conn: sqlite3.Connection, jobs: JobManager, job_id: str, user_id: str) -> Job:
@@ -114,7 +129,7 @@ async def analyze(body: AnalyzeRequest, user_id: UserId, conn: Db, jobs: Jobs, s
     membership(conn, user_id)
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers), index=body.index)
+        job = _start(conn, jobs, settings, user_id, body.url, body.branch.strip() or "main", sandbox=body.sandbox, analyzers=list(body.analyzers), index=body.index, rules=body.rules)
     return JobStarted(job_id=job.id)
 
 

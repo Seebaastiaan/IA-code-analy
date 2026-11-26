@@ -162,6 +162,11 @@ class JobManager:
         alive = [r for r in rows if not _stale(r)]
         return _from_row(alive[0], "") if alive else None
 
+    def forget_repo(self, repo_id: str) -> None:
+        """Olvida los jobs terminados de un repo que se eliminó (los que siguen corriendo no se tocan)."""
+        for job_id in [j.id for j in self._jobs.values() if j.repo_id == repo_id and j.status != "running"]:
+            del self._jobs[job_id]
+
     def is_local(self, job: Job) -> bool:
         return job.id in self._jobs
 
@@ -368,6 +373,11 @@ class JobManager:
         self._finish_step(job, f"  commit {result.commit} · {py} archivos .py · {result.seconds} s\n{found}")
         return True
 
+    @staticmethod
+    def _app_tests(settings: Settings, repo_id: str) -> dict[str, str] | None:
+        with session(settings.database_path) as conn:
+            return pipeline.app_rule_tests(conn, settings, repo_id)[0]
+
     async def _analyze(self, settings: Settings, job: Job) -> bool:
         """
         Pasos 2-7. Ruff, Bandit y Radon corren en un hilo mientras el sandbox crea el entorno, instala las
@@ -376,7 +386,10 @@ class JobManager:
         """
         chosen = set(job.analyzers)
         needs_sandbox = bool(chosen & pipeline.SANDBOX_ANALYZERS)
-        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id) if job.sandbox and needs_sandbox else (None, None)
+        # Pruebas de reglas generadas y aprobadas en la app: van al sandbox sobre la copia del repo (tests/_ia_voy_reglas)
+        overlay = await asyncio.to_thread(self._app_tests, settings, job.repo_id) if job.sandbox and needs_sandbox else None
+        extra = ("analisis", overlay) if overlay else ()
+        runner, reason = await asyncio.to_thread(sandbox.start, settings, job.repo_id, *extra) if job.sandbox and needs_sandbox else (None, None)
         if reason:
             self._emit(job, {"type": "log", "line": f"  aviso: sandbox {settings.sandbox} no disponible ({reason}); pytest, coverage y pip-audit se simulan"})
         static_task = asyncio.create_task(asyncio.to_thread(pipeline.analyze_static, settings, job.repo_id, job.analyzers))
@@ -418,6 +431,21 @@ class JobManager:
                 runner.close()
         return True
 
+    async def _auto_rules(self, settings: Settings, job: Job) -> asyncio.Task | None:
+        """Si el repo no trae reglas y el proyecto no tiene, empieza a sacarlas de su documento de requisitos (app.projects.reglas_auto)."""
+        from app.projects import reglas_auto
+
+        try:
+            document = await asyncio.to_thread(reglas_auto.pending_document, settings, job.repo_id)
+        except Exception:
+            log.exception("No se pudo revisar si %s necesita reglas", job.repo_id)
+            return None
+        if not document:
+            return None
+        self._emit(job, {"type": "log", "line": f"  reglas: el repo no trae reglas; las saco de {document} con IA mientras se analiza"})
+        # El nombre de la tarea es el documento: el paso 10 lo menciona
+        return asyncio.create_task(asyncio.to_thread(reglas_auto.run, settings, job.repo_id, job.name, job.user_id, document), name=document)
+
     async def _run(self, settings: Settings, job: Job) -> None:
         try:
             # Un reintento retoma el paso donde falló; si fue el clonado, se vuelve a clonar
@@ -425,7 +453,11 @@ class JobManager:
                 self._start_step(job)
                 if not await self._clone(settings, job):
                     return
+            # Reglas de negocio desde el documento de requisitos del repo, mientras corren los analizadores
+            rules_task = await self._auto_rules(settings, job)
             if job.result is None and not await self._analyze(settings, job):
+                if rules_task:
+                    rules_task.cancel()
                 return
             while job.step < job.total:
                 self._start_step(job)
@@ -438,7 +470,18 @@ class JobManager:
                 else:
                     await asyncio.sleep(settings.job_step_seconds)
                     summary = pipeline.step_summary(job.step, job.result)
+                    if job.step == pipeline.RULES_STEP and rules_task:
+                        # El proyecto no tenía reglas al empezar: las únicas son las que se están sacando del documento (borradores,
+                        # aunque la lectura termine antes de este paso). Sin esto decía «sin reglas declaradas»
+                        summary = (
+                            f"  reglas sacadas de {rules_task.get_name()}: entran en borrador y se comprueban desde el próximo análisis, "
+                            "cuando las apruebes («Preparar todo» en Configuración → Reglas)"
+                        )
                 self._finish_step(job, summary)
+            if rules_task:
+                if not rules_task.done():
+                    self._emit(job, {"type": "log", "line": "  reglas: terminando de leer el documento de requisitos…"})
+                self._emit(job, {"type": "log", "line": (await rules_task).line})
             num, score = _save_report(settings, job)
             job.status = "done"
             job.done = {"num": num, "score": score}

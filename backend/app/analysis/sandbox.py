@@ -9,8 +9,9 @@ Un solo script bash (SCRIPT) corre en WSL2 o en Docker según `SANDBOX`:
 - `off`: no se ejecuta nada; pipeline simula esos pasos (marcados "(simulado)").
 
 El script copia el clon a una carpeta temporal del sandbox (el clon del editor no se toca) y deja en OUT un
-`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más audit.json, junit.xml y
-coverage.json. El job espera cada `.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
+`{fase}.code` (código de salida, o `skip`) y un `{fase}.log` por fase, más audit.json, junit.xml,
+coverage.json y reglas.json (plugin ia_voy_reglas: pruebas ligadas a las reglas de negocio).
+El job espera cada `.code` para avanzar la terminal en vivo (`SandboxRun.wait`).
 """
 
 import asyncio
@@ -35,6 +36,10 @@ log = logging.getLogger(__name__)
 PHASES = ("venv", "install", "audit", "tests", "coverage")
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 LOG_TAIL_LINES = 12
+# Plugin de pytest de las reglas de negocio: se copia a OUT/plugins y pytest lo carga con -p ia_voy_reglas
+PLUGIN = Path(__file__).with_name("ia_voy_reglas.py")
+# Ejecutor de la prueba de fuerza (mutantes), también en OUT/plugins
+STRENGTH = Path(__file__).with_name("ia_voy_fuerza.py")
 
 SCRIPT = r"""#!/usr/bin/env bash
 # Sandbox de IA voy (app/analysis/sandbox.py). Uso: sandbox.sh SRC OUT
@@ -67,9 +72,33 @@ phase venv 300 bash -c '
 cd "$WORK" || { skip install audit tests coverage; exit 0; }
 if [ "$(cat "$OUT/venv.code")" != 0 ]; then skip install audit tests coverage; exit 0; fi
 export VIRTUAL_ENV="$WORK/.venv"; export PATH="$VIRTUAL_ENV/bin:$PATH"
+MODE="$(cat "$OUT/mode" 2>/dev/null || echo analisis)"
+# Código en una subcarpeta (un repo con frontend/ y backend/): si la raíz no tiene requirements.txt ni parecidos y
+# exactamente UNA carpeta de primer nivel sí (o la única que declara un framework web), todo se instala y corre desde ahí
+# (como mapa.source_root). Los resultados salen con rutas de esa carpeta: Python les antepone `subdir` (SandboxOutput).
+SUB=""
+if ! ls requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile > /dev/null 2>&1; then
+  CANDS="$(for d in */; do d="${d%/}"; for m in requirements.txt pyproject.toml setup.py setup.cfg manage.py Pipfile; do [ -f "$d/$m" ] && { echo "$d"; break; }; done; done)"
+  # Varias (api/ y worker/): la única que declara un framework web (como mapa.source_root)
+  if [ "$(printf "%s" "$CANDS" | grep -c .)" -gt 1 ]; then
+    CANDS="$(for d in $CANDS; do grep -qiE "(^|[^a-z])(fastapi|flask|django|starlette)([^a-z]|$)" "$d"/requirements.txt "$d"/pyproject.toml "$d"/setup.py "$d"/Pipfile 2>/dev/null && echo "$d"; done)"
+  fi
+  [ "$(printf "%s" "$CANDS" | grep -c .)" = 1 ] && SUB="$CANDS"
+fi
+# Archivos de IA voy sobre la copia (el arnés de reglas de negocio y su prueba de humo); el clon no se toca
+if [ -d "$OUT/overlay" ]; then mkdir -p "$WORK/$SUB"; cp -R "$OUT/overlay/." "$WORK/${SUB:+$SUB/}"; fi
+printf "%s" "$SUB" > "$OUT/subdir"
+[ -n "$SUB" ] && cd "$WORK/$SUB"
+# La prueba de fuerza escribe los mutantes con rutas desde la raíz del repo
+export IA_VOY_RAIZ="$WORK"
 
 phase install 600 bash -c '
-  if [ -f requirements.txt ]; then uv pip install -r requirements.txt || exit $?
+  if [ -f requirements.txt ]; then
+    uv pip install -r requirements.txt || exit $?
+    # Algunos repos declaran en pyproject.toml lo que requirements.txt no trae (InventoryFlow: python-dotenv)
+    if [ -f pyproject.toml ] && grep -qE "^dependencies[[:space:]]*=" pyproject.toml; then
+      uv pip install -q -r pyproject.toml || echo "aviso: no se pudieron instalar las dependencias de pyproject.toml"
+    fi
   elif [ -f pyproject.toml ] || [ -f setup.py ]; then uv pip install -e . || exit $?
   else echo "Sin requirements.txt ni pyproject.toml: no hay dependencias que instalar"
   fi
@@ -86,13 +115,61 @@ phase install 600 bash -c '
   fi
   exit 0'
 
+# Librerías de las pruebas de reglas (PROPUESTA_REGLAS_VERIFICABLES.md §7.3), solo dentro del sandbox: hora controlada
+# (time-machine, freezegun), HTTP a terceros simulado (respx, responses) y SQLAlchemy async (aiosqlite); pytest-django si
+# el proyecto es Django. Opcionales: si alguna no instala, las pruebas corren igual. httpx: el TestClient de FastAPI /
+# Starlette lo necesita y muchos proyectos no lo declaran
+rule_tools() {
+  uv pip install -q pytest httpx >> "$OUT/tools.log" 2>&1
+  uv pip install -q time-machine freezegun respx responses aiosqlite >> "$OUT/tools.log" 2>&1 || echo "aviso: no se instalaron todas las librerías de pruebas" >> "$OUT/tools.log"
+  if grep -qiE "^[[:space:]]*django" requirements.txt pyproject.toml 2>/dev/null; then
+    uv pip install -q pytest-django >> "$OUT/tools.log" 2>&1 || true
+  fi
+}
+
+# Prueba de humo del arnés (app.projects.reglas_arnes), primera corrida de las pruebas generadas
+# (app.projects.reglas_pruebas) o prueba de fuerza (app.projects.reglas_fuerza): solo pytest sobre tests/_ia_voy_reglas,
+# sin auditoría ni cobertura, y sin red (IA_VOY_SIN_RED: el plugin la bloquea)
+if [ "$MODE" = arnes ] || [ "$MODE" = pruebas ] || [ "$MODE" = fuerza ]; then
+  skip audit coverage
+  rule_tools
+  if [ "$MODE" = fuerza ]; then
+    # Cada mutante: escribir el archivo, correr la prueba de la regla y restaurar (app/analysis/ia_voy_fuerza.py)
+    phase tests 900 env IA_VOY_SIN_RED=1 PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" \
+      python "$OUT/plugins/ia_voy_fuerza.py" .ia_voy_mutantes.json "$OUT/fuerza.json"
+    exit 0
+  fi
+  TARGET=tests/_ia_voy_reglas/test_humo_arnes.py
+  [ "$MODE" = pruebas ] && TARGET=tests/_ia_voy_reglas
+  phase tests 300 env IA_VOY_SIN_RED=1 PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas.json" \
+    python -m pytest -q -p no:cacheprovider -o addopts= -p ia_voy_reglas --junitxml="$OUT/junit.xml" -o junit_family=xunit1 "$TARGET"
+  exit 0
+fi
+
 # Solo las dependencias del proyecto: pytest y coverage se instalan después
 SITE="$(echo "$VIRTUAL_ENV"/lib/python3*/site-packages)"
 phase audit 300 env -u VIRTUAL_ENV uvx pip-audit --path "$SITE" -f json -o "$OUT/audit.json" --progress-spinner off
 
 uv pip install -q pytest coverage > "$OUT/tools.log" 2>&1
-phase tests 600 coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider \
-  --junitxml="$OUT/junit.xml" -o junit_family=xunit1
+# Pruebas de reglas generadas por IA voy y aprobadas en la app (overlay en tests/_ia_voy_reglas): corren aparte, después
+# de las del repo, para no contar en sus fallas ni en la cobertura; su resultado va a reglas_app.json
+APP_TESTS=""
+if [ -d tests/_ia_voy_reglas ]; then APP_TESTS=1; rule_tools; fi
+export OUT APP_TESTS
+run_tests() {
+  # -p ia_voy_reglas (app/analysis/ia_voy_reglas.py, copiado a OUT/plugins): pruebas ligadas a reglas de negocio
+  env PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas.json" \
+    coverage run --source=. --omit='.venv/*' -m pytest -q --maxfail=50 -p no:cacheprovider -p ia_voy_reglas \
+    --junitxml="$OUT/junit.xml" -o junit_family=xunit1 ${APP_TESTS:+--ignore=tests/_ia_voy_reglas}
+  local code=$?
+  if [ -n "$APP_TESTS" ]; then
+    env IA_VOY_SIN_RED=1 PYTHONPATH="$OUT/plugins${PYTHONPATH:+:$PYTHONPATH}" IA_VOY_REGLAS_OUT="$OUT/reglas_app.json" \
+      python -m pytest -q -p no:cacheprovider -o addopts= -p ia_voy_reglas tests/_ia_voy_reglas > "$OUT/reglas_app.log" 2>&1
+  fi
+  return $code
+}
+export -f run_tests
+phase tests 600 bash -c run_tests
 phase coverage 120 coverage json -q -o "$OUT/coverage.json"
 """
 
@@ -115,6 +192,14 @@ class SandboxOutput:
     audit: dict | None = None
     junit: str | None = None
     coverage: dict | None = None
+    # Pruebas ligadas a reglas de negocio (plugin ia_voy_reglas); None = pytest no llegó a escribirlo
+    reglas: dict | None = None
+    # Las pruebas de reglas generadas y aprobadas en la app (corrida aparte sobre tests/_ia_voy_reglas)
+    reglas_app: dict | None = None
+    # Prueba de fuerza (modo `fuerza`): resultado de cada mutante
+    fuerza: dict | None = None
+    # Carpeta del repo donde corrió todo ("" = la raíz): los archivos de junit, coverage y reglas son relativos a ella
+    subdir: str = ""
 
     @property
     def usable(self) -> bool:
@@ -215,6 +300,10 @@ class SandboxRun:
             audit=_load_json(self.out / "audit.json"),
             junit=(self.out / "junit.xml").read_text(encoding="utf-8", errors="replace") if (self.out / "junit.xml").is_file() else None,
             coverage=_load_json(self.out / "coverage.json"),
+            reglas=_load_json(self.out / "reglas.json"),
+            reglas_app=_load_json(self.out / "reglas_app.json"),
+            fuerza=_load_json(self.out / "fuerza.json"),
+            subdir=(self.out / "subdir").read_text(encoding="utf-8").strip().strip("/") if (self.out / "subdir").is_file() else "",
         )
 
     def _kill_inside(self) -> None:
@@ -256,19 +345,35 @@ def _load_json(path: Path) -> dict | None:
         return None
 
 
-def start(settings: Settings, repo_id: str) -> tuple[SandboxRun | None, str | None]:
-    """(sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se simula."""
+def start(settings: Settings, repo_id: str, mode: str = "analisis", overlay: dict[str, str] | None = None) -> tuple[SandboxRun | None, str | None]:
+    """
+    (sandbox en marcha, None) o (None, motivo) si está apagado o no disponible: entonces se simula.
+    `mode="arnes"` corre solo la prueba de humo del arnés de reglas de negocio, `"pruebas"` las pruebas generadas y
+    `"fuerza"` la prueba de fuerza (mutantes); `overlay` = archivos (ruta relativa →
+    texto) que se escriben sobre la copia temporal del repo antes de instalar.
+    """
     if settings.sandbox == "off":
         return None, None
     reason = _available(settings)
     if reason:
         return None, reason
-    out = clones_root(settings) / f"{repo_id}.sandbox"
+    # Carpeta propia por modo: la prueba del arnés no pisa la salida de un análisis del mismo repo
+    out = clones_root(settings) / (f"{repo_id}.sandbox" if mode == "analisis" else f"{repo_id}.{mode}")
     name = f"ia-voy-{repo_id}-{secrets.token_hex(3)}"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     # newline="\n": bash no acepta los \r de Windows
     (out / "sandbox.sh").write_text(SCRIPT, encoding="utf-8", newline="\n")
+    (out / "mode").write_text(mode, encoding="utf-8", newline="\n")
+    for rel, text in (overlay or {}).items():
+        target = (out / "overlay" / rel).resolve()
+        if not target.is_relative_to((out / "overlay").resolve()):
+            raise ValueError(f"ruta fuera de la copia: {rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8", newline="\n")
+    (out / "plugins").mkdir()
+    for script in (PLUGIN, STRENGTH):
+        (out / "plugins" / script.name).write_text(script.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
     # Entorno mínimo: el código analizado no hereda las claves del backend (.env ya cargado en os.environ)
     env = {k: v for k, v in os.environ.items() if k.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "LOCALAPPDATA", "PROGRAMDATA", "DOCKER_HOST"}}
     # Que wsl.exe escriba sus errores (p. ej. distro no encontrada) en UTF-8 y no en UTF-16
@@ -302,7 +407,20 @@ class TestRun:
     failures: list[TestCase] = field(default_factory=list)
 
 
-def parse_junit(xml: str | None) -> TestRun:
+def _under(prefix: str, path: str) -> str:
+    """Ruta del repo a partir de una relativa a la carpeta del código (`backend/` + `tests/x.py`)."""
+    return f"{prefix}/{path}" if prefix and path and not path.startswith("/") else path
+
+
+def rebase_tests(data: dict | None, prefix: str) -> dict | None:
+    """El reglas.json del plugin con los archivos y nodeids desde la raíz del repo (si el código está en una subcarpeta)."""
+    if not prefix or not isinstance(data, dict) or not isinstance(data.get("tests"), list):
+        return data
+    tests = [{**t, "file": _under(prefix, str(t.get("file") or "")), "nodeid": _under(prefix, str(t.get("nodeid") or ""))} if isinstance(t, dict) else t for t in data["tests"]]
+    return {**data, "tests": tests}
+
+
+def parse_junit(xml: str | None, prefix: str = "") -> TestRun:
     run = TestRun()
     if not xml:
         return run
@@ -324,19 +442,19 @@ def parse_junit(xml: str | None) -> TestRun:
                 file = (case.get("classname") or "").replace(".", "/") + ".py"
             line = int(case.get("line") or -1) + 1
             message = (bad.get("message") or bad.text or "").strip().splitlines()
-            run.failures.append(TestCase(case.get("name") or "?", file, max(line, 1), message[0][:300] if message else "", bad.tag))
+            run.failures.append(TestCase(case.get("name") or "?", _under(prefix, file), max(line, 1), message[0][:300] if message else "", bad.tag))
         else:
             run.passed += 1
     return run
 
 
-def parse_coverage(data: dict | None) -> dict[str, tuple[int, int]]:
+def parse_coverage(data: dict | None, prefix: str = "") -> dict[str, tuple[int, int]]:
     """{archivo: (líneas ejecutadas, sentencias)} del coverage.json."""
     files = (data or {}).get("files") or {}
     out = {}
     for path, info in files.items():
         summary = info.get("summary") or {}
-        out[path.replace("\\", "/").removeprefix("./")] = (int(summary.get("covered_lines", 0)), int(summary.get("num_statements", 0)))
+        out[_under(prefix, path.replace("\\", "/").removeprefix("./"))] = (int(summary.get("covered_lines", 0)), int(summary.get("num_statements", 0)))
     return out
 
 

@@ -26,6 +26,8 @@ export const EP = {
     get: (id: string) => `/api/report/${id}`,
     share: (id: string) => `/api/report/${id}/share`,
     export: (id: string) => `/api/report/${id}/export`,
+    /** Matriz regla → estado → evidencia de un análisis (id puede ser 'latest' con ?repo=) */
+    rules: (id: string) => `/api/report/${id}/reglas`,
   },
   file: '/api/file',
   fix: '/api/fix',
@@ -33,6 +35,53 @@ export const EP = {
   chatStream: '/api/chat/stream',
   diff: '/api/diff',
   config: (projectId: string) => `/api/projects/${projectId}/config`,
+  /** Reglas de negocio: origen y carga desde Configuración (docs/adr/ADR-003) */
+  rules: {
+    project: (projectId: string) => `/api/projects/${projectId}/reglas`,
+    /** Las reglas son de cada proyecto: se validan contra su repositorio y la plantilla lleva su nombre */
+    validate: (projectId: string) => `/api/projects/${projectId}/reglas/validar`,
+    template: (projectId: string) => `/api/projects/${projectId}/reglas/plantilla`,
+    /** Las reglas como documento para leer y presentar (formato = html | md) */
+    document: (projectId: string) => `/api/projects/${projectId}/reglas/documento`,
+    /** Revisa las reglas de un repo antes de analizarlo (Nuevo análisis), sin clonarlo */
+    precheck: '/api/reglas/revisar',
+    /** Saca las reglas de un documento de requisitos (PDF, Word, Markdown) con IA */
+    import: '/api/reglas/importar',
+    /** POST: aprueba (o vuelve a borrador) reglas de las cargadas en la app */
+    states: (projectId: string) => `/api/projects/${projectId}/reglas/estado`,
+    /** PUT: las dudas que siguen abiertas de una regla (quitar una = resolverla) */
+    doubts: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/dudas`,
+    control: (projectId: string) => `/api/projects/${projectId}/reglas/concordancia`,
+    expected: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/esperado`,
+    write: (projectId: string) => `/api/projects/${projectId}/reglas/redactar`,
+    answer: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/${ruleId}/respuesta`,
+    contradiction: (projectId: string) => `/api/projects/${projectId}/reglas/contradiccion`,
+    /** Mapa del proyecto (endpoints, modelos, roles) leído del código sin IA */
+    map: (projectId: string) => `/api/projects/${projectId}/reglas/mapa`,
+    /** Arnés de pruebas: GET / POST (proponer con IA) / PUT (editar) / DELETE */
+    harness: (projectId: string) => `/api/projects/${projectId}/reglas/arnes`,
+    harnessFromRepo: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/repo`,
+    harnessSmoke: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/humo`,
+    harnessApprove: (projectId: string) => `/api/projects/${projectId}/reglas/arnes/aprobar`,
+    /** Pruebas de las reglas generadas por IA voy: GET (lista) / POST (generar) */
+    tests: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas`,
+    testsRun: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/correr`,
+    testsApprove: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/aprobar`,
+    /** PUT (editar) / DELETE de la prueba de una regla */
+    test: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}`,
+    /** GET / PUT de la matriz de permisos de una regla (la prueba sale de la tabla, sin IA) */
+    testMatrix: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/matriz`,
+    /** POST: dónde parece estar implementada la regla (IA, no cuenta) */
+    testEvidence: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/evidencia`,
+    /** POST: la IA propone el cambio en el CÓDIGO para que cumpla la regla (el documento manda); no guarda nada */
+    testFixCode: (projectId: string, ruleId: string) => `/api/projects/${projectId}/reglas/pruebas/${ruleId}/corregir`,
+    /** POST: prueba de fuerza con mutación dirigida (en segundo plano) */
+    testsStrength: (projectId: string) => `/api/projects/${projectId}/reglas/pruebas/fuerza`,
+    /** «Preparar todo» en el servidor: GET (estado) / POST (lanzar) / DELETE (detener) */
+    prepare: (projectId: string) => `/api/projects/${projectId}/reglas/preparar`,
+    /** Zip con reglas_negocio.toml, el arnés y las pruebas aprobadas */
+    export: (projectId: string) => `/api/projects/${projectId}/reglas/exportar`,
+  },
   github: {
     status: '/api/github/status',
     repos: '/api/github/repos',

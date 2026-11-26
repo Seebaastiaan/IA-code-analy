@@ -11,15 +11,25 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.analyses.familias import AUTO_FIX_ES
+from app.analyses.mensajes import bandit_message, ruff_message
 from app.analyses.models import ComplexityInput, FindingInput
+from app.analyses.remedies import bandit_remedy, ruff_remedy
 from app.analyses.scoring import grade
 from app.errors import ApiError
 
 TIMEOUT_S = 60
 # Analizar un repo completo puede tardar más que un archivo
 DIR_TIMEOUT_S = 300
-# Reglas por defecto de Ruff (E4, E7, E9, F) + bugbear, simplificaciones y comprensiones
+# Reglas de Ruff sin configuración del repo: las que eran por defecto (E4, E7, E9, F) + bugbear,
+# simplificaciones y comprensiones. Se fijan con --select: desde Ruff 0.17 el conjunto por defecto trae ~400
+# reglas (estilo, imports, copyright…) y el reporte se llenaba de ruido que no está en docs/ia/catalogo-reglas.md.
+RUFF_SELECT = "E4,E7,E9,F,B,SIM,C4"
+# Con la configuración del repo: la suya más estas
 RUFF_EXTEND = "B,SIM,C4"
+# Correcciones de Ruff que se ofrecen. "unsafe" puede cambiar el comportamiento en casos raros: el editor muestra
+# el diff y la persona decide antes de guardar. "display-only" no se aplica.
+FIX_APPLICABILITY = ("safe", "unsafe")
 BANDIT_SEV = {"HIGH": "alta", "MEDIUM": "media", "LOW": "baja"}
 BANDIT_CONF = {"HIGH": "alta", "MEDIUM": "media", "LOW": "baja"}
 
@@ -44,19 +54,21 @@ RUFF_CONFIGS = ("ruff.toml", ".ruff.toml", "pyproject.toml")
 
 def _ruff_config_args(root: Path | None) -> list[str]:
     """
-    Usa la configuración de Ruff del propio repo si la tiene; si no, `--isolated` para que no se cuele
-    la de una carpeta superior (el pyproject.toml del backend) ni la del usuario del servidor.
+    Configuración y reglas de Ruff: la del propio repo (más RUFF_EXTEND) si la tiene; si no, `--isolated` (que no
+    se cuele la de una carpeta superior ni la del usuario del servidor) con las reglas fijas de RUFF_SELECT.
     """
+    # --no-fix siempre: si el repo trae `fix = true`, Ruff con stdin imprime el código corregido en vez del JSON
+    # (y sobre la carpeta reescribiría los archivos del clon). Las correcciones se aplican aparte con fix_content.
     for name in RUFF_CONFIGS:
         cfg = root / name if root else None
         if cfg and cfg.is_file() and (name != "pyproject.toml" or "[tool.ruff" in cfg.read_text(encoding="utf-8", errors="replace")):
-            return ["--config", str(cfg)]
-    return ["--isolated"]
+            return ["--config", str(cfg), "--extend-select", RUFF_EXTEND, "--no-fix"]
+    return ["--isolated", "--select", RUFF_SELECT, "--no-fix"]
 
 
 def ruff_raw(content: str, path: str, cwd: Path | None) -> list[dict]:
     """Diagnósticos de Ruff (con sus correcciones) para `content` como si fuera `path` dentro del repo."""
-    args = ["ruff", "check", "--output-format", "json", "--no-cache", *_ruff_config_args(cwd), "--extend-select", RUFF_EXTEND, "--stdin-filename", path, "-"]
+    args = ["ruff", "check", "--output-format", "json", "--no-cache", *_ruff_config_args(cwd), "--stdin-filename", path, "-"]
     out = _run(args, content, cwd)
     try:
         return json.loads(out)
@@ -80,28 +92,34 @@ def _ruff_severity(code: str) -> str:
     return "baja"
 
 
-def _safe_fix(diag: dict) -> dict | None:
+def _auto_fix(diag: dict) -> dict | None:
+    """La corrección de Ruff del diagnóstico, si se puede aplicar (safe o unsafe, con ediciones)."""
     fix = diag.get("fix")
-    return fix if fix and fix.get("applicability") == "safe" and fix.get("edits") else None
+    return fix if fix and fix.get("applicability") in FIX_APPLICABILITY and fix.get("edits") else None
 
 
 def ruff_finding(path: str, d: dict) -> FindingInput:
-    fix = _safe_fix(d)
+    """Hallazgo de Ruff con recomendación concreta. Sin corrección de Ruff, la propone la IA en el editor."""
+    code = d["code"] or "E999"
+    fix = _auto_fix(d)
+    message = ruff_message(d["message"], code)
+    why, rec = ruff_remedy(code, message)
+    if fix:
+        rec += AUTO_FIX_ES
     return FindingInput(
-        sev=_ruff_severity(d["code"] or ""), cat="prac", tool="Ruff", rule=d["code"] or "E999", file=path, line=d["location"]["row"],
-        msg=d["message"],
-        why=f"Regla {d.get('name') or d['code']} de Ruff: suele indicar un error latente o código difícil de mantener. Documentación: {d.get('url') or 'https://docs.astral.sh/ruff/rules/'}",
-        rec=f"Corrección automática disponible: {fix['message']}." if fix and fix.get("message") else "Corrígelo siguiendo la documentación de la regla.",
-        fix=fix is not None,
+        sev=_ruff_severity(code), cat="prac", tool="Ruff", rule=code, file=path, line=d["location"]["row"],
+        msg=message, why=why, rec=rec, fix=True, fix_kind="auto" if fix else "ia",
     )
 
 
 def bandit_finding(path: str, r: dict) -> FindingInput:
+    """Hallazgo de Bandit con recomendación concreta. Bandit no corrige: la corrección la propone la IA."""
+    message = bandit_message(r["test_id"], r["issue_text"])
+    why, rec = bandit_remedy(r["test_id"], message)
+    conf = BANDIT_CONF.get(r["issue_confidence"], "baja")
     return FindingInput(
         sev=BANDIT_SEV.get(r["issue_severity"], "baja"), cat="seg", tool="Bandit", rule=r["test_id"], file=path, line=r["line_number"],
-        msg=r["issue_text"],
-        why=f"Bandit detecta un patrón de riesgo de seguridad (confianza {BANDIT_CONF.get(r['issue_confidence'], 'baja')}). Documentación: {r.get('more_info', '')}".strip(),
-        rec="Revisa la documentación de la regla y elimina el patrón inseguro. Si es un falso positivo, ignora la regla en la configuración del proyecto.",
+        msg=message, why=f"{why} (Bandit, confianza {conf})", rec=rec, fix=True, fix_kind="ia",
     )
 
 
@@ -141,7 +159,7 @@ def static_findings_dir(root: Path, files: list[str], ruff_on: bool = True, band
     if not py:
         return []
     try:
-        ruff = json.loads(_run(["ruff", "check", "--output-format", "json", "--no-cache", *_ruff_config_args(root), "--extend-select", RUFF_EXTEND, "."], "", root, DIR_TIMEOUT_S) or "[]") if ruff_on else []
+        ruff = json.loads(_run(["ruff", "check", "--output-format", "json", "--no-cache", *_ruff_config_args(root), "."], "", root, DIR_TIMEOUT_S) or "[]") if ruff_on else []
         bandit = json.loads(_run(["bandit", "-r", ".", "-f", "json", "-q", "-x", BANDIT_EXCLUDE], "", root, DIR_TIMEOUT_S))["results"] if bandit_on else []
     except (json.JSONDecodeError, KeyError) as exc:
         raise AnalyzerError("Ruff o Bandit no devolvieron un resultado válido") from exc
@@ -236,7 +254,7 @@ def fix_content(content: str, path: str, cwd: Path | None, targets: list[tuple[s
     Aplica las correcciones de Ruff de los hallazgos `targets` = (regla, texto de la línea, línea).
     Cada hallazgo se ubica por regla y texto de su línea (o la más cercana), no solo por número de línea.
     """
-    diags = [d for d in ruff_raw(content, path, cwd) if _safe_fix(d)]
+    diags = [d for d in ruff_raw(content, path, cwd) if _auto_fix(d)]
     lines = content.split("\n")
     edits, used = [], set()
     for rule, code, line in targets:

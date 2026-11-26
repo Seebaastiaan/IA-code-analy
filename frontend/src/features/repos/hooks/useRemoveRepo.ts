@@ -7,7 +7,8 @@ import { reposApi } from '../api/repos.api'
 import { useSelectedRepo } from '../store/selectedRepo.store'
 import type { Repo } from '../types'
 
-export function useRemoveRepo() {
+/** Quita un repositorio del equipo con todos sus análisis (no toca el de GitHub). */
+export function useRemoveRepo(onDone?: () => void) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (repo: Repo) => reposApi.remove(repo.id),
@@ -22,7 +23,8 @@ export function useRemoveRepo() {
       for (const key of ['report', 'tree', 'file', 'config', 'analyses', 'index']) {
         queryClient.removeQueries({ queryKey: [key, repo.id] })
       }
-      toast(`Se quitó ${repo.name} del analizador`)
+      toast(`Se eliminó ${repo.name}`, { tone: 'ok' })
+      onDone?.()
       await Promise.all([invalidateAnalysis(queryClient), queryClient.invalidateQueries({ queryKey: TEAM_KEY })])
     },
     onError: (error) => toast(error.message, { tone: 'err' }),

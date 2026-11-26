@@ -52,6 +52,8 @@ def _path(raw: str) -> str:
 
 def normalize(cfg: ProjectConfig) -> ProjectConfig:
     weights = {k: _percent(cfg.weights.get(k), f"El peso de {k}") for k in ("seg", "test", "prac")}
+    # Reglas de negocio: opcional, 0 = no entra al score (configuraciones anteriores no lo traen)
+    weights["neg"] = _percent(cfg.weights.get("neg", 0), "El peso de reglas de negocio")
     if sum(weights.values()) <= 0:
         raise ConfigError("Al menos un peso debe ser mayor que 0")
     thresholds = {"score": _percent(cfg.thresholds.get("score"), "El score mínimo"), "cov": _percent(cfg.thresholds.get("cov"), "La cobertura mínima")}
@@ -62,13 +64,14 @@ def normalize(cfg: ProjectConfig) -> ProjectConfig:
 
 def to_toml(cfg: ProjectConfig) -> str:
     total = sum(cfg.weights.values()) or 1
-    w = {k: cfg.weights[k] / total for k in ("seg", "test", "prac")}
+    w = {k: cfg.weights.get(k, 0) / total for k in ("seg", "test", "prac", "neg")}
     lst = lambda xs: "[" + ", ".join(json.dumps(x, ensure_ascii=False) for x in xs) + "]"
     return f"""# .ia_voy.toml — configuración de IA voy (se edita desde la pantalla Configuración)
 [pesos]
 seguridad = {w["seg"]:.2f}
 pruebas   = {w["test"]:.2f}
 practicas = {w["prac"]:.2f}
+negocio   = {w["neg"]:.2f}
 
 [umbrales]
 score_minimo     = {cfg.thresholds["score"]}
@@ -89,7 +92,7 @@ def from_toml(text: str, base: ProjectConfig) -> ProjectConfig:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{FILENAME} no es TOML válido: {exc}") from exc
     pesos, umbrales = data.get("pesos", {}), data.get("umbrales", {})
-    names = {"seg": "seguridad", "test": "pruebas", "prac": "practicas"}
+    names = {"seg": "seguridad", "test": "pruebas", "prac": "practicas", "neg": "negocio"}
     weights = dict(base.weights)
     if any(n in pesos for n in names.values()):
         # El archivo guarda fracciones (0.50); la app trabaja en porcentajes (50)

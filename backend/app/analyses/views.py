@@ -4,6 +4,9 @@ import json
 import sqlite3
 from typing import TYPE_CHECKING
 
+from app.analyses import familias
+from app.analyses.mensajes import bandit_message, ruff_message
+from app.analyses.remedies import bandit_remedy, ruff_remedy
 from app.analyses.schemas import Finding, Progress, Repo, Scores
 from app.analyses.scoring import category_scores, effective_coverage, global_score
 from app.analyses.store import AnalysisStore, ProjectConfig
@@ -31,7 +34,9 @@ def scores(report: sqlite3.Row, findings: list[sqlite3.Row], cfg: ProjectConfig)
     else:
         cov = effective_coverage(report["coverage_total"], report_analyzers(report))
         cats = category_scores(((f["cat"], f["sev"]) for f in findings if f["status"] == "open"), cov, report["tests_failed"], report["code_lines"])
-    return Scores(**cats, global_=global_score(cfg.weights, cats))
+    # Reglas de negocio: se guarda al analizar (sus resultados no cambian después); los reportes anteriores no la tienen
+    neg = report["neg"]
+    return Scores(**cats, neg=neg, global_=global_score(cfg.weights, {**cats, "neg": neg}))
 
 
 def report_analyzers(report: sqlite3.Row) -> list[str]:
@@ -43,10 +48,38 @@ def report_scores(store: AnalysisStore, report: sqlite3.Row, cfg: ProjectConfig)
     return scores(report, visible(store.findings(report["id"]), cfg), cfg)
 
 
+def fix_kind(row: sqlite3.Row) -> str | None:
+    """auto | ia | None. Los reportes anteriores a las correcciones con IA solo tienen `fix` (de Ruff)."""
+    if not row["fix"]:
+        return None
+    return row["fix_kind"] or "auto"
+
+
+def localize(tool: str, rule: str, msg: str, why: str, rec: str, auto_fix: bool = False) -> tuple[str, str, str]:
+    """
+    Mensaje, por qué y qué hacer en español aunque el hallazgo se haya guardado antes de tener la traducción (análisis
+    viejos con «Try, Except, Pass detected.») o con el ejemplo genérico de la documentación de Ruff.
+    """
+    if tool == "Ruff":
+        msg = ruff_message(msg, rule)
+        if why.startswith("Ruff ") or familias.english(why) or "Escríbelo así:" in rec:
+            why, rec = ruff_remedy(rule, msg)
+        rec = familias.auto_fix_note(rec)
+        if auto_fix and familias.AUTO_FIX_ES.strip() not in rec:
+            rec += familias.AUTO_FIX_ES
+    elif tool == "Bandit":
+        if familias.english(msg):
+            msg = bandit_message(rule, msg)
+        if why.startswith("Bandit ") and familias.english(why):
+            why, rec = bandit_remedy(rule, msg)
+    return msg, why, rec
+
+
 def finding_view(row: sqlite3.Row, with_code: bool = True) -> Finding:
+    msg, why, rec = localize(row["tool"], row["rule"], row["msg"], row["why"], row["rec"], fix_kind(row) == "auto")
     return Finding(
         id=row["id"], sev=row["sev"], cat=row["cat"], tool=row["tool"], rule=row["rule"], file=row["file"], line=row["line"],
-        msg=row["msg"], why=row["why"], rec=row["rec"], fix=bool(row["fix"]), status=row["status"],
+        msg=msg, why=why, rec=rec, fix=bool(row["fix"]), fix_kind=fix_kind(row), status=row["status"],
         snippet=json.loads(row["snippet"]) if with_code and row["snippet"] else None,
     )
 

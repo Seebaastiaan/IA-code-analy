@@ -12,11 +12,11 @@ JOB_STEPS: list[tuple[str, str]] = [
     ("Instalando dependencias", "uv pip install -r requirements.txt"),
     ("Bandit", "bandit -r . -f json"),
     ("pip-audit", "pip-audit --path .venv/…/site-packages -f json"),
-    ("pytest", "coverage run -m pytest -q --maxfail=50"),
+    ("pytest", "coverage run -m pytest -q --maxfail=50 -p ia_voy_reglas"),
     ("coverage", "coverage json"),
     ("Ruff", "ruff check . --output-format json"),
     ("Radon", "radon cc . -j && radon mi . -j"),
-    ("Verificando reglas de negocio", "reglas_negocio.toml → patrones prohibido/obligatorio"),
+    ("Verificando reglas de negocio", "reglas_negocio.toml → patrones y pruebas @pytest.mark.regla"),
     ("Calculando score", "agregación ponderada (.ia_voy.toml)"),
     ("Indexando para el asistente", "ast → embeddings (Gemini) → SQLite"),
 ]

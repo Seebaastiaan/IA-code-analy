@@ -16,6 +16,7 @@ export const FIXES: Record<number, [string, number, string | null][]> = {
     ['tokens.py', 9, '    return "".join(secrets.choice(ALFABETO) for _ in range(longitud))'],
   ],
   9: [['api.py', 3, null]],
+  7: [['tests/test_api.py', 14, '    assert r.status_code == 422']],
   10: [
     [
       'pagos/procesador.py',
@@ -54,10 +55,10 @@ export const FINDINGS: FindingTemplate[] = [
     msg: 'Cobertura de 31 % (umbral: 60 %)',
     why: 'La lógica de reembolsos casi no tiene pruebas y maneja dinero.',
     rec: 'Agregar pruebas para los casos de reembolso parcial y total.' },
-  { id: 7, sev: 'media', cat: 'test', tool: 'pytest', rule: 'FAIL', file: 'tests/test_api.py', line: 13, fix: false,
+  { id: 7, sev: 'media', cat: 'test', tool: 'pytest', rule: 'FAIL', file: 'tests/test_api.py', line: 13, fix: true,
     msg: 'test_crear_pago_invalido falló (AssertionError)',
     why: 'Una prueba fallida indica que el comportamiento esperado cambió o hay un error.',
-    rec: 'Revisar el código de estado esperado (400 vs 422).' },
+    rec: 'FastAPI responde 422 cuando el cuerpo no pasa la validación: cambia la aserción a `assert r.status_code == 422` o valida el monto y responde 400.' },
   { id: 8, sev: 'media', cat: 'prac', tool: 'Radon', rule: 'CC · D', file: 'pagos/procesador.py', line: 20, fix: false,
     msg: 'Complejidad ciclomática 24 en procesar_lote()',
     why: 'Funciones muy complejas son difíciles de probar y mantener.',

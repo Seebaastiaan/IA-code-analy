@@ -146,10 +146,14 @@ def test_hallazgo_mencionado_lleva_su_codigo(client, repo_id, llm):
 
 def test_accion_solo_para_hallazgos_con_correccion(client, repo_id, llm):
     report = client.get("/api/report/latest", params={"repo": repo_id}).json()
-    fixable = next(f for f in report["findings"] if f["fix"])
+    auto = next(f for f in report["findings"] if f["fix_kind"] == "auto")
+    ia = next(f for f in report["findings"] if f["fix_kind"] == "ia")
+    # La cobertura baja no se corrige con un parche
     manual = next(f for f in report["findings"] if not f["fix"])
-    llm.reply = {"answer": "Aplica la corrección.", "sources": [], "finding_id": fixable["id"]}
-    assert ask(client, repo_id, "¿Cómo lo arreglo?").json()["action"] == {"finding_id": fixable["id"], "label": "Aplicar corrección automática"}
+    llm.reply = {"answer": "Aplica la corrección.", "sources": [], "finding_id": auto["id"]}
+    assert ask(client, repo_id, "¿Cómo lo arreglo?").json()["action"] == {"finding_id": auto["id"], "label": "Aplicar corrección automática"}
+    llm.reply = {"answer": "Lee la clave del entorno.", "sources": [], "finding_id": ia["id"]}
+    assert ask(client, repo_id, "¿Y la clave?").json()["action"] == {"finding_id": ia["id"], "label": "Corregir con IA"}
     llm.reply = {"answer": "Corrígelo a mano.", "sources": [], "finding_id": manual["id"]}
     assert ask(client, repo_id, "¿Y este?").json()["action"] is None
 
@@ -227,11 +231,20 @@ def test_503_reintenta_el_mismo_modelo(settings, monkeypatch):
     assert seen == ["m1", "m1"] and result.model == "M1"
 
 
+def test_503_espera_dos_veces_antes_de_pasar_al_respaldo(settings, monkeypatch):
+    # El principal saturado a ratos: con un solo reintento casi todo lo contestaba el respaldo (más débil)
+    waits: list[float] = []
+    monkeypatch.setattr(llm_mod.time, "sleep", waits.append)
+    seen: list[str] = []
+    result = make_llm(settings, {"m1": [503, 503]}, seen).answer("s", [], {})
+    assert seen == ["m1", "m1", "m1"] and result.model == "M1" and waits == [1.5, 6.0]
+
+
 def test_respaldo_entre_modelos_y_groq(settings, monkeypatch):
     monkeypatch.setattr(llm_mod, "BUSY_RETRY_WAIT_S", 0)
     seen: list[str] = []
-    result = make_llm(settings, {"m1": [429], "m2": [503, 503]}, seen, groq="g").answer("s", [], {})
-    assert seen == ["m1", "m2", "m2", "groq"] and result.model == "Groq · Llama 3.3" and result.data["answer"] == "de groq"
+    result = make_llm(settings, {"m1": [429], "m2": [503, 503, 503]}, seen, groq="g").answer("s", [], {})
+    assert seen == ["m1", "m2", "m2", "m2", "groq"] and result.model == "Groq · Llama 3.3" and result.data["answer"] == "de groq"
 
 
 def test_error_no_recuperable_no_usa_respaldo(settings):

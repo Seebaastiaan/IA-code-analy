@@ -6,7 +6,7 @@ import { CATEGORIES, type Category, type Severity } from '@/shared/types/common'
 import { Button, Card, Chip, DeltaBadge, Icon, ProgressBar, ScoreRing, buttonClass } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { formatDateTime, formatDuration } from '@/shared/utils/format'
-import { f1, weightSum } from '@/shared/utils/score'
+import { f1, usesNeg, weightSum } from '@/shared/utils/score'
 import type { CatFilter } from '../hooks/useReportFilters'
 import type { Report } from '../types'
 
@@ -20,7 +20,9 @@ interface ReportHeaderProps {
 export function ReportHeader({ report: r, cat, onCat, onShare }: ReportHeaderProps) {
   const open = r.findings.filter((f) => f.status === 'open')
   const count = (s: Severity) => open.filter((f) => f.sev === s).length
-  const sum = weightSum(r.weights) || 1
+  const neg = usesNeg(r.weights, r.scores)
+  // Los pesos se normalizan solo con lo que entra al score (sin `neg` si no tiene peso o nota)
+  const sum = (neg ? weightSum(r.weights) : weightSum({ ...r.weights, neg: 0 })) || 1
   const w = (k: Category) => (r.weights[k] / sum).toFixed(2)
   // IA voy analiza solo Python: se avisa qué más trae el repo (el resto no entra al score)
   const python = r.languages.find((l) => l.name === 'Python')?.files ?? 0
@@ -30,7 +32,9 @@ export function ReportHeader({ report: r, cat, onCat, onShare }: ReportHeaderPro
     k === 'seg'
       ? `${open.filter((f) => f.cat === 'seg').length} hallazgos abiertos`
       : k === 'test'
-        ? `${r.summary.coverage_total === null ? 'Cobertura no medida' : `Cobertura ${r.summary.coverage_total} %`} · ${r.analyzers.includes('pytest') ? `${r.summary.tests_failed} prueba(s) fallan` : 'pytest no se corrió'}`
+        ? r.summary.coverage_total === 0 && r.summary.tests_failed === 0 && r.analyzers.includes('pytest')
+          ? 'Sin pruebas: ninguna línea del código se prueba'
+          : `${r.summary.coverage_total === null ? 'Cobertura no medida' : `Cobertura ${r.summary.coverage_total} %`} · ${r.analyzers.includes('pytest') ? `${r.summary.tests_failed} prueba(s) fallan` : 'pytest no se corrió'}`
         : `Complejidad media ${r.summary.avg_complexity}`
 
   return (
@@ -125,9 +129,15 @@ export function ReportHeader({ report: r, cat, onCat, onShare }: ReportHeaderPro
         })}
       </div>
       <p className="mt-4 font-mono text-xs text-slate-500 bg-slate-50 dark:bg-slate-950 rounded-lg px-3 py-2 overflow-x-auto whitespace-nowrap scroll-thin">
-        Score = {w('seg')} × {r.scores.seg} + {w('test')} × {r.scores.test} + {w('prac')} × {r.scores.prac} ={' '}
-        <b className={TONE[tone(r.scores.global)].text}>{f1(r.scores.global)}</b>
+        Score = {w('seg')} × {r.scores.seg} + {w('test')} × {r.scores.test} + {w('prac')} × {r.scores.prac}
+        {neg && ` + ${((r.weights.neg ?? 0) / sum).toFixed(2)} × ${r.scores.neg}`} = <b className={TONE[tone(r.scores.global)].text}>{f1(r.scores.global)}</b>
       </p>
+      {r.scores.neg != null && (
+        <p className="mt-2 text-xs text-slate-500">
+          Reglas de negocio: <b className={TONE[tone(r.scores.neg)].text}>{r.scores.neg}</b> ·{' '}
+          {neg ? `peso ${Math.round(((r.weights.neg ?? 0) / sum) * 100)} %` : 'no cuenta en el score (peso 0 %: se cambia en Configuración)'}
+        </p>
+      )}
     </Card>
   )
 }

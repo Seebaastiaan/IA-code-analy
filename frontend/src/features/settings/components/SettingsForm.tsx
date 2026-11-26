@@ -83,6 +83,30 @@ export function SettingsForm({ repoId, repoName, initial, categoryScores }: Sett
                 <input id={`w-${k}`} type="range" min={0} max={100} step={5} value={config.weights[k]} onChange={(e) => setWeight(k, Number(e.target.value))} className="w-full" />
               </div>
             ))}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-7 h-7 rounded-lg grid place-items-center bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-300">
+                  <Icon name="check" className="w-4 h-4" />
+                </span>
+                <label htmlFor="w-neg" className="text-sm font-medium">
+                  Reglas de negocio
+                </label>
+                <span className="ml-auto font-mono text-sm font-semibold">{config.weights.neg ?? 0}%</span>
+              </div>
+              <input
+                id="w-neg"
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={config.weights.neg ?? 0}
+                onChange={(e) => setConfig((c) => ({ ...c, weights: { ...c.weights, neg: Number(e.target.value) } }))}
+                className="w-full"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                0 % = se muestra pero no cuenta. Solo mide las reglas aprobadas que tienen prueba o patrón; con prueba rota o sin verificar no suben ni bajan la nota.
+              </p>
+            </div>
           </div>
           {sum === 0 ? (
             <p className="mt-4 text-xs text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-500/10 rounded-lg p-3">Al menos una categoría debe tener peso mayor que 0.</p>

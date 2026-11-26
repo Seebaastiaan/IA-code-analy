@@ -10,7 +10,7 @@ Describe el producto completo (12 pasos). La columna "Sprint" indica cuándo ent
 | **Seguridad** | Bandit, pip-audit | Patrones inseguros en el código y dependencias con vulnerabilidades conocidas | 50 % | **5** |
 | **QA / Testing** | pytest, coverage | Si las pruebas del proyecto pasan y cuánto código ejecutan | 30 % | 6 |
 | **Buenas Prácticas** | Ruff, Radon | Errores latentes, código innecesario o difícil de mantener, complejidad | 20 % | 6 |
-| Reglas de negocio | patrones (7) · pytest (8) | Ver [PROPUESTA_REGLAS_NEGOCIO.md](PROPUESTA_REGLAS_NEGOCIO.md) | — (aún no cuenta) | **7** |
+| Reglas de negocio | patrones (7) · pytest (8) | Ver [PROPUESTA_REGLAS_NEGOCIO.md](PROPUESTA_REGLAS_NEGOCIO.md) | 0 % (el equipo lo activa en Configuración; ver §2) | **7 y 9** |
 
 Alcance: **solo Python**. Se detectan otros lenguajes del repo, pero no se analizan.
 
@@ -23,8 +23,23 @@ Nunca se analizan las carpetas `.git`, `.venv`, `venv`, `env`, `node_modules`, `
 Seguridad         = 100 − Σ penalización de hallazgos de seguridad abiertos
 Buenas Prácticas  = 100 − Σ penalización de hallazgos de buenas prácticas abiertos
 Testing           = cobertura total − 5 × pruebas que fallan
+Reglas de negocio = 100 × peso de las reglas que cumplen / peso de las que se pudieron verificar
+                    (alta 3, media 2, baja 1; cuentan «cumple», «no cumple» y «no implementada»)
 Global            = promedio ponderado con los pesos del proyecto
 ```
+
+**Reglas de negocio (`negocio`, fase 6 de [PROPUESTA_REGLAS_VERIFICABLES.md](PROPUESTA_REGLAS_VERIFICABLES.md)):**
+
+- Pesa **0 % por defecto**: la nota se calcula y se muestra en el reporte, pero no mueve el global hasta que el proyecto
+  le da un peso (Configuración o `[pesos] negocio` de `.ia_voy.toml`).
+- Solo miden las reglas **aprobadas** que tienen prueba aprobada o patrón. Una prueba rota (no se culpa al código), una
+  regla sin verificar o fuera del código (`tipo = "proceso"`) no suben ni bajan la nota.
+- Un análisis sin ninguna regla medible no tiene nota de reglas; su peso no cuenta en el promedio (los demás se
+  normalizan entre sí).
+- La nota se guarda al analizar (`reports.neg`): los reportes anteriores no la tienen.
+- Compuerta de activación: los dos repos demo, con sus pruebas de referencia, dan 68.1 (inventario: 32 de 47) y 65.7
+  (reservas: 23 de 35) ([test_demos_reglas.py](../backend/tests/test_demos_reglas.py)).
+
 
 | Severidad | Seguridad | Buenas Prácticas |
 |---|---|---|
@@ -156,6 +171,7 @@ En **Configuración**, o en `.ia_voy.toml` en la raíz del repo, que se lee en c
 seguridad = 0.50
 pruebas   = 0.30
 practicas = 0.20
+negocio   = 0.00
 
 [umbrales]
 score_minimo     = 70

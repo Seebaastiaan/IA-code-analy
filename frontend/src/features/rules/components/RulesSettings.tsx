@@ -1,0 +1,330 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { toast } from '@/shared/hooks/useToast'
+import { Button, Card, Chip, ErrorState, Icon, PageLoader, Spinner } from '@/shared/ui'
+import { projectRulesQuery, rulesApi, RULES_FILENAME, useProjectRules } from '../api/rules.api'
+import type { ImportedRules, ProjectRules, RulesValidation } from '../types'
+import { baseName, INVALID_DOCUMENT, isDocument, NO_AI_FOR_DOCUMENTS, saveText } from '../utils/rules'
+import { useImportRules } from '../hooks/useImportRules'
+import { AutoVerifyCard } from './AutoVerifyCard'
+import { ConcordanceCard } from './ConcordanceCard'
+import { ContradictionsCard } from './ContradictionsCard'
+import { DocumentDropzone } from './DocumentDropzone'
+import { HarnessCard } from './HarnessCard'
+import { ImportNotice } from './ImportNotice'
+import { RuleTestsCard } from './RuleTestsCard'
+import { WriteRuleCard } from './WriteRuleCard'
+import { RulesApprovalTable } from './RulesApprovalTable'
+import { QuestionsCard } from './QuestionsCard'
+import { ReviewCard } from './ReviewCard'
+import { ResultStep, RulesStepper } from './RulesStepper'
+import { currentStep } from '../utils/steps'
+import { ValidationResult } from './ValidationResult'
+import { cn } from '@/shared/utils/cn'
+
+function Origin({ data }: { data: ProjectRules }) {
+  const open = data.contradictions?.length ?? 0
+  if (open)
+    return (
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone="brand">Guardadas en el proyecto</Chip>
+        <span className="text-sm text-slate-500">
+          El documento se contradice en {open === 1 ? 'un punto' : `${open} puntos`}: elige abajo cuál vale y sigues con las preguntas.
+        </span>
+      </p>
+    )
+  if (data.active === 'repo' && data.repo)
+    return (
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone="success">
+          <Icon name="branch" className="w-3 h-3" />
+          Repositorio
+        </Chip>
+        <code className="font-mono text-sm">{data.repo.path}</code>
+        {data.commit && <span className="text-xs text-slate-400 font-mono">commit {data.commit.slice(0, 7)}</span>}
+      </p>
+    )
+  if (data.active === 'app' && data.repo && !data.repo.valid)
+    return (
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone="brand">Corregidas en la app</Chip>
+        <span className="text-sm text-slate-500">
+          El <code className="font-mono">{data.repo.path}</code> del repositorio tiene errores: el análisis usa las reglas corregidas aquí.
+        </span>
+      </p>
+    )
+  if (data.active === 'app')
+    return (
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone="brand">Cargadas en la app</Chip>
+        <span className="text-sm text-slate-500">Guardadas en el proyecto: se usan en cada análisis, sin descargar ni subir nada.</span>
+      </p>
+    )
+  return (
+    <p className="flex flex-wrap items-center gap-2">
+      <Chip>Sin reglas</Chip>
+      <span className="text-sm text-slate-500">{data.cloned ? data.documents.length && data.can_import ? 'Todavía no hay reglas: el próximo análisis las saca solo del documento de requisitos, o sácalas ahora abajo.' : 'El repositorio todavía no trae reglas: sube el documento de requisitos.' : 'Analiza el repositorio para saber si trae el archivo.'}</span>
+    </p>
+  )
+}
+
+function Editor({ repoId, data }: { repoId: string; data: ProjectRules }) {
+  const queryClient = useQueryClient()
+  const initial = data.uploaded?.content ?? data.repo?.content ?? ''
+  const [text, setText] = useState(initial)
+  const [result, setResult] = useState<RulesValidation | null>(null)
+  const [notice, setNotice] = useState<ImportedRules | null>(null)
+  const [reading, setReading] = useState<string | null>(null)
+  // «Avanzado» (el archivo .toml): cerrado, salvo que haya un error que corregir. Se controla aquí para que no se cierre al escribir
+  const [advanced, setAdvanced] = useState(false)
+  // Reemplaza el contenido del editor: no se guarda hasta "Guardar en la app"
+  const importRules = useImportRules((done) => {
+    setText(done.content)
+    setResult(done.validation)
+    setNotice(done)
+    if (!done.validation.valid && !done.contradictions.length) setAdvanced(true)
+  })
+  const fromDocument = (path: string) => {
+    setReading(path)
+    importRules.mutate({ request: { project_id: repoId, path } }, { onSettled: () => setReading(null) })
+  }
+
+  const update = (next: string) => {
+    setText(next)
+    setResult(null)
+  }
+  const onSaved = (saved: ProjectRules, message: string) => {
+    queryClient.setQueryData(projectRulesQuery(repoId).queryKey, saved)
+    toast(message)
+  }
+
+  const validate = useMutation({ mutationFn: () => rulesApi.validate(repoId, text), onSuccess: setResult, onError: (e) => toast(e.message, { tone: 'err' }) })
+  const save = useMutation({
+    mutationFn: () => rulesApi.upload(repoId, text),
+    onSuccess: (saved) => {
+      setResult(saved.uploaded)
+      onSaved(saved, saved.active === 'repo' ? 'Guardadas en la app (el análisis usa las del repositorio)' : 'Reglas guardadas: se usarán en el siguiente análisis')
+    },
+    // 422 invalid_rules: el mensaje trae la línea del error
+    onError: (e) => {
+      setResult({ valid: false, error: e.message, project: null, rules: [] })
+      setAdvanced(true)
+    },
+  })
+  const remove = useMutation({
+    mutationFn: () => rulesApi.remove(repoId),
+    onSuccess: (saved) => onSaved(saved, 'Se quitaron las reglas cargadas en la app'),
+    onError: (e) => toast(e.message, { tone: 'err' }),
+  })
+  const template = useMutation({ mutationFn: () => rulesApi.template(repoId), onError: (e) => toast(e.message, { tone: 'err' }) })
+
+  // Solo PDF o Word: la IA saca las reglas para que se revisen y aprueben aquí
+  const upload = (file: File) => {
+    if (!isDocument(file.name)) return toast(INVALID_DOCUMENT, { tone: 'err' })
+    if (!data.can_import) return toast(NO_AI_FOR_DOCUMENTS, { tone: 'err' })
+    setReading(file.name)
+    importRules.mutate({ file, extra: { project_id: repoId } }, { onSettled: () => setReading(null) })
+  }
+
+  // Lo único que falla son las contradicciones que marcó la importación: se guarda y se deciden con botones
+  const onlyContradictions = Boolean(notice?.contradictions.length) && text === notice?.content
+  const blocked = result?.valid === false && !onlyContradictions
+  const dirty = Boolean(text.trim()) && text !== (data.uploaded?.content ?? data.repo?.content ?? '')
+  const busy = validate.isPending || save.isPending || importRules.isPending
+  // El archivo del repo es válido: gana a lo que se guarde aquí
+  const fromRepo = data.active === 'repo' && Boolean(data.repo?.valid)
+  // El archivo del repo tiene errores: lo que se guarde aquí se usa mientras siga así
+  const repoInvalid = Boolean(data.repo && !data.repo.valid)
+
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 className="font-semibold">{data.uploaded ? 'Reglas cargadas en la app' : 'Importar las reglas'}</h2>
+      </div>
+      {data.can_import && !fromRepo && data.documents.length > 0 && (
+        <div className="mb-2 text-sm">
+          <p className="text-slate-600 dark:text-slate-300">
+            Encontré {data.documents.length === 1 ? 'un documento' : 'documentos'} de requisitos en el repositorio. Úsalo, o sube otro abajo.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {data.documents.map((path) => (
+              <Button key={path} variant="secondary" title={path} onClick={() => fromDocument(path)} disabled={importRules.isPending}>
+                {reading === path ? <Spinner className="w-4 h-4" /> : <Icon name="wand" className="w-4 h-4" />}
+                Sacar reglas de {baseName(path)}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!fromRepo && (
+        <div className="mb-3">
+          <DocumentDropzone onFile={upload} busy={importRules.isPending} />
+        </div>
+      )}
+      {reading && (
+        <p className="mb-3 flex items-center gap-2 text-sm text-slate-500">
+          <Spinner className="w-4 h-4" />
+          Leyendo {reading} con IA… puede tardar hasta 30 segundos.
+        </p>
+      )}
+      {notice && <ImportNotice imported={notice} />}
+      {fromRepo && (
+        <p className="mb-3 text-sm text-slate-500">
+          El repositorio ya tiene <code className="font-mono">{data.repo?.path}</code> y es válido: el análisis usa ese archivo y lo que guardes aquí se ignora. Edítalo en el repositorio o desde el editor.
+        </p>
+      )}
+      {repoInvalid && (
+        <p className="mb-3 text-sm text-slate-500">
+          {data.uploaded ? 'Estas son las reglas corregidas que usa el análisis' : 'Corrige aquí el archivo y guárdalo en la app: el análisis usará esta versión'} mientras{' '}
+          <code className="font-mono">{data.repo?.path}</code> del repositorio siga con errores.
+        </p>
+      )}
+      {dirty && !fromRepo && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-brand-50 dark:bg-brand-500/10 px-3.5 py-2.5 text-sm text-brand-800 dark:text-brand-200">
+          <span>Las reglas nuevas todavía no están guardadas: guárdalas para revisarlas y aprobarlas en la tabla.</span>
+          <Button onClick={() => save.mutate()} disabled={busy || blocked}>
+            {save.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="save" className="w-4 h-4" />}
+            Guardar reglas
+          </Button>
+        </div>
+      )}
+      {blocked && <p className="mb-3 text-sm text-rose-600 dark:text-rose-400">Las reglas tienen un error: corrígelo en «Avanzado» para poder guardarlas.</p>}
+      {/* El archivo .toml es un formato interno: queda en «Avanzado», cerrado salvo que haya un error que corregir */}
+      <details open={advanced} onToggle={(e) => setAdvanced(e.currentTarget.open)} className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
+        <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">Avanzado: archivo {RULES_FILENAME}, plantilla y patrones</summary>
+        <div className="mt-3 mb-3 flex flex-wrap items-center gap-2">
+          <Button variant="ghost" onClick={() => template.mutate()} disabled={template.isPending}>
+            <Icon name="download" className="w-4 h-4" />
+            Descargar plantilla
+          </Button>
+        </div>
+      <textarea
+        value={text}
+        onChange={(e) => update(e.target.value)}
+        spellCheck={false}
+        aria-label="Texto de las reglas"
+        placeholder={'[proyecto]\nnombre = "Mi proyecto"\n\n[[regla]]\nid = "RN-001"\n…'}
+        className="w-full min-h-80 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-950 text-slate-100 font-mono text-xs leading-relaxed p-4 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15"
+      />
+      {result && <ValidationResult result={result} />}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant="secondary" onClick={() => validate.mutate()} disabled={!text.trim() || busy}>
+          {validate.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="check" className="w-4 h-4" />}
+          Validar
+        </Button>
+        <Button onClick={() => save.mutate()} disabled={!text.trim() || busy || text === data.uploaded?.content}>
+          {save.isPending ? <Spinner className="w-4 h-4" /> : <Icon name="save" className="w-4 h-4" />}
+          Guardar en la app
+        </Button>
+        <Button variant="secondary" onClick={() => saveText(RULES_FILENAME, text)} disabled={!text.trim()}>
+          <Icon name="download" className="w-4 h-4" />
+          Descargar para el repo
+        </Button>
+        {data.uploaded && (
+          <Button variant="ghost" className="text-rose-600 dark:text-rose-400" onClick={() => remove.mutate()} disabled={remove.isPending}>
+            Quitar de la app
+          </Button>
+        )}
+      </div>
+        <div className="mt-4">
+          <RegexHelp />
+        </div>
+      </details>
+    </Card>
+  )
+}
+
+/** Cómo escribir los patrones `prohibido` y `obligatorio` (expresiones regulares), con ejemplos que se pueden copiar. */
+function RegexHelp() {
+  const code = 'font-mono text-xs bg-slate-100 dark:bg-slate-800 rounded px-1 py-0.5'
+  return (
+    <Card className="p-5 h-fit">
+      <h2 className="font-semibold mb-1">Cómo escribir un patrón (regex)</h2>
+      <p className="text-sm text-slate-500 mb-3">
+        <code className={code}>prohibido</code> es un texto que <b>no</b> debe aparecer en el código de la regla y <code className={code}>obligatorio</code> uno que <b>sí</b> debe aparecer. Se escriben como expresión regular.
+      </p>
+      <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+        <li>
+          <b>Texto tal cual:</b> <code className={code}>@requiere_admin</code> busca exactamente eso.
+        </li>
+        <li>
+          <b>Los símbolos <code className={code}>{'. ( ) [ ] { } * + ? | ^ $'}</code> son especiales:</b> para buscarlos como texto ponles una barra antes. Para encontrar <code className={code}>float(</code> escribe <code className={code}>{'float\\('}</code>.
+        </li>
+        <li>
+          <b>Cualquier carácter:</b> <code className={code}>{'.*'}</code>. Ejemplo: <code className={code}>{'descuento.*0\\.5'}</code>.
+        </li>
+        <li>
+          <b>Uno u otro:</b> <code className={code}>{'md5|sha1'}</code>.
+        </li>
+        <li>
+          <b>En el archivo .toml usa comillas simples</b> (<code className={code}>{"prohibido = 'float\\('"}</code>): así la barra no se duplica.
+        </li>
+      </ul>
+      <p className="mt-3 text-xs text-slate-400">Pulsa «Validar»: si el patrón no es una expresión regular válida, te dice en qué regla está el error.</p>
+    </Card>
+  )
+}
+
+/** Configuración → Reglas de negocio: cuatro pasos, uno a la vez, con la siguiente acción siempre a la vista. */
+export function RulesSettings({ repoId }: { repoId: string }) {
+  const { data, error, refetch, isPlaceholderData } = useProjectRules(repoId)
+  if (error) return <ErrorState error={error} onRetry={() => void refetch()} />
+  if (!data || isPlaceholderData) return <PageLoader />
+  return <RulesFlow repoId={repoId} data={data} />
+}
+
+function RulesFlow({ repoId, data }: { repoId: string; data: ProjectRules }) {
+  const source = data.active === 'repo' ? data.repo : data.uploaded
+  const rules = source?.valid ? source.rules : []
+  const where = currentStep(rules)
+  const [step, setStep] = useState(where)
+  // Cuando el proyecto avanza (se guardan reglas, se aprueba la última), la vista avanza con él; ir atrás sigue siendo libre
+  const [seen, setSeen] = useState(where)
+  if (seen !== where) {
+    setSeen(where)
+    setStep(where)
+  }
+  const show = (n: number) => (step === n ? '' : 'hidden')
+
+  return (
+    <div className="space-y-4">
+      <RulesStepper repoId={repoId} rules={rules} step={step} onStep={setStep} contradictions={data.contradictions?.length ?? 0} />
+      <div className={cn('space-y-4', show(0))}>
+        <Card className="p-5">
+          <h2 className="font-semibold mb-3">De dónde vienen las reglas</h2>
+          <Origin data={data} />
+          {data.repo && !data.repo.valid && (
+            <p className="mt-3 text-sm text-rose-600 dark:text-rose-400 font-mono">
+              {data.repo.path}: {data.repo.error}
+            </p>
+          )}
+        </Card>
+        <ContradictionsCard repoId={repoId} data={data} />
+        {/* key: al guardar o quitar, el editor se reinicia con lo del servidor */}
+        <Editor key={`${repoId}-${data.uploaded?.updated_at ?? 'none'}-${data.active}`} repoId={repoId} data={data} />
+      </div>
+      <div className={cn('space-y-4', show(1))}>
+        <QuestionsCard repoId={repoId} data={data} />
+        <RulesApprovalTable repoId={repoId} data={data} />
+      </div>
+      <div className={cn('space-y-4', show(2))}>
+        <AutoVerifyCard repoId={repoId} />
+        <ReviewCard repoId={repoId} />
+      </div>
+      <div className={show(3)}>
+        <ResultStep repoId={repoId} />
+      </div>
+      <details className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+        <summary className="cursor-pointer text-sm font-medium text-slate-600 dark:text-slate-300">
+          Herramientas avanzadas: escribir una regla, arnés, pruebas una por una y comparación con lo que sabes
+        </summary>
+        <div className="mt-4 space-y-4">
+          <WriteRuleCard repoId={repoId} canWrite={data.can_import} />
+          <ConcordanceCard repoId={repoId} version={rules.map((r) => r.id).join(',')} />
+          <HarnessCard repoId={repoId} />
+          <RuleTestsCard repoId={repoId} project={data.repo?.project ?? data.uploaded?.project ?? 'proyecto'} />
+        </div>
+      </details>
+    </div>
+  )
+}

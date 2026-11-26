@@ -178,7 +178,11 @@ def test_patrones_prohibido_y_obligatorio(tmp_path):
 
     assert (r3.status, r3.level) == ("sin_verificar", "ninguno")
     assert (r4.status, r4.level) == ("sin_verificar", "patron") and "revisa `rutas`" in r4.detail
-    assert reglas.summary_line(check) == "  4 regla(s) · 0 cumplen · 2 no cumplen · 2 sin verificar"
+    # `obligatorio` sigue funcionando (formato v1) pero avisa que está obsoleto (PROPUESTA_REGLAS_VERIFICABLES.md §4.1)
+    assert reglas.summary_line(check).splitlines() == [
+        "  4 regla(s) · 0 cumplen · 2 no cumplen · 2 sin verificar",
+        "  aviso: RN-002: `obligatorio` está obsoleto (un archivo que no lo tenga, como un __init__.py vacío, ya no cumple); verifica la regla con una prueba",
+    ]
 
 
 def test_cumple_y_respeta_rutas_excluidas(tmp_path):
@@ -214,6 +218,46 @@ def test_sin_archivo_y_archivo_invalido(tmp_path):
     assert check.source == "reglas_negocio.toml" and check.results == []
     assert "no cumple el formato" in check.error
     assert reglas.summary_line(check).startswith("  ERROR en reglas_negocio.toml")
+
+
+DOS_REGLAS = """
+[proyecto]
+nombre = "Reservas"
+
+{marca}
+[[regla]]
+id = "RN-001"
+titulo = "Cancelar 24 h antes es gratis"
+descripcion = "Con 24 h o más se reembolsa todo."
+severidad = "alta"
+
+[[regla]]
+id = "RN-002"
+titulo = "Cancelar con menos de 48 h cobra"
+descripcion = "Con menos de 48 h se cobra la mitad."
+severidad = "alta"
+"""
+
+
+@pytest.mark.parametrize("marca", [
+    "# CONTRADICCIÓN RN-001 RN-002: 24 h contra 48 h",
+    "#contradiccion rn-002 y rn-001",
+])
+def test_contradiccion_marcada_invalida_el_archivo(tmp_path, marca):
+    with pytest.raises(reglas.RulesError, match=r"línea 5: RN-00\d y RN-00\d se contradicen según el documento"):
+        reglas.parse(DOS_REGLAS.format(marca=marca))
+    # En el análisis también: el archivo del repo queda con error
+    root, files = repo(tmp_path, {"reglas_negocio.toml": DOS_REGLAS.format(marca=marca)})
+    assert "se contradicen según el documento" in correr(root, files).error
+
+
+@pytest.mark.parametrize("marca", [
+    "# CONTRADICCIÓN RN-001 RN-007: la otra ya se borró",
+    "# CONTRADICCIÓN RN-001 RN-001: consigo misma",
+    "# Ver la contradicción RN-001 RN-002 en el documento",
+])
+def test_marca_que_ya_no_aplica_no_estorba(marca):
+    assert len(reglas.parse(DOS_REGLAS.format(marca=marca)).rules) == 2
 
 
 def test_archivo_demasiado_grande(tmp_path, monkeypatch):
@@ -258,11 +302,14 @@ def test_paso_de_reglas_en_el_analisis_y_api(client):
     assert job["status"] == "done" and job["total"] == len(fake.JOB_STEPS) == 12
     i = job["logs"].index(next(line for line in job["logs"] if "Verificando reglas de negocio" in line))
     assert job["logs"][i].startswith("[10/12]")
-    assert job["logs"][i + 1] == "  4 regla(s) · 0 cumplen · 1 no cumplen · 3 sin verificar"
+    summary, *avisos = job["logs"][i + 1].splitlines()
+    assert summary == "  4 regla(s) · 0 cumplen · 1 no cumplen · 3 sin verificar"
+    # Las reglas del repo falso usan `obligatorio` (formato v1): siguen funcionando, con aviso
+    assert avisos[0].startswith("  aviso: RN-002: `obligatorio` está obsoleto")
 
     body = client.get(f"/api/report/{job['report_id']}/reglas").json()
     assert body["checked"] is True and body["source"] == "reglas_negocio.toml" and body["project"] == "Tienda"
-    assert body["summary"] == {"total": 4, "cumple": 0, "no_cumple": 1, "sin_verificar": 3}
+    assert body["summary"] == {"total": 4, "cumple": 0, "no_cumple": 1, "sin_verificar": 3, "prueba_rota": 0, "no_implementada": 0, "fuera_del_codigo": 0}
     r1 = body["rules"][0]
     assert r1["id"] == "RN-001" and r1["status"] == "no_cumple" and r1["paths"] == ["app/pagos/"]
     assert r1["evidence"] == [{"file": "app/pagos/cobro.py", "line": 2, "text": "return float(m)"}]
@@ -271,6 +318,37 @@ def test_paso_de_reglas_en_el_analisis_y_api(client):
     # Las reglas no son hallazgos y no cambian el score
     report = client.get(f"/api/report/{job['report_id']}").json()
     assert all(f["tool"] != "Reglas" for f in report["findings"])
+
+
+def test_neg_se_guarda_y_solo_mueve_el_global_con_peso(client):
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    rid, repo_id = job["report_id"], job["repo_id"]
+    before = client.get(f"/api/report/{rid}").json()
+    # De las 4 reglas solo RN-001 se pudo medir (no cumple, alta): neg = 0; las otras 3 siguen sin verificar
+    assert before["scores"]["neg"] == 0.0 and before["weights"]["neg"] == 0
+    s = before["scores"]
+    # Con peso 0 el global es el de siempre
+    assert s["global"] == round((50 * s["seg"] + 30 * s["test"] + 20 * s["prac"]) / 100, 1)
+
+    cfg = client.get(f"/api/projects/{repo_id}/config").json()
+    cfg["weights"] = {"seg": 40, "test": 20, "prac": 20, "neg": 20}
+    assert client.put(f"/api/projects/{repo_id}/config", json=cfg).status_code == 200
+    after = client.get(f"/api/report/{rid}").json()
+    assert after["scores"]["neg"] == 0.0
+    assert after["scores"]["global"] == round((40 * s["seg"] + 20 * s["test"] + 20 * s["prac"]) / 100, 1)
+    # El .ia_voy.toml lleva el peso
+    assert after["weights"]["neg"] == 20
+
+
+def test_neg_sale_en_las_exportaciones_el_tablero_y_la_comparativa(client):
+    job = wait_done(client, client.post("/api/analyze", json={"url": URL}).json()["job_id"])
+    rid, repo_id = job["report_id"], job["repo_id"]
+    md = client.get(f"/api/report/{rid}/export", params={"format": "md"}).text
+    assert "| Score global | Seguridad | Pruebas | Buenas prácticas | Reglas de negocio |" in md
+    assert "Reglas de negocio<br>0.0" in client.get(f"/api/report/{rid}/export", params={"format": "html"}).text
+    assert client.get(f"/api/report/{rid}/export", params={"format": "json"}).json()["scores"]["neg"] == 0.0
+    dash = client.get("/api/dashboard", params={"repo": repo_id}).json()
+    assert dash["selected"]["scores"]["neg"] == 0.0 and dash["selected"]["history"][-1]["neg"] == 0.0
 
 
 def test_archivo_invalido_no_detiene_el_analisis(client, cloner):
@@ -302,5 +380,88 @@ def test_datos_de_demostracion_traen_reglas(client, settings):
     repo_id = seed("ana", settings)
     body = client.get("/api/report/latest/reglas", params={"repo": repo_id}).json()
     assert body["checked"] is True and body["project"] == "API de pagos"
-    assert body["summary"] == {"total": 4, "cumple": 1, "no_cumple": 2, "sin_verificar": 1}
+    assert body["summary"] == {"total": 4, "cumple": 1, "no_cumple": 2, "sin_verificar": 1, "prueba_rota": 0, "no_implementada": 0, "fuera_del_codigo": 0}
     assert body["rules"][1]["evidence"][0]["file"] == "api.py" and body["rules"][1]["story"] == "HU-05"
+
+
+# ─── Contradicciones y duplicados (avisos, no invalidan el archivo) ───
+
+
+def _reglas(*cuerpos: str) -> str:
+    texto = '[proyecto]\nnombre = "P"\n'
+    for n, cuerpo in enumerate(cuerpos, start=1):
+        texto += f'\n[[regla]]\nid = "RN-{n:03d}"\ntitulo = "T{n}"\ndescripcion = "D{n}"\nseveridad = "alta"\n{cuerpo}\n'
+    return texto
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        # El mismo patrón prohibido en una y obligatorio en la otra
+        ("prohibido = '@requiere_admin'", "obligatorio = '@requiere_admin'"),
+        # Lo obligatorio es un texto fijo que contiene lo prohibido
+        (r"prohibido = 'float\('", r"obligatorio = 'total = float\(x\)'"),
+        # Rutas que se cruzan (carpeta y archivo dentro de ella; vacío = todo el repo)
+        ("prohibido = 'print'\nrutas = [\"app/\"]", "obligatorio = 'print'\nrutas = [\"app/pagos/cobro.py\"]"),
+        ("prohibido = 'print'", "obligatorio = 'print'\nrutas = [\"app/\"]"),
+    ],
+)
+def test_detecta_reglas_que_se_contradicen(a, b):
+    avisos = reglas.conflicts(parse(_reglas(a, b)).rules)
+    assert len(avisos) == 1
+    assert avisos[0].startswith("RN-001 y RN-002 se contradicen: RN-002 exige") and avisos[0].endswith("no pueden cumplirse las dos")
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        # Rutas distintas: cada una manda en su carpeta
+        ("prohibido = 'print'\nrutas = [\"app/pagos/\"]", "obligatorio = 'print'\nrutas = [\"app/admin/\"]"),
+        # Un archivo con nombre parecido no está dentro de la carpeta
+        ("prohibido = 'x'\nrutas = [\"app/pagos/\"]", "obligatorio = 'x'\nrutas = [\"app/pagos.py\"]"),
+        # Lo obligatorio usa regex de verdad: no se adivina
+        ("prohibido = 'float'", "obligatorio = 'float|Decimal'"),
+        # Prohibido anclado al inicio de la línea: no se cumple por fuerza
+        ("prohibido = '^import os'", "obligatorio = 'import os'"),
+        (r"prohibido = 'float\('", r"obligatorio = 'Decimal\('"),
+    ],
+)
+def test_no_avisa_si_no_se_contradicen(a, b):
+    assert reglas.conflicts(parse(_reglas(a, b)).rules) == []
+
+
+def test_regla_que_se_contradice_a_si_misma():
+    avisos = reglas.conflicts(parse(_reglas("prohibido = 'float'\nobligatorio = 'float'")).rules)
+    assert avisos == ["RN-001 se contradice: `obligatorio` (`float`) siempre incluye lo `prohibido` (`float`); nunca puede cumplirse"]
+
+
+def test_detecta_reglas_duplicadas():
+    texto = _reglas(
+        "prohibido = 'float\\('\nrutas = [\"app/\", \"lib/\"]",
+        "prohibido = 'float\\('\nrutas = [\"lib/\", \"./app/\"]",
+        "",
+    ).replace('titulo = "T3"', 'titulo = "  t1. "').replace('descripcion = "D3"', 'descripcion = "d1"')
+    assert reglas.conflicts(parse(texto).rules) == [
+        "RN-002 parece duplicada de RN-001: tiene el mismo patrón y rutas",
+        "RN-003 parece duplicada de RN-001: tiene el mismo título y la misma descripción",
+    ]
+    # Mismo patrón en otras rutas, o dos reglas sin patrón: no son duplicadas
+    assert reglas.conflicts(parse(_reglas("prohibido = 'x'\nrutas = [\"a/\"]", "prohibido = 'x'\nrutas = [\"b/\"]", "", "")).rules) == []
+
+
+def test_contradicciones_en_el_analisis_y_al_validar(tmp_path):
+    texto = _reglas("prohibido = 'print'", "obligatorio = 'print'")
+    (tmp_path / "reglas_negocio.toml").write_text(texto, encoding="utf-8")
+    (tmp_path / "app.py").write_text("print('hola')\n", encoding="utf-8")
+    check = reglas.run(tmp_path, ["app.py"], lambda f: (tmp_path / f).read_text(encoding="utf-8").splitlines())
+    # Se siguen verificando las dos; el aviso explica por qué una siempre falla
+    assert [r.status for r in check.results] == ["no_cumple", "cumple"]
+    # (y el de `obligatorio` obsoleto, del formato v1)
+    assert len(check.warnings) == 2 and "obsoleto" in check.warnings[0] and "se contradicen" in check.warnings[1]
+    assert "se contradicen" in reglas.summary_line(check)
+    # Sigue con el aviso después de agregar las pruebas
+    assert reglas.with_tests(check, None, "sin sandbox").warnings == check.warnings
+
+    from app.projects.reglas import validate
+    v = validate(texto)
+    assert v.valid and v.warnings == check.warnings

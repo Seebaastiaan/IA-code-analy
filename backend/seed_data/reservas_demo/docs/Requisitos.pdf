@@ -1,0 +1,137 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Title (Requisitos - Sistema de reservas) /Author (Equipo de producto) /CreationDate (D:20261014000000Z) >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2584 >>
+stream
+BT /F2 17 Tf 72 698 Td (Documento de requisitos \267 Sistema de reservas) Tj ET
+BT /F1 10 Tf 72 682 Td (Centro de bienestar Sereno \267 Versi\363n 2.0 \267 14 de octubre de 2026) Tj ET
+BT /F1 10 Tf 72 666 Td (Secciones 1 a 5 y 8: equipo de producto. Secci\363n 6: recepci\363n. Secci\363n 7: finanzas.) Tj ET
+BT /F2 13 Tf 72 633 Td (1. Objetivo) Tj ET
+BT /F1 10 Tf 72 617 Td (Permitir que los clientes del centro reserven, paguen y cancelen sus citas de masaje, facial) Tj ET
+BT /F1 10 Tf 72 603 Td (y fisioterapia desde la web, y que la recepci\363n administre la agenda de los terapeutas sin) Tj ET
+BT /F1 10 Tf 72 589 Td (hojas de c\341lculo.) Tj ET
+BT /F2 13 Tf 72 556 Td (2. Alcance) Tj ET
+BT /F1 10 Tf 86 540 Td (\225 Incluye: cat\341logo de servicios, agenda de profesionales, reservas, anticipos,) Tj ET
+BT /F1 10 Tf 86 526 Td (  cancelaciones y avisos por correo.) Tj ET
+BT /F1 10 Tf 86 510 Td (\225 No incluye: facturaci\363n, n\363mina de los terapeutas ni la aplicaci\363n m\363vil \(fase 2\).) Tj ET
+BT /F2 13 Tf 72 477 Td (3. Agenda) Tj ET
+BT /F2 11 Tf 72 454 Td (3.1 Profesionales) Tj ET
+BT /F1 10 Tf 72 438 Td (Un profesional no puede tener dos citas que se empalmen.) Tj ET
+BT /F2 11 Tf 72 415 Td (3.2 Clientes) Tj ET
+BT /F1 10 Tf 72 399 Td (Un cliente no puede tener dos citas confirmadas cuyo horario se empalme, aunque sean con) Tj ET
+BT /F1 10 Tf 72 385 Td (profesionales distintos.) Tj ET
+BT /F2 11 Tf 72 362 Td (3.3 Horario y anticipaci\363n) Tj ET
+BT /F1 10 Tf 72 346 Td (El centro atiende de lunes a s\341bado de 9:00 a 20:00, y la cita completa debe quedar dentro) Tj ET
+BT /F1 10 Tf 72 332 Td (de ese horario. Las reservas se hacen con al menos 2 horas de anticipaci\363n.) Tj ET
+BT /F2 11 Tf 72 309 Td (3.4 L\355mite de citas) Tj ET
+BT /F1 10 Tf 72 293 Td (Cada cliente puede tener como m\341ximo tres citas activas.) Tj ET
+BT /F2 13 Tf 72 260 Td (4. Anticipo y cancelaciones) Tj ET
+BT /F2 11 Tf 72 237 Td (4.1 Anticipo) Tj ET
+BT /F1 10 Tf 72 221 Td (Al reservar, el cliente paga un anticipo del 30 % del precio del servicio.) Tj ET
+BT /F2 11 Tf 72 198 Td (4.2 Cancelaci\363n a tiempo) Tj ET
+BT /F1 10 Tf 72 182 Td (Si el cliente cancela con al menos 24 horas de anticipaci\363n, se le reembolsa el 100 % del) Tj ET
+BT /F1 10 Tf 72 168 Td (anticipo.) Tj ET
+BT /F2 11 Tf 72 145 Td (4.3 Cancelaci\363n tard\355a) Tj ET
+BT /F1 10 Tf 72 129 Td (Si cancela con menos de 24 horas de anticipaci\363n, el anticipo no se reembolsa. Una cita que) Tj ET
+BT /F1 10 Tf 72 115 Td (ya comenz\363 no se puede cancelar.) Tj ET
+BT /F1 8 Tf 480 40 Td (P\341gina 1 de 3) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 2427 >>
+stream
+BT /F2 11 Tf 72 705 Td (4.4 Clientes premium) Tj ET
+BT /F1 10 Tf 72 689 Td (Los clientes premium pueden cancelar sin cargo hasta 12 horas antes de su cita.) Tj ET
+BT /F2 13 Tf 72 656 Td (5. Avisos al cliente) Tj ET
+BT /F2 11 Tf 72 633 Td (5.1 Confirmaci\363n) Tj ET
+BT /F1 10 Tf 72 617 Td (Cada reserva confirmada env\355a un correo al cliente con el folio, el servicio, la fecha y la) Tj ET
+BT /F1 10 Tf 72 603 Td (hora de la cita.) Tj ET
+BT /F2 11 Tf 72 580 Td (5.2 Cancelaci\363n) Tj ET
+BT /F1 10 Tf 72 564 Td (Cada cancelaci\363n env\355a un correo al cliente con el folio y el monto que se le reembolsa.) Tj ET
+BT /F2 11 Tf 72 541 Td (5.3 Recordatorio) Tj ET
+BT /F1 10 Tf 72 525 Td (Un d\355a antes de la cita el sistema env\355a un recordatorio por correo. Cada cita recibe un) Tj ET
+BT /F1 10 Tf 72 511 Td (solo recordatorio.) Tj ET
+BT /F2 13 Tf 72 478 Td (6. Operaci\363n de la agenda \(recepci\363n\)) Tj ET
+BT /F2 11 Tf 72 455 Td (6.1 Empalmes) Tj ET
+BT /F1 10 Tf 72 439 Td (No se permite agendar a un terapeuta en dos citas cuyo horario se traslape, aunque sea) Tj ET
+BT /F1 10 Tf 72 425 Td (parcialmente.) Tj ET
+BT /F2 11 Tf 72 402 Td (6.2 Reservas por tel\351fono) Tj ET
+BT /F1 10 Tf 72 386 Td (La recepci\363n puede reservar a nombre de cualquier cliente que llame por tel\351fono.) Tj ET
+BT /F2 13 Tf 72 353 Td (7. Pol\355ticas de cobro \(finanzas\)) Tj ET
+BT /F2 11 Tf 72 330 Td (7.1 Cargos por cancelaci\363n) Tj ET
+BT /F1 10 Tf 72 314 Td (Toda cancelaci\363n realizada con menos de 48 horas de anticipaci\363n genera un cargo del 50 %) Tj ET
+BT /F1 10 Tf 72 300 Td (del anticipo.) Tj ET
+BT /F2 11 Tf 72 277 Td (7.2 Comisiones) Tj ET
+BT /F1 10 Tf 72 261 Td (En todo reembolso se descuenta una comisi\363n bancaria del 10 % del monto reembolsado.) Tj ET
+BT /F2 11 Tf 72 238 Td (7.3 Medios de pago) Tj ET
+BT /F1 10 Tf 72 222 Td (Los anticipos se cobran con tarjeta a trav\351s de la pasarela del banco.) Tj ET
+BT /F2 13 Tf 72 189 Td (8. Seguridad y privacidad) Tj ET
+BT /F2 11 Tf 72 166 Td (8.1 Privacidad) Tj ET
+BT /F1 10 Tf 72 150 Td (Un cliente solo puede ver y cancelar sus propias citas; las de otros clientes no deben) Tj ET
+BT /F1 10 Tf 72 136 Td (mostrarse ni existir para \351l.) Tj ET
+BT /F2 11 Tf 72 113 Td (8.2 Acceso) Tj ET
+BT /F1 10 Tf 72 97 Td (Despu\351s de 3 intentos fallidos de inicio de sesi\363n, la cuenta se bloquea durante 15 minutos.) Tj ET
+BT /F1 8 Tf 480 40 Td (P\341gina 2 de 3) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 1031 >>
+stream
+BT /F2 11 Tf 72 705 Td (8.3 Permisos) Tj ET
+BT /F1 10 Tf 72 689 Td (La administraci\363n da de alta servicios y profesionales, cambia precios y marca a los) Tj ET
+BT /F1 10 Tf 72 675 Td (clientes premium. La recepci\363n ve la agenda de los profesionales y env\355a los recordatorios.) Tj ET
+BT /F1 10 Tf 72 661 Td (El cliente solo gestiona sus propias citas. El reporte de anticipos es exclusivo de la) Tj ET
+BT /F1 10 Tf 72 647 Td (administraci\363n.) Tj ET
+BT /F2 13 Tf 72 614 Td (9. Otros requisitos) Tj ET
+BT /F2 11 Tf 72 591 Td (9.1 T\351cnicos) Tj ET
+BT /F1 10 Tf 86 575 Td (\225 La API se construye con Flask y SQLAlchemy; en desarrollo se usa SQLite.) Tj ET
+BT /F1 10 Tf 86 559 Td (\225 El sistema debe estar disponible el 99 % del horario de atenci\363n.) Tj ET
+BT /F2 11 Tf 72 536 Td (9.2 Operaci\363n) Tj ET
+BT /F1 10 Tf 72 520 Td (La recepci\363n llama por tel\351fono a los clientes que no asistieron para ofrecerles una nueva) Tj ET
+BT /F1 10 Tf 72 506 Td (cita.) Tj ET
+BT /F1 8 Tf 480 40 Td (P\341gina 3 de 3) Tj ET
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000134 00000 n 
+0000000231 00000 n 
+0000000333 00000 n 
+0000000459 00000 n 
+0000000595 00000 n 
+0000003231 00000 n 
+0000003367 00000 n 
+0000005846 00000 n 
+0000005984 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R /Info 5 0 R >>
+startxref
+7068
+%%EOF

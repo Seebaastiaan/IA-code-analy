@@ -42,7 +42,7 @@ def test_tablero(client, repo_id):
     sevs = [f["sev"] for f in sel["top_findings"]]
     assert len(sevs) == 4 and sevs == sorted(sevs, key=["alta", "media", "baja"].index)
     assert sel["open_findings"] >= 4
-    assert set(sel["scores"]) == {"global", "seg", "test", "prac"}
+    assert set(sel["scores"]) == {"global", "seg", "test", "prac", "neg"}
 
 
 def test_reglas_ignoradas_no_aparecen(client, repo_id):
@@ -80,7 +80,7 @@ def test_reporte(client, repo_id):
     latest = client.get("/api/report/latest", params={"repo": repo_id}).json()
     assert latest == client.get(f"/api/report/{repo_id}-4").json()
     assert latest["prev"]["num"] == 3
-    assert latest["weights"] == {"seg": 50, "test": 30, "prac": 20}
+    assert latest["weights"] == {"seg": 50, "test": 30, "prac": 20, "neg": 0}
     assert latest["complexity"][0]["fn"] == "procesar" and latest["complexity"][0]["grade"] in "BCDEF"
     f = finding(client, repo_id, rule="B602")
     assert f["sev"] == "alta" and f["cat"] == "seg" and f["file"] == "api.py"
@@ -159,9 +159,14 @@ def test_correccion_automatica(client, repo_id):
 
 
 def test_correccion_no_disponible(client, repo_id):
-    f = finding(client, repo_id, rule="B602")
+    # La cobertura baja no se corrige con un parche
+    f = finding(client, repo_id, rule="COV")
     res = client.post("/api/fix", json={"repo_id": repo_id, "finding_ids": [f["id"]]})
     assert res.status_code == 422 and res.json()["error"]["code"] == "fix_unavailable"
+    # Bandit se corrige con IA: sin GEMINI_API_KEY lo dice (Ruff funciona sin ella)
+    f = finding(client, repo_id, rule="B602")
+    res = client.post("/api/fix", json={"repo_id": repo_id, "finding_ids": [f["id"]]})
+    assert res.status_code == 503 and res.json()["error"]["code"] == "llm_not_configured"
 
 
 def test_guardar_resuelve_y_respalda(client, repo_id, settings):

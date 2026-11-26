@@ -11,6 +11,7 @@ export function toToml(c: ProjectConfig): string {
 seguridad = ${(c.weights.seg / s).toFixed(2)}
 pruebas   = ${(c.weights.test / s).toFixed(2)}
 practicas = ${(c.weights.prac / s).toFixed(2)}
+negocio   = ${((c.weights.neg ?? 0) / s).toFixed(2)}
 
 [umbrales]
 score_minimo     = ${c.thresholds.score}

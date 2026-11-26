@@ -4,13 +4,13 @@ import type { Finding } from '@/features/findings'
 import { CAT } from '@/shared/constants/categories'
 import { paths } from '@/shared/constants/paths'
 import { BRAND_HEX, TONE, tone } from '@/shared/constants/tones'
-import type { Scores } from '@/shared/types/common'
+import type { Category } from '@/shared/types/common'
 import { Card, CategoryChip, DeltaBadge, EmptyState, ErrorState, Icon, Label, PageHeader, PageLoader, Select, SeverityBadge, Skeleton } from '@/shared/ui'
 import { cn } from '@/shared/utils/cn'
 import { f1 } from '@/shared/utils/score'
 import { useAnalyses, useDiff } from '../api/compare.api'
 
-const METRICS: { key: keyof Scores; label: string; color: string }[] = [
+const METRICS: { key: 'global' | Category; label: string; color: string }[] = [
   { key: 'global', label: 'Global', color: BRAND_HEX },
   { key: 'seg', label: CAT.seg.label, color: CAT.seg.hex },
   { key: 'test', label: CAT.test.label, color: CAT.test.hex },
@@ -93,7 +93,7 @@ export default function ComparePage() {
         <>
           <Card className="p-5 grid sm:grid-cols-[1fr_auto_1fr] gap-3 items-end">
             <div>
-              <Label htmlFor="cmp-a">Base (A)</Label>
+              <Label htmlFor="cmp-a">Base A</Label>
               <Select id="cmp-a" value={a ?? ''} onChange={(e) => setBase(e.target.value)}>
                 {analyses.data.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -106,7 +106,7 @@ export default function ComparePage() {
               <Icon name="arrow" className="w-4 h-4" />
             </span>
             <div>
-              <Label htmlFor="cmp-b">Comparar con (B)</Label>
+              <Label htmlFor="cmp-b">Base B</Label>
               <Select id="cmp-b" value={b ?? ''} onChange={(e) => setTarget(e.target.value)}>
                 {analyses.data.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -131,6 +131,8 @@ export default function ComparePage() {
                 {METRICS.map((m) => (
                   <DeltaCard key={m.key} label={m.label} color={m.color} a={diff.data.a[m.key]} b={diff.data.b[m.key]} />
                 ))}
+                {/* Reglas de negocio: solo si los dos análisis tuvieron reglas medibles */}
+                {diff.data.a.neg != null && diff.data.b.neg != null && <DeltaCard label="Reglas de negocio" color="#8b5cf6" a={diff.data.a.neg} b={diff.data.b.neg} />}
               </div>
               <div className="grid lg:grid-cols-2 gap-4 mt-4">
                 <FindingList

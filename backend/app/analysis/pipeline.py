@@ -6,23 +6,25 @@ Pasos 2-11 del análisis sobre el clon:
   (app.analysis.sandbox) cuando `SANDBOX` es `wsl` o `docker`. Con `SANDBOX=off`, o si el sandbox no está
   disponible, se SIMULAN: sus números salen de la semilla del job (el mismo reporte siempre se ve igual)
   y sus hallazgos dicen "(simulado)" para no confundirse con resultados reales.
-- Reglas de negocio (`reglas_negocio.toml`, app.analyses.reglas): nivel patrón, en el backend. Sus resultados
-  van aparte de los hallazgos y todavía no entran al score (docs/adr/ADR-003-reglas-de-negocio.md).
+- Reglas de negocio (`reglas_negocio.toml`, app.analyses.reglas): el nivel patrón en el backend y el nivel
+  pruebas con pytest en el sandbox (plugin ia_voy_reglas). Sus resultados van aparte de los hallazgos y todavía
+  no entran al score (docs/adr/ADR-003-reglas-de-negocio.md).
 """
 
 import logging
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.analyses import reglas
 from app.analyses.analyzers import complexity, is_test_path, static_findings_dir
 from app.analyses.config_file import FILENAME, ConfigError, from_toml
 from app.analyses.models import ComplexityInput, CoverageInput, FindingInput, ReportInput
-from app.analyses.scoring import category_scores, effective_coverage, global_score
+from app.analyses.reglas_store import RulesStore
+from app.analyses.scoring import business_score, category_scores, effective_coverage, global_score
 from app.analyses.store import AnalysisStore, ProjectConfig
 from app.analyses.workspace import Workspace, is_excluded
-from app.analysis.sandbox import PhaseResult, SandboxOutput, parse_audit, parse_coverage, parse_junit
+from app.analysis.sandbox import PhaseResult, SandboxOutput, parse_audit, parse_coverage, parse_junit, rebase_tests
 from app.config import Settings
 from app.db import session
 
@@ -63,6 +65,8 @@ class StaticResult:
     code_lines: int = 0
     # Reglas de negocio del repo (paso 10)
     rules: reglas.RulesCheck | None = None
+    # Lo que la app ya sabe de reglas con prueba generada y aprobada (no implementada, fuera del código)
+    rule_notes: dict[str, reglas.AppNote] = field(default_factory=dict)
 
 
 @dataclass
@@ -142,21 +146,36 @@ def analyze_static(settings: Settings, repo_id: str, analyzers: list[str] | tupl
         store = AnalysisStore(conn)
         import_repo_config(store, ws, repo_id)
         cfg = store.config(repo_id)
+        uploaded = RulesStore(conn).uploaded_text(repo_id)
+        _, notes, app_declared = app_rule_tests(conn, settings, repo_id)
     files = ws.list_files(cfg.excluded)
     py = [f for f in files if f.endswith(".py")]
     findings = static_findings_dir(ws.root, files, ruff_on="ruff" in analyzers, bandit_on="bandit" in analyzers)
     lines = sum(len(lines) for f in py if (lines := ws.read_lines(f)))
     return StaticResult(
         files=files, py=py, findings=findings, complexity=complexity(ws.root, py) if "radon" in analyzers else [], cfg=cfg, code_lines=lines,
-        rules=reglas.run(ws.root, files, ws.read_lines),
+        rules=reglas.with_app(reglas.run(ws.root, files, ws.read_lines, uploaded), app_declared, notes), rule_notes=notes,
     )
+
+
+def app_rule_tests(conn, settings: Settings, repo_id: str) -> tuple[dict[str, str] | None, dict[str, reglas.AppNote], list[reglas.LinkedTest]]:
+    """Pruebas de reglas aprobadas en la app (app.projects.reglas_pruebas). Nunca detiene el análisis."""
+    from app.projects import reglas_pruebas
+
+    try:
+        return reglas_pruebas.analysis_inputs(conn, settings, repo_id)
+    except Exception:  # un problema con las pruebas de la app no debe tumbar el análisis
+        log.exception("No se pudieron leer las pruebas de reglas aprobadas de %s", repo_id)
+        return None, {}, []
 
 
 # ───────────────────────── Resultados del sandbox ─────────────────────────
 
 
-def _deps_file(files: list[str]) -> str:
-    return next((f for f in ("requirements.txt", "pyproject.toml", "setup.py") if f in files), "requirements.txt")
+def _deps_file(files: list[str], sub: str = "") -> str:
+    """Archivo de dependencias; con el código en una subcarpeta (`backend/`), el de ahí."""
+    base = f"{sub}/" if sub else ""
+    return next((f"{base}{n}" for n in ("requirements.txt", "pyproject.toml", "setup.py") if f"{base}{n}" in files), f"{base}requirements.txt")
 
 
 def _normalize(name: str) -> str:
@@ -174,15 +193,20 @@ def _package_line(lines: list[str] | None, package: str) -> int:
 
 
 def audit_findings(ws: Workspace, files: list[str], out: SandboxOutput) -> list[FindingInput]:
-    deps = _deps_file(files)
+    deps = _deps_file(files, out.subdir)
     lines = ws.read_lines(deps) if deps in files else None
     findings = []
     for v in parse_audit(out.audit):
         fix = f"Actualizar a {v.package} {v.fix_versions[0]} o superior" if v.fix_versions else "No hay versión corregida publicada: evalúa reemplazar el paquete"
+        line = _package_line(lines, v.package)
+        # La versión se cambia sola en un requirements*.txt donde aparece el paquete; en otro archivo la propone la IA
+        pinned = bool(lines) and 1 <= line <= len(lines) and _normalize(v.package) in _normalize(lines[line - 1])
+        kind = ("auto" if pinned and deps.endswith(".txt") else "ia") if v.fix_versions else None
         findings.append(FindingInput(
-            sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=_package_line(lines, v.package),
+            sev="alta", cat="seg", tool="pip-audit", rule=f"{v.package} {v.version}", file=deps, line=line, fix=kind is not None, fix_kind=kind,
             msg=f"{v.package} {v.version} tiene {len(v.ids)} vulnerabilidad(es) conocida(s): {', '.join(v.ids[:5])}",
-            why=v.description[:400] or "La versión instalada tiene avisos de seguridad publicados.",
+            # La descripción del aviso viene en inglés: se explica en español y el aviso se identifica por su id
+            why="Esta versión del paquete tiene fallas de seguridad publicadas: alguien que las conozca puede aprovecharlas contra la app.",
             rec=f"{fix} y volver a correr las pruebas.",
         ))
     return findings
@@ -192,7 +216,7 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
     """(cobertura por archivo, cobertura total, fallidas, pasadas, hallazgos) de pytest y coverage en el sandbox."""
     findings: list[FindingInput] = []
     install, tests = out.phases.get("install"), out.phases.get("tests")
-    deps = _deps_file(static.files)
+    deps = _deps_file(static.files, out.subdir)
     if install is not None and not install.ok:
         findings.append(FindingInput(
             sev="alta", cat="test", tool="pytest", rule="DEPS", file=deps, line=1, code="",
@@ -201,7 +225,7 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
             rec="Revisa que requirements.txt (o pyproject.toml) tenga versiones que existan y se instalen en Python 3.12.",
         ))
 
-    run = parse_junit(out.junit)
+    run = parse_junit(out.junit, out.subdir)
     for case in run.failures[:MAX_TEST_FINDINGS]:
         if is_excluded(case.file, static.cfg.excluded):
             continue
@@ -223,7 +247,7 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
             rec="Ejecuta `pytest` localmente en un entorno limpio con las dependencias del proyecto.",
         ))
 
-    measured = parse_coverage(out.coverage)
+    measured = parse_coverage(out.coverage, out.subdir)
     coverage, covered, statements = [], 0, 0
     for f in static.py:
         if _is_test(f) or _is_tooling(f):
@@ -237,6 +261,17 @@ def real_tests(static: StaticResult, out: SandboxOutput, min_cov: float) -> tupl
         coverage.append(CoverageInput(file=f, percent=_clamp(100 * done / total) if total else 100.0))
     coverage.sort(key=lambda c: c.percent)
     cov_total = round(100 * covered / statements, 1) if statements else 0.0
+    # pytest sale con 5 cuando no encontró ninguna prueba (no confundir con dependencias que no se instalaron)
+    # (coverage lista los archivos aunque nadie los haya ejecutado: lo que cuenta es que no se cubrió ninguna línea)
+    if coverage and covered == 0 and tests is not None and tests.code == 5 and not run.passed and not run.failed:
+        # Sin ninguna prueba: un solo hallazgo, no uno igual por archivo («Cobertura de 0 %» ×9 abrumaba)
+        findings.append(FindingInput(
+            sev="media", cat="test", tool="coverage", rule="COV", file=coverage[0].file, line=1, code="",
+            msg=f"El repositorio no tiene pruebas: ninguno de sus {len(coverage)} archivos se prueba",
+            why="Sin pruebas, cualquier cambio puede romper algo sin que nadie lo note hasta que falle en uso.",
+            rec="Agrega una carpeta `tests/` con pruebas de pytest para las funciones principales. Para las reglas de negocio, «Preparar todo» en Configuración → Reglas escribe sus pruebas.",
+        ))
+        return coverage, cov_total, run.failed, run.passed, findings
     findings += [
         FindingInput(
             sev="media" if c.percent < min_cov - 15 else "baja", cat="test", tool="coverage", rule="COV", file=c.file, line=1, code="",
@@ -269,6 +304,16 @@ def build(
     else:
         coverage, cov_total, failed, passed, test_findings = simulated_tests(static.py, random.Random(seed), cat["test"], cfg.thresholds["cov"])
         simulated = True
+    # Nivel pruebas de las reglas de negocio: solo cuenta si pytest corrió de verdad en el sandbox
+    if "pytest" not in analyzers:
+        not_run = "no se eligió pytest en este análisis"
+    elif simulated:
+        not_run = "sin sandbox las pruebas no se ejecutan (SANDBOX=wsl o docker)"
+    else:
+        not_run = None
+    # Las del repo y, aparte, las generadas y aprobadas en la app (las del repo tienen prioridad)
+    data = reglas.merge_app_tests(rebase_tests(out.reglas, out.subdir), rebase_tests(out.reglas_app, out.subdir)) if out is not None else None
+    rules = reglas.with_tests(static.rules, data, not_run, static.rule_notes)
     if "pytest" not in analyzers:
         failed, passed = 0, 0
         test_findings = [f for f in test_findings if f.tool != "pytest"]
@@ -284,7 +329,8 @@ def build(
     )
     ignored = set(cfg.ignored)
     cats = category_scores(((f.cat, f.sev) for f in findings if f.rule not in ignored), effective_coverage(cov_total, analyzers), failed, static.code_lines)
-    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, cats), simulated=simulated, vulnerable=len(vulns), rules=static.rules)
+    neg = business_score((r.status, r.rule.severity) for r in rules.results) if rules is not None else None
+    return PipelineResult(report=report, passed=passed, score=global_score(cfg.weights, {**cats, "neg": neg}), simulated=simulated, vulnerable=len(vulns), rules=rules)
 
 
 def run(settings: Settings, repo_id: str, branch: str, commit: str | None, seed: int, cat: dict) -> PipelineResult:
@@ -317,10 +363,10 @@ def phase_summary(step: int, phase: PhaseResult, out: SandboxOutput) -> str:
             return "  no se encontraron pruebas"
         if out.junit is None:
             return f"  pytest no pudo correr (código {phase.code}): " + _last_line(phase.log_tail, "sin detalle")
-        t = parse_junit(out.junit)
+        t = parse_junit(out.junit, out.subdir)
         return f"  {t.passed} passed, {t.failed} failed, {t.skipped} skipped"
     if step == COVERAGE_STEP:
-        measured = [v for f, v in parse_coverage(out.coverage).items() if not _is_test(f) and not _is_tooling(f)]
+        measured = [v for f, v in parse_coverage(out.coverage, out.subdir).items() if not _is_test(f) and not _is_tooling(f)]
         done, total = sum(c for c, _ in measured), sum(n for _, n in measured)
         return f"  líneas cubiertas: {round(100 * done / total, 1) if total else 0.0} %"
     return ""

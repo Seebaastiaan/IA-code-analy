@@ -12,9 +12,16 @@ class Weights(BaseModel):
     seg: float
     test: float
     prac: float
+    # Reglas de negocio: 0 = no entra al score global
+    neg: float = 0
 
 
-class Scores(Weights):
+class Scores(BaseModel):
+    seg: float
+    test: float
+    prac: float
+    # Reglas de negocio; None = el análisis no tiene reglas medibles
+    neg: float | None = None
     # "global" es palabra reservada en Python: se expone con alias
     global_: float = Field(alias="global")
 
@@ -43,6 +50,8 @@ class Finding(BaseModel):
     why: str
     rec: str
     fix: bool
+    # auto: Ruff / versión de pip-audit · ia: la propone el LLM (POST /api/fix) · None: sin corrección
+    fix_kind: Literal["auto", "ia"] | None = None
     status: Literal["open", "resolved"]
     snippet: list[SnippetLine] | None = None
 

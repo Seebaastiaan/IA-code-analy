@@ -74,7 +74,8 @@ def seed(login: str, settings: Settings | None = None) -> str:
     avg_cc = round(sum(c.cc for c in cc) / len(cc), 1) if cc else 0.0
     min_cov = store.config(repo_id).thresholds["cov"]
 
-    rules = reglas.run(ws.root, files, ws.read_lines)
+    # Sin sandbox: las pruebas ligadas a reglas (tests/test_procesador.py::test_rn004_…) quedan sin ejecutar
+    rules = reglas.with_tests(reglas.run(ws.root, files, ws.read_lines), None, "datos de demostración, sin sandbox")
     now = datetime.now(UTC).replace(microsecond=0)
     for weeks_ago, cov_total, failed, extra in HISTORY:
         coverage = {f: max(0, pct - (74 - cov_total)) for f, pct in COVERAGE.items()}
@@ -88,7 +89,7 @@ def seed(login: str, settings: Settings | None = None) -> str:
             complexity=cc,
             created_at=(now - timedelta(weeks=weeks_ago, hours=2)).isoformat().replace("+00:00", "Z"),
         ), ws)
-        # Reglas de negocio de seed_data/demo_repo/reglas_negocio.toml (nivel patrón, ADR-003)
+        # Reglas de negocio de seed_data/demo_repo/reglas_negocio.toml (patrones y pruebas, ADR-003)
         RulesStore(conn).save(report_id, rules)
     store.set_repo_status(repo_id, "listo", files=len(py))
     print(f"Repo de demostración listo: {DEMO_NAME} (id {repo_id}, usuario {user['login']})")

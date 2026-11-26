@@ -2,6 +2,130 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado semántico.
 
+## [Sin publicar] — Reglas de negocio verificables (docs/PROPUESTA_REGLAS_VERIFICABLES.md)
+
+### Agregado
+- Las reglas salen solas al analizar: si el repo no trae `reglas_negocio.toml` y el proyecto todavía no tiene reglas, el análisis
+  saca las reglas del documento de requisitos del repo (PDF o Word, `docs/` primero) mientras corren los analizadores y las
+  guarda en el proyecto, en borrador (`app/projects/reglas_auto.py`). Ya no hay que descargar el archivo ni subirlo en
+  Configuración; nunca pisa lo que el equipo guardó y, si la IA falla, el análisis sigue y lo dice en la terminal. La app ya no
+  pide «descárgalas y súbelas al repo».
+- Apps de páginas HTML (Flask con `render_template`/`flash`, Django con `render`): el mapa las reconoce (`html`) y las pruebas
+  revisan la base en lugar del código de respuesta (un rechazo vuelve a mostrar la página con 200 o redirige con 302), incluyen el
+  caso válido que sí se guarda y usan las claves exactas que acepta el código (sus constantes en MAYÚSCULAS van en el prompt). Una
+  prueba que decide un rechazo con `assert r.status_code` se rechaza y se reescribe. Con `iTsS4ma/f1-pitwall` (11 reglas, todas
+  cumplidas según las 43 pruebas del autor) se pasó de 0 cumplen · 8 no cumplen a 8 cumplen · 0 no cumplen.
+- El reloj de las pruebas mueve también la hora del sistema (`Reloj(…, sistema=True)`, time_machine en hora local) para proyectos que leen `date.today()` sin función propia; el arnés ya no puede reemplazar `date`/`datetime` del proyecto.
+- La importación quita sin IA las dudas de límites que el documento ya contesta («25 % o más», «al menos el 50 %», «del 1 al 99»).
+- Guía para el equipo: `docs/GUIA_REGLAS_DE_NEGOCIO.md` (cómo se usa, con qué repos sí y no, cómo saber si el resultado está bien).
+- En `docs/` cuenta cualquier PDF o Word como documento de requisitos («Documentacion.pdf» no se detectaba).
+- Una prueba de la IA que dice «no cumple» ya no se aprueba sola si el repo trae sus propias pruebas de esa regla; «Esperan tu
+  revisión» lo dice.
+- Contradicciones del documento con botones: en Configuración → Reglas, «El documento se contradice: ¿cuál vale?» muestra las
+  dos reglas y se elige «Vale RN-…» (la otra se quita) o «Las dos valen» (`POST /api/projects/{id}/reglas/contradiccion`). Las
+  reglas importadas con contradicciones ya se guardan en el proyecto y no hay que tocar el archivo en «Avanzado».
+- «Preparar todo» endurece las pruebas flojas: si una prueba pasa pero no notó algún cambio a propósito en el código de la regla,
+  la IA la reescribe viendo esos cambios (con reservas-demo, dos reglas rotas pasaban por pruebas flojas).
+- «Esperan tu revisión» en Configuración → Reglas (paso «Preparar todo»): una fila por prueba que el programa no aprobó solo, con
+  lo que dice, por qué no se aprobó sola, qué conviene hacer y «Aprobar» en un clic (o «Aprobar las recomendadas»).
+- El importador busca contradicciones sin depender de que la IA las vea en la lista entera: elige los pares sospechosos (secciones
+  distintas, cantidades de la misma clase que no coinciden y el mismo tema) y pregunta sí o no por cada uno. Con el modelo de
+  respaldo ahora marca §4.2 ↔ §7.2 de reservas-demo, que antes se le pasaba.
+- Con Gemini saturado (503), los trabajos sin streaming reintentan dos veces con espera creciente antes de pasar al modelo de
+  respaldo; un tiempo agotado o una falla de red se dicen en español.
+- Revisión en Chrome del flujo completo con reservas-demo: «Preparar todo» guarda su avance (se ve tras reiniciar el servidor
+  y, si se cortó, ofrece «Reintentar»); una lectura del código que agota el tiempo de Gemini ya no detiene el paso; la franja
+  «Siguiente» dice qué hacer durante y después de «Preparar todo»; «Analizar de nuevo» analiza el mismo repo; el reporte explica
+  cada regla sin verificar (prueba que pasa o falla sin aprobar, prueba rota) y un repo sin pruebas da un solo hallazgo en lugar
+  de uno por archivo.
+- Hallazgos siempre en español: las reglas de Ruff que activa la configuración del propio repo (I001, E501, UP…) se explican por
+  familia en lugar del mensaje en inglés y del ejemplo genérico de la documentación de Ruff; los hallazgos de análisis anteriores
+  también se muestran traducidos.
+- Nuevo análisis ya no abre el TOML ni la importación en bruto: avisa que las reglas se sacan del documento después de analizar,
+  en Configuración → Reglas. El reporte de reglas, con todo en borrador, dice qué hacer en lugar de «0 cumplen · no declara reglas».
+- El arnés que escribe la IA se corrige una vez con el error de su prueba de humo, expone el id del usuario (`como(rol).id`) y da un
+  cliente distinto a cada rol (la prueba de humo lo comprueba).
+- Los avisos de dependencias vulnerables (pip-audit) se explican en español y un repo sin pruebas dice «Sin pruebas» en lugar de
+  «Cobertura 0 % · 0 prueba(s) fallan».
+- «Preparar todo» corre en el servidor (`/api/projects/{id}/reglas/preparar`): sigue aunque se cierre la pestaña, se ve
+  su avance al volver y se detiene al terminar el paso en curso. Si una prueba no coincide con la lectura independiente del
+  código, la escribe una vez más y la vuelve a correr y medir antes de decidir.
+- La confianza de cada regla usa la segunda opinión: si la prueba coincide con la lectura del código sube un escalón; si
+  discrepa queda como mucho en «baja».
+- Una prueba aprobada que usa rutas que el código ya no tiene no se corre en el análisis: sale como «prueba rota» con el
+  motivo (no se culpa al código) y «Preparar todo» la escribe de nuevo.
+- El reporte de reglas avisa arriba de las reglas que se cumplían en el análisis anterior y ahora no.
+- «Preparar todo» aprueba solas las pruebas que fallan cuando la lectura del código confirma que la regla no está (antes ninguna regla
+  rota llegaba sola al reporte) y reescribe las pruebas rotas dándole a la IA el error de su corrida. La prueba de fuerza ya no quita el
+  «no existe» (404) salvo que la regla hable de existencia. Medición en docs/BITACORA_REGLAS_AUTOMATICAS.md §5b
+  (`scripts/medir_preparar.py`).
+- Una regla con prueba sin aprobar ya no sale como «sin patrón ni pruebas»: el reporte dice si su prueba pasa o falla y que falta aprobarla.
+- Configuración → Reglas como asistente de 4 pasos (importar, preguntas y aprobación, preparar todo, resultado) con la siguiente
+  acción siempre a la vista, «Preguntas para ti» (una por una, con la cita del documento, el efecto del Sí y del No y respuesta
+  escrita para las abiertas) y errores de la IA o del documento en palabras con «Reintentar». El reporte de reglas ya no
+  se corta en celular. Revisión en docs/REVISION_USABILIDAD_REGLAS.md.
+- Formato `reglas_negocio.toml` v2 (`tipo`, escenarios Dado/Cuando/Entonces, `estado`, `dudas`, `fuente`); el importador
+  desde un documento saca reglas atómicas en borrador y una tabla de aprobación en Configuración las aprueba (solo las
+  aprobadas se verifican).
+- Mapa del proyecto (FastAPI, Flask y Django) y arnés de pruebas con Gemini, con prueba de humo en el sandbox. Detecta la
+  carpeta del código en repos con `backend/`.
+- Pruebas generadas por regla (con primera corrida, aprobación y exportación), matriz de permisos, evidencia de apoyo y
+  prueba de fuerza (mutación dirigida) que avisa de pruebas débiles.
+- Categoría `neg` (reglas de negocio) en el score, con peso 0 % por defecto: se ve en el reporte, el tablero, la
+  tendencia, la comparativa y las exportaciones; solo mueve el global con un peso (`[pesos] negocio`).
+- Las reglas del repositorio también se aprueban desde la tabla (se guardan en la copia de trabajo; hay que descargar el
+  archivo y hacer commit). El análisis normal (pytest, cobertura, pip-audit) trabaja desde la carpeta del código si está en
+  una subcarpeta (`backend/`).
+- Las dudas de una regla se contestan con **Sí o No** en la tabla de aprobación: la respuesta queda en la descripción de la
+  regla y el proyecto la recuerda; si una importación nueva trae la misma pregunta de la misma regla, se contesta sola.
+- Resultado de las reglas en lenguaje normal (semáforo y una frase por regla), el `.toml` en «Avanzado» y «Escribe una regla
+  con tus palabras» (la IA la redacta y entra en borrador).
+- Casos de control opcionales («sé que se cumple / se viola») y panel de concordancia con el último análisis, con la
+  confianza de cada regla.
+- Lo que aprueba «Preparar todo» se marca «Aprobada por el programa» y se revierte a borrador en un clic.
+- «El documento manda»: en una regla que el código no cumple, «Corregir con IA» propone el cambio en el código (no en la
+  regla ni en su prueba) y lo muestra como diff antes de guardar.
+- Los repos de prueba (`inventario_demo` y `reservas_demo`) tienen interfaz web en `/ui` y datos de ejemplo opcionales
+  (`python -m inventario.datos_demo`, `python -m reservas.datos_demo`); sus errores sembrados siguen en la API.
+- Primera corrida real con Gemini y `reservas-demo` (informe en `docs/CORRIDA_RESERVAS_DEMO.md`): las contradicciones se buscan en una
+  segunda consulta sobre la lista final y por título (antes la IA numeraba mal), la memoria de dudas reconoce la misma pregunta
+  redactada distinto con embeddings, y «Corregir con IA» recibe las demás reglas para no romperlas.
+- Pruebas generadas por la IA de mayor calidad (medido con Gemini real en `reservas-demo`, 3 corridas por ronda): prompt que aísla la regla,
+  evita cifras y formatos inventados y pregunta «¿pasaría igual sin la regla?»; validadores de rechazos sin 409, cifras ajenas, asserts
+  sin comparación, nombres con letras raras y dos variables con el mismo usuario; y se insiste cuando dice «no implementada» con
+  endpoints que existen y deja el código vacío. Falsos positivos de 3 a 1 o 2 y falsos negativos de 2 a 0 en 2 de 3 corridas.
+- El importador detecta plazos ambiguos («un día antes», «días hábiles»…) y los convierte en dudas de sí o no; con la respuesta, la
+  prueba generada usa el plazo correcto (RN-012 de reservas-demo: de 3 falsos positivos de 3 a 0).
+- Repos de prueba propios (`inventario_demo`, `reservas_demo`) y scripts de medición (`backend/scripts/`).
+- Eliminar un repositorio desde la lista (`DELETE /api/repos/{id}`): borra sus análisis, reglas, pruebas, enlaces, la copia
+  de trabajo y los respaldos; con un análisis en curso responde 409. No toca el repositorio de GitHub.
+- Subir el documento de requisitos arrastrándolo o eligiéndolo, con aviso de «Tipo de archivo no válido»; la tabla de
+  aprobación muestra de qué capítulo y página (u hoja) salió cada regla y la ayuda explica cómo escribir un patrón (regex).
+
+- «Documento para presentar»: las reglas como documento legible (HTML imprimible a PDF o Markdown) con resumen, guía de
+  lectura, ejemplos Dado/Cuando/Entonces, dudas y fuente (`GET /api/projects/{id}/reglas/documento`). El `.toml` que
+  genera la IA lleva al inicio una guía de lectura de sus campos.
+
+- «Preparar todo» (Configuración → Reglas de negocio): aprueba las reglas sin dudas, prepara el entorno de pruebas, lo
+  prueba, escribe y corre una prueba por regla y comprueba que detecten violaciones, sin pasos manuales
+  (docs/PLAN_REGLAS_AUTOMATICO.md). Aprueba las pruebas que pasan y son fuertes; el filtro «Necesitan mi decisión» lista
+  el resto.
+- Cada regla sacada de un documento trae la `cita` textual que la respalda y el programa comprueba que esté en el
+  documento, Word o PDF con texto (`cita_verificada`; agrega la dependencia `pypdf`); una regla sin cita o con una cita que
+  no aparece queda con una duda. También avisa de frases que parecen reglas y no se extrajeron.
+- Segunda lectura del código sin ver la prueba y contraste con su resultado (coincide / discrepa); «Preparar todo» solo
+  aprueba solas las pruebas fuertes que coinciden.
+
+### Cambiado
+- Los mensajes de los hallazgos de Ruff y Bandit salen en español (`app/analyses/mensajes.py`); lo que no está en el
+  catálogo conserva el original.
+- Las reglas solo se importan de documentos PDF y Word (.docx); ya no de Markdown, texto ni .toml. Los PDF y Word del
+  repositorio ahora sí se detectan en la copia de trabajo (antes solo se veían los de texto).
+- Comparativa: los selectores se llaman «Base A» y «Base B». La IA ya no repite el título como descripción de una regla.
+- `scores` y `weights` del API traen `neg` (puede ser `null` / 0).
+- El sandbox instala también `[project].dependencies` de `pyproject.toml` y las librerías de pruebas de reglas; la red va
+  bloqueada en las pruebas de reglas.
+
 ## [1.0.0] — 24 de noviembre de 2026 (Sprint 9, code freeze)
 
 ### Agregado
